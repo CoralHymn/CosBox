@@ -40,7 +40,14 @@
 				{/each}
 			</div>
 		{/if}
-		<ChatInput disabled={busy} {searchSupported} {searching} {onSend} />
+		<ChatInput
+			disabled={busy}
+			{searchSupported}
+			{searching}
+			places={characterState.places}
+			wardrobe={characterState.outfit.wardrobe}
+			{onSend}
+		/>
 	</div>
 	<StatePreview {characterState} />
 </div>
