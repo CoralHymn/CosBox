@@ -15,7 +15,10 @@
 	};
 </script>
 
-<div class="message {message.role}">
+<div
+	class="message {message.role}"
+	class:tool-note={message.role === 'system' && message.content.startsWith('【工具调用】')}
+>
 	<div class="message-meta">
 		<span>{roleLabel[message.role]}</span>
 		<span>{formatTimestamp(message.timestamp)}</span>

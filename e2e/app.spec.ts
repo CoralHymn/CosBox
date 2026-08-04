@@ -279,7 +279,7 @@ test('开启 AI 状态工具后，演示模式按剧情自主切换地点', asyn
 	await page.getByRole('button', { name: '发送' }).click();
 
 	await expect(page.getByText(/好，那我们过去吧/)).toBeVisible();
-	await expect(page.getByText('学校 > 食堂')).toBeVisible();
+	await expect(page.getByText('学校 > 食堂', { exact: true })).toBeVisible();
 });
 
 test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并反映到状态', async ({ page }) => {
@@ -301,7 +301,11 @@ test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并�
 	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
-		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 3));
+		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 4));
+
+	// 工具调用反馈持久化为可见的系统消息
+	await expect(page.getByText(/【工具调用】set_outfit/).first()).toBeVisible();
+	await expect(page.getByText(/已把上衣更换为「黑色卫衣」/).first()).toBeVisible();
 
 	// 下一轮请求的系统提示带工具执行反馈，让模型确认工具已调用并生效
 	await page.getByRole('button', { name: '开发者：查看最近一次完整提示词' }).click();
@@ -376,9 +380,10 @@ test('AI 一次回复可包含多段：工具轮次叙事文本与最终回复�
 	await expect(page.getByText('（手忙脚乱地把衬衫扣子扣好）呼——这下不会着凉了。')).toBeVisible();
 	await expect(page.locator('.message.assistant')).toHaveCount(2);
 	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
+	await expect(page.getByText(/【工具调用】set_outfit/).first()).toBeVisible();
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
-		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 4));
+		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 5));
 });
 
 test('流式输出：开启后按 SSE 逐块渲染，请求携带 stream: true', async ({ page }) => {
@@ -510,7 +515,8 @@ test('开发者预览：展示输入框内容点击发送将发送给 AI 的完�
 	await expect(previewModal).toBeVisible();
 	await expect(previewModal.getByText('【当前状态】').first()).toBeVisible();
 	await expect(previewModal.getByText('[user]')).toBeVisible();
-	await expect(previewModal.getByText('早上好，我们什么时候去食堂？')).toBeVisible();
+	// 待发送消息带有当前世界时间标注，帮助 AI 感知剧情时间
+	await expect(previewModal.getByText('（周一 08:00）早上好，我们什么时候去食堂？')).toBeVisible();
 	await expect(page.locator('.message.user')).toHaveCount(0);
 	await previewModal.getByRole('button', { name: '关闭' }).click();
 

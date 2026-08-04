@@ -142,6 +142,25 @@ describe('rebuildFromNodes', () => {
 		expect(result.messages[0]!.content).toBe('回答');
 	});
 
+	it('消息 delta 携带 worldTime 时重建保留世界时间', () => {
+		const nodes = toMap([
+			makeNode('root', null, null, 0),
+			makeNode(
+				'a',
+				'root',
+				{
+					kind: 'message',
+					role: 'user',
+					content: '你好',
+					worldTime: { day: 1, hour: 10, minute: 30 }
+				},
+				1
+			)
+		]);
+		const result = rebuildFromNodes(nodes, 'a', createInitialState());
+		expect(result.messages[0]!.worldTime).toEqual({ day: 1, hour: 10, minute: 30 });
+	});
+
 	it('120+ 次 delta 应用后重建正确（状态+消息+空补丁混合）', () => {
 		const nodes: SnapshotNode[] = [makeNode('root', null, null, 0)];
 		let parent = 'root';

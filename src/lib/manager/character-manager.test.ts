@@ -174,6 +174,16 @@ describe('CharacterManager', () => {
 		expect(manager.getConversation()[0]!.thinking).toBeUndefined();
 	});
 
+	it('addMessage 记录消息产生时的世界时间', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '你好');
+		expect(manager.getConversation()[0]!.worldTime).toEqual({ day: 0, hour: 8, minute: 0 });
+		await manager.advanceTime(30);
+		await manager.addMessage('assistant', '你也好');
+		expect(manager.getConversation()[1]!.worldTime).toEqual({ day: 0, hour: 8, minute: 30 });
+	});
+
 	it('未注入 now 时回退到 Date.now', async () => {
 		const manager = new CharacterManager({ snapshots, kv });
 		await manager.init();

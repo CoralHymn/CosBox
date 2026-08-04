@@ -172,7 +172,7 @@
 						}
 					: undefined;
 			streamingDraft = '';
-			const { reply, debug, bundle, usage, compaction, thinking, segments } =
+			const { reply, debug, bundle, usage, compaction, thinking, rounds } =
 				await service.generateReply(input, settings.config, {
 					onDelta: (delta) => {
 						streamingDraft = `${streamingDraft ?? ''}${delta}`;
@@ -189,11 +189,17 @@
 			lastContext = { bundle, usage: usage ?? null, compaction };
 			compactState = compaction;
 			streamingDraft = null;
-			// AI 一次回复可包含多段：工具调用轮次中的叙事文本也保留为独立消息。
-			for (const segment of segments) {
-				await session.addMessage('assistant', segment.content, {
-					thinking: segment.thinking
-				});
+			// AI 一次回复可包含多段：每轮先落叙事文本，再把工具调用反馈持久化为
+			// 系统消息（前端可见、后续上下文持续携带）。
+			for (const round of rounds) {
+				if (round.content !== null && round.content.trim() !== '') {
+					await session.addMessage('assistant', round.content, {
+						thinking: round.thinking
+					});
+				}
+				for (const tool of round.tools) {
+					await session.addMessage('system', `【工具调用】${tool.name}：${tool.output}`);
+				}
 			}
 			await session.addMessage('assistant', reply, { thinking });
 		} catch (err) {
@@ -253,7 +259,8 @@
 			id: 'preview-pending',
 			role: 'user',
 			content: trimmed,
-			timestamp: Date.now()
+			timestamp: Date.now(),
+			worldTime: session.state.schedule.time
 		};
 		const conversation = [...session.conversation, pending];
 		const input: ContextPipelineInput = {

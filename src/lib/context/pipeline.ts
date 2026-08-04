@@ -57,12 +57,12 @@ export function defaultSystemPrompt(name: string): string {
 export function buildToolGuidance(): string {
 	return [
 		'【工具使用】',
-		'你可以调用工具主动更新剧情状态，而不是只口头描述：',
-		'- goto_location：切换当前地点（优先从【已知地点】中选择）',
-		'- advance_time：推进世界时间',
-		'- set_outfit：更换穿着（必须从【衣柜】中选择，item 用精确名称；用 null/「无」表示脱掉）',
-		'- set_attribute：设置或更新角色属性',
-		'当剧情需要（离开某地、时间流逝、换装、属性变化）时直接调用工具；工具会立即生效并返回结果。'
+		'你必须在剧情中主动调用工具来同步状态，不允许只口头描述或假设状态已变化：',
+		'- 只要剧情暗示时间流逝（排队、等待、赶路、闲聊、用餐、入夜等）→ 立即调用 advance_time 推进到合理时刻；',
+		'- 离开某地或到达新地点 → 立即调用 goto_location（优先从【已知地点】中选择）；',
+		'- 穿上/脱下衣物 → 立即调用 set_outfit（必须从【衣柜】中选择，item 用精确名称；用「无」表示脱掉）；',
+		'- 属性发生变化 → 立即调用 set_attribute。',
+		'每次调用工具都会立即生效并返回反馈；「我这就去」「过了几分钟」这类表述不算数，必须真的调用工具。'
 	].join('\n');
 }
 

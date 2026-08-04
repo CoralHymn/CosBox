@@ -57,6 +57,25 @@ describe('prepareHistory', () => {
 		expect(result.messages.map((m) => m.content)).toEqual(['早上好', '你好呀']);
 		expect(result.compressedCount).toBe(0);
 	});
+
+	it('带世界时间的消息在发送内容前标注（周一 09:00）', () => {
+		const conversation: ChatMessageView[] = [
+			{
+				id: '1',
+				role: 'user',
+				content: '好了快穿上吧',
+				timestamp: 1,
+				worldTime: { day: 0, hour: 9, minute: 0 }
+			}
+		];
+		const result = prepareHistory(conversation, { maxMessages: 10 });
+		expect(result.messages[0]!.content).toBe('（周一 09:00）好了快穿上吧');
+	});
+
+	it('无世界时间的消息不标注时间', () => {
+		const result = prepareHistory([msg('1', '早上好')], { maxMessages: 10 });
+		expect(result.messages[0]!.content).toBe('早上好');
+	});
 });
 
 describe('excludeFromContext', () => {
