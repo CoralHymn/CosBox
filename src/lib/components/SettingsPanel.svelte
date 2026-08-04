@@ -5,6 +5,7 @@
 	import { DEFAULT_LLM_CONFIG, type LlmConfig } from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
 	import type { AppProfile } from '../stores/settings.svelte';
+	import ModelCombobox from './ModelCombobox.svelte';
 
 	interface Props {
 		config: LlmConfig;
@@ -187,8 +188,9 @@
 		}
 	}
 
-	/** 手动输入模型时，若已拉取到该模型的上下文窗口则自动填充。 */
-	function onModelInput(): void {
+	/** 输入/选中模型时，若已拉取到该模型的上下文窗口则自动填充。 */
+	function onModelChange(next: string): void {
+		model = next;
 		const known = modelContexts[model.trim()];
 		if (known !== undefined) {
 			modelContextWindow = known;
@@ -244,19 +246,13 @@
 			</div>
 			<div class="field">
 				<label for="llm-model">模型</label>
-				<input
-					id="llm-model"
-					class="input"
-					bind:value={model}
-					oninput={onModelInput}
-					list="llm-model-list"
-					placeholder="模型 id"
+				<ModelCombobox
+					value={model}
+					candidates={modelCandidates}
+					inputId="llm-model"
+					placeholder="模型 id（点击选择或直接输入）"
+					onChange={onModelChange}
 				/>
-				<datalist id="llm-model-list">
-					{#each modelCandidates as candidate (candidate)}
-						<option value={candidate}></option>
-					{/each}
-				</datalist>
 				<p class="muted" style="margin-top: 2px;">
 					上下文窗口：{modelContextWindow ?? findModelInfo(model.trim())?.contextWindow ?? '未知'} tokens
 				</p>
@@ -302,8 +298,12 @@
 				/>
 			</div>
 			<div class="field">
-				<label for="llm-max-tokens">Max Tokens</label>
+				<label for="llm-max-tokens">Max Tokens（单次回复最大输出）</label>
 				<input id="llm-max-tokens" class="input" type="number" bind:value={maxTokens} />
+				<p class="muted" style="margin-top: 2px;">
+					限制一次回复最多生成的 token 数（请求中的 max_tokens），不是上下文总长度；
+					自动压缩时也会预留这么多作为输出预算。
+				</p>
 			</div>
 		</div>
 	</div>

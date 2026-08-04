@@ -201,6 +201,14 @@ test('设置页选择主流服务商预设自动填充地址与模型', async ({
 	await expect(page.locator('#llm-base-url')).toHaveValue('https://api.deepseek.com/v1');
 	await expect(page.locator('#llm-model')).toHaveValue('deepseek-v4-flash');
 
+	// 点击模型输入框弹出候选下拉，可用键盘选择
+	await page.locator('#llm-model').click();
+	await expect(
+		page.locator('.combobox-item').filter({ hasText: 'deepseek-v4-flash' })
+	).toBeVisible();
+	await expect(page.locator('.combobox-item').filter({ hasText: 'deepseek-v4-pro' })).toBeVisible();
+	await page.keyboard.press('Escape');
+
 	await page.locator('#llm-provider').selectOption('ollama');
 	await expect(page.locator('#llm-base-url')).toHaveValue('http://localhost:11434/v1');
 	await expect(page.locator('#llm-model')).toHaveValue('qwen3:8b');
@@ -389,11 +397,15 @@ test('设置：获取模型列表自动填充上下文窗口，连接测试验�
 
 	await page.getByRole('button', { name: '获取模型列表' }).click();
 	await expect(page.getByText(/已获取 2 个模型/)).toBeVisible();
-	// 服务端模型列表替代写死的候选
-	await expect(page.locator('#llm-model-list option[value="mock-model-a"]')).toHaveCount(1);
-	await expect(page.locator('#llm-model-list option[value="deepseek-v4-flash"]')).toHaveCount(0);
-	// 输入已知模型后自动填充上下文窗口
-	await page.locator('#llm-model').fill('mock-model-a');
+	// 点击模型输入框弹出服务端模型下拉，点选后自动填充上下文窗口
+	await page.locator('#llm-model').click();
+	const modelItem = page.locator('.combobox-item').filter({ hasText: 'mock-model-a' });
+	await expect(modelItem).toBeVisible();
+	await expect(page.locator('.combobox-item').filter({ hasText: 'deepseek-v4-flash' })).toHaveCount(
+		0
+	);
+	await modelItem.click();
+	await expect(page.locator('#llm-model')).toHaveValue('mock-model-a');
 	await expect(page.getByText('上下文窗口：64000 tokens')).toBeVisible();
 
 	await page.getByRole('button', { name: '连接测试' }).click();
