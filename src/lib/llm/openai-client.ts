@@ -204,7 +204,13 @@ function extractToolCalls(data: unknown): ToolCall[] {
 		if (name === '') {
 			return;
 		}
-		const argumentsRaw = typeof fn.arguments === 'string' ? fn.arguments : '';
+		// 兼容两种形态：JSON 字符串（标准）与已解析对象（部分代理直接返回对象）。
+		const argumentsRaw =
+			typeof fn.arguments === 'string'
+				? fn.arguments
+				: isRecord(fn.arguments)
+					? JSON.stringify(fn.arguments)
+					: '';
 		calls.push({
 			id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `call_${index}`,
 			name,
