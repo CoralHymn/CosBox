@@ -135,6 +135,75 @@ describe('ChatService', () => {
 		expect(executedTools[0]!.output).toContain('未知工具');
 	});
 
+	it('agent 循环：带工具调用的轮次叙事文本保留为独立段落', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: '（愣了一下，脸颊红了）啊！？',
+					toolCalls: [
+						{ id: 'c1', name: 'set_outfit', arguments: { slot: 'top', item: '黑色卫衣' } }
+					],
+					thinking: '让我想想'
+				})
+				.mockResolvedValueOnce({ content: '（扣好扣子）呼——好了。', toolCalls: [] })
+		};
+		const service = new ChatService(client);
+		const { reply, segments, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(executedTools).toHaveLength(1);
+		expect(executedTools[0]!.output).toContain('黑色卫衣');
+		expect(segments).toEqual([{ content: '（愣了一下，脸颊红了）啊！？', thinking: '让我想想' }]);
+		expect(reply).toBe('（扣好扣子）呼——好了。');
+	});
+
+	it('agent 循环：工具轮次无叙事文本时不产生段落', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: null,
+					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+				})
+				.mockResolvedValueOnce({ content: '我们到食堂了', toolCalls: [] })
+		};
+		const service = new ChatService(client);
+		const { reply, segments } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('我们到食堂了');
+		expect(segments).toEqual([]);
+	});
+
+	it('agent 循环：超过最大轮数时已产生的段落仍返回', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools: vi.fn(async () => ({
+				content: '（旁白）继续。',
+				toolCalls: [{ id: 'c', name: 'goto_location', arguments: { name: '图书馆' } }]
+			}))
+		};
+		const service = new ChatService(client);
+		const { reply, segments, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), maxToolTurns: 2 }
+		);
+		expect(executedTools).toHaveLength(2);
+		expect(reply).toContain('已连续执行多次状态变更');
+		expect(segments).toEqual([
+			{ content: '（旁白）继续。', thinking: undefined },
+			{ content: '（旁白）继续。', thinking: undefined }
+		]);
+	});
+
 	it('客户端不支持 chatWithTools 时即使传了工具也走纯文本', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '纯文本回复', toolCalls: [] }))

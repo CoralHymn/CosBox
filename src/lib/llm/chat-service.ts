@@ -30,6 +30,12 @@ export interface DebugPromptView {
 export type PromptPreviewResult =
 	{ kind: 'prompt'; debug: DebugPromptView; note?: string } | { kind: 'notice'; text: string };
 
+/** agent 循环中带工具调用那一轮的叙事文本（AI 一次回复的多段之一）。 */
+export interface ReplySegment {
+	content: string;
+	thinking?: string;
+}
+
 /** 自动上下文压缩参数（生成回复时按需触发）。 */
 export interface CompactionOptions {
 	/** 模型上下文窗口；null 表示未知（此时不自动压缩）。 */
@@ -81,6 +87,8 @@ export class ChatService {
 		usage: TokenUsage | undefined;
 		compaction: CompactionState | null;
 		thinking: string | undefined;
+		/** 工具调用轮次中的叙事段落（按顺序；最终回复在 reply）。 */
+		segments: ReplySegment[];
 	}> {
 		let usage: TokenUsage | undefined;
 		let compaction: CompactionState | null = options.compaction?.state ?? null;
@@ -127,6 +135,7 @@ export class ChatService {
 		];
 		let debug: DebugPromptView = { systemMessage: bundle.systemMessage, messages };
 		const executedTools: ExecutedToolCall[] = [];
+		const segments: ReplySegment[] = [];
 
 		if (options.tools !== undefined && options.tools.length > 0 && options.toolContext) {
 			if (this.client.chatWithTools) {
@@ -149,8 +158,14 @@ export class ChatService {
 							debug,
 							usage,
 							compaction,
-							thinking: result.thinking
+							thinking: result.thinking,
+							segments
 						};
+					}
+					// 带工具调用的那一轮也可能包含叙事文本：保留为独立段落，避免被丢弃。
+					const segmentContent = result.content ?? '';
+					if (segmentContent.trim() !== '') {
+						segments.push({ content: segmentContent, thinking: result.thinking });
 					}
 					const toolMessages: ChatMessage[] = [];
 					for (const call of result.toolCalls) {
@@ -184,7 +199,8 @@ export class ChatService {
 					debug,
 					usage,
 					compaction,
-					thinking: undefined
+					thinking: undefined,
+					segments
 				};
 			}
 		}
@@ -197,7 +213,8 @@ export class ChatService {
 			debug,
 			usage: mergeUsage(usage, result.usage),
 			compaction,
-			thinking: result.thinking
+			thinking: result.thinking,
+			segments
 		};
 	}
 

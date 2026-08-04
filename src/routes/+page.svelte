@@ -172,10 +172,8 @@
 						}
 					: undefined;
 			streamingDraft = '';
-			const { reply, debug, bundle, usage, compaction, thinking } = await service.generateReply(
-				input,
-				settings.config,
-				{
+			const { reply, debug, bundle, usage, compaction, thinking, segments } =
+				await service.generateReply(input, settings.config, {
 					onDelta: (delta) => {
 						streamingDraft = `${streamingDraft ?? ''}${delta}`;
 					},
@@ -186,12 +184,17 @@
 						advanceTime: (minutes) => session.advanceTime(minutes)
 					},
 					...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
-				}
-			);
+				});
 			debugPrompt = debug;
 			lastContext = { bundle, usage: usage ?? null, compaction };
 			compactState = compaction;
 			streamingDraft = null;
+			// AI 一次回复可包含多段：工具调用轮次中的叙事文本也保留为独立消息。
+			for (const segment of segments) {
+				await session.addMessage('assistant', segment.content, {
+					thinking: segment.thinking
+				});
+			}
 			await session.addMessage('assistant', reply, { thinking });
 		} catch (err) {
 			toasts.error(err);
