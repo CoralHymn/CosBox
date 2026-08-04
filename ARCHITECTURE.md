@@ -145,6 +145,9 @@ Chat Completions API 的 `messages` 数组。
     max_context_window / meta.context_length），结果替代写死的 datalist 候选，
     选中/输入已知模型时自动填充 `modelContextWindow`。
   - 「连接测试」：同端点成功即通过，失败展示可读错误。
+- 模型输入框是受控 combobox：点击/聚焦即弹出候选下拉（服务端拉取列表优先，未拉取时用
+  预设建议），输入即时过滤、↑/↓ + Enter 键盘选择，同时仍允许直接输入自定义模型 id；
+  `Max Tokens` 是单次回复的输出上限（`max_tokens`），同时作为自动压缩的预留输出预算。
 
 ## Agent 工具循环
 
