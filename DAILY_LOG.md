@@ -1,0 +1,29 @@
+# 开发日志
+
+## 2026-08-04
+
+### 上午：脚手架与核心抽象层
+
+- 初始化 SvelteKit（adapter-static + fallback，SSR/prerender 关闭，Svelte 5 runes 显式开启）、ESLint flat config、Prettier、Vitest、Playwright。
+- 定义核心类型：`CharacterState`（outfit/location/schedule/attributes）、`SnapshotNode`、`StatePatch`、`WorldInfoEntry`。
+- 实现快照版本图纯函数：`chainToRoot`、`rebuildFromNodes`、`getBranchTips`、`getChildrenMap`、`checkout`（纯读）。
+- 实现 Dexie 仓储（snapshots / worldInfo / kv）与 `CharacterManager`（唯一变更入口）。
+- Context Pipeline：World Info 触发、状态摘要、历史压缩。
+- LLM 客户端：OpenAI-compatible + 离线 demo。
+
+### 下午：测试与类型收尾
+
+- 152 个单元测试首次全绿；覆盖率迭代到 100% 语句/行/函数（分支 94%）。
+- 修复 svelte-check 暴露的类型缺陷：引入 `StatePatch` 深度可选补丁、属性合并语义（undefined = 不修改）。
+- 修复 ESLint 对 `.svelte.ts` 的解析与组件 runes 模式下 prop 命名冲突（`state` → `characterState`）。
+
+### 傍晚：UI 与端到端
+
+- 完成 P0–P5 全部面板：对话、状态编辑器（实时预览）、日程/时间推进、版本树 + checkout、世界书、设置、V3 导入导出。
+- Playwright e2e 6 条流程通过；修复 vite preview 仅绑定 IPv6 导致 e2e 连接失败的问题（显式 `--host 127.0.0.1`）。
+- 截图验证界面（空态 / 对话 / 版本树 / 预览）。
+
+### 遗留与下一步
+
+- 未覆盖分支（不可达防御路径）：`headId === null` 持久化、空 tips 选择——保持防御并在测试锁定主路径。
+- 可迭代项：历史 LLM 摘要压缩、世界书词边界匹配、角色卡数值属性映射、PWA 离线打包。
