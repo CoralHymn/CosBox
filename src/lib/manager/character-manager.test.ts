@@ -338,19 +338,17 @@ describe('CharacterManager', () => {
 		expect(await snapshots.count()).toBe(4);
 	});
 
-	it('deleteBranch 单链历史全部删除后只剩根，head 回退到根', async () => {
+	it('deleteBranch 只剩一个分支时拒绝删除，避免清空全部历史', async () => {
 		const manager = createManager();
 		await manager.init();
-		const root = manager.getHeadId()!;
 		await manager.update({ outfit: { top: '普通上衣' } }, { desc: '换装' });
 		await manager.addMessage('user', '只有一条分支');
 		const tip = manager.getHeadId()!;
 
-		const deleted = await manager.deleteBranch(tip);
-		expect(deleted).toBe(2);
-		expect(manager.getHeadId()).toBe(root);
-		expect(manager.getConversation()).toEqual([]);
-		expect(await snapshots.count()).toBe(1);
+		await expect(manager.deleteBranch(tip)).rejects.toThrow('只剩一个分支');
+		expect(manager.getHeadId()).toBe(tip);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['只有一条分支']);
+		expect(await snapshots.count()).toBe(3);
 	});
 
 	it('deleteBranch 根快照或不存在节点抛 SnapshotError', async () => {
@@ -360,6 +358,27 @@ describe('CharacterManager', () => {
 		await expect(manager.deleteBranch(root)).rejects.toThrow('无法删除根快照');
 		await expect(manager.deleteBranch('missing')).rejects.toThrow('无法删除根快照');
 		expect(await snapshots.count()).toBe(1);
+	});
+
+	it('deleteBranch 多分支下删除一条分支后仍保留其余分支', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		await manager.addMessage('user', '分支A消息');
+		const branchAHead = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支B上衣' } }, { desc: '分支B' });
+		const branchBHead = manager.getHeadId()!;
+
+		const deleted = await manager.deleteBranch(branchAHead);
+		expect(deleted).toBe(2);
+		expect(manager.getHeadId()).toBe(branchBHead);
+		expect(manager.getBranches()).toHaveLength(1);
+		expect(manager.getBranches()[0]!.tipId).toBe(branchBHead);
+		expect(manager.getState().outfit.top).toBe('分支B上衣');
 	});
 
 	it('deleteBranch 与其他变更并发时按入队顺序串行落地', async () => {

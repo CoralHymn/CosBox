@@ -1,6 +1,6 @@
 import { SnapshotError, StateValidationError } from '../core/errors';
 import { applyStateDelta, addMinutes, createInitialState } from '../core/state';
-import { collectBranchPath, getChildrenMap, sortNodes } from '../core/snapshot';
+import { collectBranchPath, getBranchTips, getChildrenMap, sortNodes } from '../core/snapshot';
 import type {
 	BranchSummary,
 	CharacterSessionView,
@@ -269,7 +269,8 @@ export class CharacterManager {
 	/**
 	 * 删除分支：删除从 tip 沿 parentId 到分支点（不含分支点与根）的一整段链。
 	 * 若当前 head 位于删除链上，会先切换到链的父节点（分支点或根），再删除，
-	 * 保证删除后 head 一定指向仍存在的快照。根快照不可删除。
+	 * 保证删除后 head 一定指向仍存在的快照。根快照不可删除；
+	 * 当全图只剩一个分支时禁止删除，避免把整段聊天历史清空。
 	 * @returns 实际删除的快照数量
 	 */
 	deleteBranch(tipId: string): Promise<number> {
@@ -287,6 +288,9 @@ export class CharacterManager {
 		const path = collectBranchPath(childrenMap, map, tipId);
 		if (path.length === 0) {
 			throw new SnapshotError('无法删除根快照或节点不存在');
+		}
+		if (getBranchTips(all).length <= 1) {
+			throw new SnapshotError('只剩一个分支，不能删除，否则会清空全部聊天记录');
 		}
 		const pathIds = new Set(path.map((node) => node.id));
 		if (this.headId !== null && pathIds.has(this.headId)) {

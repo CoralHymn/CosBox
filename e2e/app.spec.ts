@@ -59,7 +59,7 @@ test('版本页切换回退状态与对话', async ({ page }) => {
 
 	await page.getByRole('button', { name: /版本/ }).click();
 	await expect(page.getByText('更新穿着').first()).toBeVisible();
-	await expect(page.getByText('分支', { exact: false }).first()).toBeVisible();
+	await expect(page.getByText('分支列表').first()).toBeVisible();
 
 	// 切换回根快照（第一个「切换」按钮即根节点）
 	await page.getByRole('button', { name: '切换' }).first().click();
@@ -85,7 +85,7 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 	await expect(page.getByText(/演示模式回应/)).toBeVisible();
 
 	await page.getByRole('button', { name: /版本/ }).click();
-	await expect(page.locator('.list-row')).toHaveCount(2);
+	await expect(page.locator('.branch-card')).toHaveCount(2);
 	const snapshotsBefore = await page
 		.locator('.chip')
 		.filter({ hasText: '快照' })
@@ -94,10 +94,45 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 	page.on('dialog', (dialog) => void dialog.accept());
 	await page.getByRole('button', { name: '删除' }).first().click();
 
-	await expect(page.locator('.list-row')).toHaveCount(1);
+	await expect(page.locator('.branch-card')).toHaveCount(1);
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 5) - 2));
+});
+
+test('输入 / 触发快捷命令补全：/goto 补地点、/wear 先补槽位再补衣物', async ({ page }) => {
+	await page.goto('/');
+	const input = page.getByPlaceholder(/输入消息/);
+
+	// / 显示命令候选，选择 /goto
+	await input.fill('/');
+	await expect(page.getByRole('option', { name: /\/goto 地点/ })).toBeVisible();
+	await input.press('Enter');
+	await expect(input).toHaveValue('/goto ');
+
+	// /goto 补地点：选「学校 > 食堂」
+	await expect(page.getByRole('option', { name: /学校 > 食堂/ })).toBeVisible();
+	await input.press('ArrowDown');
+	await input.press('ArrowDown');
+	await input.press('Enter');
+	await expect(input).toHaveValue('/goto 学校 > 食堂');
+	await input.press('Enter');
+	await expect(page.getByText('（命令）切换地点：学校 > 食堂')).toBeVisible();
+	await expect(page.getByText('学校 > 食堂', { exact: true })).toBeVisible();
+
+	// /wear 先补槽位，再补该槽位的衣物
+	await input.fill('/wear ');
+	await expect(page.getByRole('option', { name: /上衣=/ })).toBeVisible();
+	await input.press('ArrowDown');
+	await input.press('Enter');
+	await expect(input).toHaveValue('/wear 上衣=');
+	await expect(page.getByRole('option', { name: /黑色卫衣/ })).toBeVisible();
+	await input.press('ArrowDown');
+	await input.press('ArrowDown');
+	await input.press('Enter');
+	await expect(input).toHaveValue('/wear 上衣=黑色卫衣');
+	await input.press('Enter');
+	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
 });
 
 test('日程：时间推进自动生成快照', async ({ page }) => {

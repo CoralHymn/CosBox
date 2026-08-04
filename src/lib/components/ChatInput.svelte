@@ -1,22 +1,48 @@
 <script lang="ts">
+	import type { ClothingItem, LocationDef } from '../core/types';
+	import { buildAutocompleteSuggestions } from '../utils/autocomplete';
+
 	interface Props {
 		disabled: boolean;
 		searchSupported: boolean;
 		searching: boolean;
+		/** 地点库：/goto 补全数据源。 */
+		places: LocationDef[];
+		/** 衣柜：/wear 补全数据源。 */
+		wardrobe: ClothingItem[];
 		onSend: (content: string, options: { search: boolean }) => void;
 	}
 
-	let { disabled, searchSupported, searching, onSend }: Props = $props();
+	let { disabled, searchSupported, searching, places, wardrobe, onSend }: Props = $props();
 	let text = $state('');
 	let search = $state(false);
+	let activeIndex = $state(0);
+	let dismissed = $state(false);
+	let inputEl = $state<HTMLTextAreaElement | null>(null);
 
-	/** RP 快捷命令列表：点击把命令前缀填入输入框。 */
-	const quickCommands = [
-		{ label: '/goto', value: '/goto ' },
-		{ label: '/wear', value: '/wear ' },
-		{ label: '/time', value: '/time ' },
-		{ label: '/help', value: '/help' }
-	] as const;
+	const suggestions = $derived(buildAutocompleteSuggestions(text, places, wardrobe));
+	const popupVisible = $derived(suggestions.length > 0 && !dismissed);
+
+	/** 建议列表变化时把选中项复位到第一项。 */
+	$effect(() => {
+		void suggestions;
+		activeIndex = 0;
+	});
+
+	function acceptSuggestion(index: number): void {
+		const suggestion = suggestions[index];
+		if (suggestion === undefined) {
+			return;
+		}
+		const lastSpace = text.lastIndexOf(' ');
+		const prefix = lastSpace === -1 ? '' : text.slice(0, lastSpace + 1);
+		text = prefix + suggestion.insert;
+		if (suggestion.keepOpen !== true) {
+			dismissed = true;
+		}
+		activeIndex = 0;
+		inputEl?.focus();
+	}
 
 	function submit(): void {
 		const value = text.trim();
@@ -28,6 +54,35 @@
 		search = false;
 	}
 
+	function onKeydown(event: KeyboardEvent): void {
+		if (popupVisible) {
+			if (event.key === 'ArrowDown') {
+				event.preventDefault();
+				activeIndex = (activeIndex + 1) % suggestions.length;
+				return;
+			}
+			if (event.key === 'ArrowUp') {
+				event.preventDefault();
+				activeIndex = (activeIndex - 1 + suggestions.length) % suggestions.length;
+				return;
+			}
+			if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+				event.preventDefault();
+				acceptSuggestion(activeIndex);
+				return;
+			}
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				dismissed = true;
+				return;
+			}
+		}
+		if (event.key === 'Enter' && !event.shiftKey) {
+			event.preventDefault();
+			submit();
+		}
+	}
+
 	function toggleSearch(): void {
 		if (searchSupported) {
 			search = !search;
@@ -36,28 +91,39 @@
 </script>
 
 <div class="composer">
-	<div class="command-hints">
-		<span class="muted" style="font-size: 12px;">快捷操作：</span>
-		{#each quickCommands as command (command.label)}
-			<button
-				class="cmd-chip"
-				type="button"
-				disabled={disabled}
-				onclick={() => {
-					text = command.value;
-				}}>{command.label}</button
-			>
-		{/each}
-	</div>
+	{#if popupVisible}
+		<div class="suggest-popup" role="listbox" aria-label="快捷命令补全">
+			{#each suggestions as suggestion, i (suggestion.insert + suggestion.label)}
+				<button
+					type="button"
+					class="suggest-item"
+					class:active={i === activeIndex}
+					role="option"
+					aria-selected={i === activeIndex}
+					onmousedown={(event) => {
+						event.preventDefault();
+						acceptSuggestion(i);
+					}}
+				>
+					<span class="suggest-label">{suggestion.label}</span>
+					{#if suggestion.detail !== undefined}
+						<span class="muted suggest-detail">{suggestion.detail}</span>
+					{/if}
+				</button>
+			{/each}
+		</div>
+	{/if}
 	<textarea
 		class="textarea"
-		placeholder="输入消息；或用 /goto /wear /time 直接操作状态，Enter 发送，Shift+Enter 换行"
+		bind:this={inputEl}
+		placeholder="输入消息；或输入 / 使用快捷命令，Enter 发送，Shift+Enter 换行"
 		bind:value={text}
-		onkeydown={(event) => {
-			if (event.key === 'Enter' && !event.shiftKey) {
-				event.preventDefault();
-				submit();
-			}
+		onkeydown={onKeydown}
+		oninput={() => {
+			dismissed = false;
+		}}
+		onblur={() => {
+			dismissed = true;
 		}}></textarea>
 	<button
 		class="btn"
