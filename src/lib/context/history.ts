@@ -1,5 +1,15 @@
 import type { ChatMessageView } from '../core/types';
 
+/**
+ * 过滤掉仅用于展示、不进入 LLM 上下文的消息（如 /help 帮助文本）。
+ * 这类消息仍在会话/快照中完整保留，只是不发给模型。
+ */
+export function excludeFromContext(
+	conversation: ReadonlyArray<ChatMessageView>
+): ChatMessageView[] {
+	return conversation.filter((message) => message.skipContext !== true);
+}
+
 /** 历史压缩选项。 */
 export interface HistoryOptions {
 	/** 保留的最大消息数（至少 1）。 */
@@ -27,9 +37,10 @@ export function prepareHistory(
 	conversation: ReadonlyArray<ChatMessageView>,
 	options: HistoryOptions = { maxMessages: 20 }
 ): HistoryResult {
+	const contextMessages = excludeFromContext(conversation);
 	const max = Math.max(1, Math.floor(options.maxMessages));
 	const charLimit = options.maxCharsPerMessage ?? 1200;
-	const kept = conversation.slice(-max);
+	const kept = contextMessages.slice(-max);
 	let truncated = 0;
 
 	const messages = kept.map((message) => {
@@ -40,7 +51,7 @@ export function prepareHistory(
 		return message;
 	});
 
-	const compressedCount = Math.max(0, conversation.length - kept.length);
+	const compressedCount = Math.max(0, contextMessages.length - kept.length);
 	if (compressedCount > 0) {
 		messages.unshift({
 			id: 'compressed',

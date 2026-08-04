@@ -17,7 +17,11 @@ export interface CharacterSessionStore {
 	readonly snapshots: SnapshotNode[];
 	readonly branches: BranchSummary[];
 	update: (patch: StatePatch, metadata: { desc: string }) => Promise<SnapshotNode>;
-	addMessage: (role: MessageRole, content: string) => Promise<SnapshotNode>;
+	addMessage: (
+		role: MessageRole,
+		content: string,
+		options?: { skipContext?: boolean }
+	) => Promise<SnapshotNode>;
 	checkout: (targetId: string) => Promise<void>;
 	advanceTime: (minutes: number) => Promise<SnapshotNode>;
 	addCheckpoint: (desc: string) => Promise<SnapshotNode>;
@@ -62,7 +66,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 			return branches;
 		},
 		update: (patch, metadata) => manager.update(patch, metadata),
-		addMessage: (role, content) => manager.addMessage(role, content),
+		addMessage: (role, content, options) => manager.addMessage(role, content, options),
 		checkout: (targetId) => manager.checkout(targetId),
 		advanceTime: (minutes) => manager.advanceTime(minutes),
 		addCheckpoint: (desc) => manager.addCheckpoint(desc),

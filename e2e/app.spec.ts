@@ -288,6 +288,33 @@ test('RP 斜杠命令：/goto /wear /time /help 直接修改状态', async ({ pa
 	await expect(page.getByText(/可用 RP 快捷命令/)).toBeVisible();
 });
 
+test('/help 帮助文本只在聊天里展示，不进入发送给 AI 的提示词', async ({ page }) => {
+	await page.goto('/');
+
+	// 开启开发者模式以便查看完整提示词
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#dev-mode-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await page.getByRole('button', { name: /对话/ }).click();
+
+	// /help 生成一条 system 帮助消息，聊天里可见
+	await page.getByPlaceholder(/输入消息/).fill('/help');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/可用 RP 快捷命令/).first()).toBeVisible();
+
+	// 再发一条普通消息触发 LLM 请求
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	// 完整提示词中不应出现帮助文本
+	await page.getByRole('button', { name: '开发者：查看最近一次完整提示词' }).click();
+	const promptBody = page.locator('.prompt-modal-body');
+	await expect(promptBody.getByText('【当前状态】').first()).toBeVisible();
+	await expect(promptBody.getByText(/可用 RP 快捷命令/)).toHaveCount(0);
+	await expect(promptBody.getByText('早上好')).toBeVisible();
+});
+
 test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 	await page.goto('/');
 

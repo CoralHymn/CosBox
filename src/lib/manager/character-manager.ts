@@ -1,6 +1,11 @@
 import { SnapshotError, StateValidationError } from '../core/errors';
 import { clonePlain } from '../core/clone';
-import { addMinutes, applyConfigOverrides, applyStateDelta, createInitialState } from '../core/state';
+import {
+	addMinutes,
+	applyConfigOverrides,
+	applyStateDelta,
+	createInitialState
+} from '../core/state';
 import { collectBranchPath, getBranchTips, getChildrenMap, sortNodes } from '../core/snapshot';
 import type {
 	BranchSummary,
@@ -205,11 +210,19 @@ export class CharacterManager {
 	}
 
 	/** 追加一条对话消息（user/assistant/system），内容不得为空。 */
-	addMessage(role: MessageRole, content: string): Promise<SnapshotNode> {
-		return this.enqueue(() => this.doAddMessage(role, content));
+	addMessage(
+		role: MessageRole,
+		content: string,
+		options: { skipContext?: boolean } = {}
+	): Promise<SnapshotNode> {
+		return this.enqueue(() => this.doAddMessage(role, content, options));
 	}
 
-	private async doAddMessage(role: MessageRole, content: string): Promise<SnapshotNode> {
+	private async doAddMessage(
+		role: MessageRole,
+		content: string,
+		options: { skipContext?: boolean }
+	): Promise<SnapshotNode> {
 		await this.ensureInit();
 		const trimmed = content.trim();
 		if (trimmed === '') {
@@ -219,7 +232,12 @@ export class CharacterManager {
 		const node = await this.deps.snapshots.addSnapshot({
 			parentId: this.headId,
 			metadata: { type: 'message', desc: roleLabel },
-			delta: { kind: 'message', role, content: trimmed },
+			delta: {
+				kind: 'message',
+				role,
+				content: trimmed,
+				...(options.skipContext === true ? { skipContext: true } : {})
+			},
 			timestamp: this.now()
 		});
 		this.headId = node.id;

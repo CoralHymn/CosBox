@@ -144,6 +144,19 @@ describe('CharacterManager', () => {
 		expect(manager.getConversation().map((m) => m.role)).toEqual(['system']);
 	});
 
+	it('addMessage 的 skipContext 选项写入快照并随重建保留', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('system', '可用 RP 快捷命令', { skipContext: true });
+		await manager.addMessage('user', '你好');
+		expect(manager.getConversation()[0]!.skipContext).toBe(true);
+		expect(manager.getConversation()[1]!.skipContext).toBeUndefined();
+		// checkout 重建后标记仍保留（帮助消息只展示、不进上下文）
+		const headId = manager.getHeadId()!;
+		await manager.checkout(headId);
+		expect(manager.getConversation()[0]!.skipContext).toBe(true);
+	});
+
 	it('未注入 now 时回退到 Date.now', async () => {
 		const manager = new CharacterManager({ snapshots, kv });
 		await manager.init();

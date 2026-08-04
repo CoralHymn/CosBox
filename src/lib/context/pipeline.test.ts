@@ -118,4 +118,42 @@ describe('buildContext', () => {
 		expect(bundle.systemMessage).not.toContain('【网络搜索结果】');
 		expect(bundle.searchResults).toEqual([]);
 	});
+
+	it('skipContext 消息不进入发送消息数组，也不触发世界信息', () => {
+		const conversation: ChatMessageView[] = [
+			{
+				id: 'help',
+				role: 'system',
+				content: '可用 RP 快捷命令：/goto 地点 /wear 槽位=衣物',
+				timestamp: 0,
+				skipContext: true
+			},
+			{ id: '1', role: 'user', content: '我们去图书馆吧', timestamp: 1 }
+		];
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: [
+				{
+					id: 'w-help',
+					keys: ['RP 快捷命令'],
+					content: '不应触发',
+					enabled: true,
+					priority: 100
+				},
+				{
+					id: 'w-lib',
+					keys: ['图书馆'],
+					content: '图书馆是校园传说发生地。',
+					enabled: true,
+					priority: 100
+				}
+			]
+		});
+		expect(bundle.messages.map((m) => m.role)).toEqual(['user']);
+		expect(bundle.messages[0]!.content).toBe('我们去图书馆吧');
+		expect(bundle.systemMessage).not.toContain('不应触发');
+		expect(bundle.systemMessage).toContain('图书馆是校园传说发生地。');
+		expect(bundle.history.map((m) => m.id)).toEqual(['1']);
+	});
 });

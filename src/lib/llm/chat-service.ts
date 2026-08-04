@@ -1,5 +1,6 @@
 import type { ChatMessageView } from '../core/types';
 import { buildContext, type ContextBundle, type ContextPipelineInput } from '../context/pipeline';
+import { excludeFromContext } from '../context/history';
 import {
 	buildCompactedHistory,
 	buildSummaryRequest,
@@ -210,12 +211,13 @@ export class ChatService {
 		conversation: ReadonlyArray<ChatMessageView>,
 		state: CompactionState | null
 	): ChatMessageView[] {
+		const contextMessages = excludeFromContext(conversation);
 		if (state === null) {
-			return [...conversation];
+			return contextMessages;
 		}
 		return buildCompactedHistory(
 			state.summary,
-			messagesAfterBoundary(conversation, state.boundaryId)
+			messagesAfterBoundary(contextMessages, state.boundaryId)
 		);
 	}
 
