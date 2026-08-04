@@ -19,10 +19,18 @@ export const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周
 const STATE_TOP_KEYS = ['outfit', 'location', 'places', 'schedule', 'attributes'] as const;
 
 /** 穿着槽位键，用于校验。 */
-const OUTFIT_SLOT_KEYS = ['top', 'bottom', 'shoes'] as const;
+const OUTFIT_SLOT_KEYS = [
+	'headwear',
+	'top',
+	'underwear',
+	'underpants',
+	'bottom',
+	'socks',
+	'shoes'
+] as const;
 
 /** 地点字段键，用于校验。 */
-const LOCATION_KEYS = ['id', 'name', 'description'] as const;
+const LOCATION_KEYS = ['id', 'category', 'name', 'description'] as const;
 
 /** 日程条目字段键，用于校验。 */
 const SCHEDULE_ENTRY_KEYS = ['id', 'day', 'start', 'end', 'title', 'locationId'] as const;
@@ -34,14 +42,19 @@ const SCHEDULE_ENTRY_KEYS = ['id', 'day', 'start', 'end', 'title', 'locationId']
 export function createInitialState(): CharacterState {
 	return {
 		outfit: {
+			headwear: null,
 			top: '白色衬衫',
+			underwear: '白色棉质内衣',
+			underpants: '白色棉质内裤',
 			bottom: '深蓝百褶裙',
+			socks: '白色过膝袜',
 			shoes: '黑色皮鞋',
 			accessories: ['蝴蝶结发带'],
 			wardrobe: createInitialWardrobe()
 		},
 		location: {
 			id: 'school-gate',
+			category: '学校',
 			name: '学院正门',
 			description: '樱花道尽头的校门，晨间常有学生出入'
 		},
@@ -65,23 +78,98 @@ export function createInitialState(): CharacterState {
 /** 生成初始衣柜：当前穿着对应的衣物 + 几件备选（含穿后描述）。 */
 export function createInitialWardrobe(): ClothingItem[] {
 	return [
-		{ id: 'cloth-01', name: '白色衬衫', description: '白色棉质衬衫，领口带细蕾丝，袖口挽起两折' },
-		{ id: 'cloth-02', name: '深蓝百褶裙', description: '深蓝色及膝百褶裙，走动时裙摆轻轻摆动' },
-		{ id: 'cloth-03', name: '黑色皮鞋', description: '黑色低跟皮鞋，鞋面擦得发亮' },
-		{ id: 'cloth-04', name: '蝴蝶结发带', description: '红色蝴蝶结发带，别在右侧发间' },
-		{ id: 'cloth-05', name: '黑色卫衣', description: '宽松黑色连帽卫衣，胸前有白色字母印花' },
-		{ id: 'cloth-06', name: '白色运动鞋', description: '白色运动鞋，鞋带系成蝴蝶结，鞋边干净' }
+		{
+			id: 'cloth-01',
+			category: '常服',
+			name: '白色衬衫',
+			description: '白色棉质衬衫，领口带细蕾丝，袖口挽起两折'
+		},
+		{
+			id: 'cloth-02',
+			category: '常服',
+			name: '深蓝百褶裙',
+			description: '深蓝色及膝百褶裙，走动时裙摆轻轻摆动'
+		},
+		{
+			id: 'cloth-03',
+			category: '常服',
+			name: '黑色皮鞋',
+			description: '黑色低跟皮鞋，鞋面擦得发亮'
+		},
+		{
+			id: 'cloth-04',
+			category: '常服',
+			name: '蝴蝶结发带',
+			description: '红色蝴蝶结发带，别在右侧发间'
+		},
+		{
+			id: 'cloth-05',
+			category: '常服',
+			name: '白色过膝袜',
+			description: '白色过膝袜，袜口带一圈蕾丝边'
+		},
+		{
+			id: 'cloth-06',
+			category: '常服',
+			name: '白色棉质内衣',
+			description: '白色纯棉内衣，无花纹，剪裁合体'
+		},
+		{ id: 'cloth-07', category: '常服', name: '白色棉质内裤', description: '白色纯棉内裤，松紧腰' },
+		{
+			id: 'cloth-08',
+			category: '运动服',
+			name: '黑色卫衣',
+			description: '宽松黑色连帽卫衣，胸前有白色字母印花'
+		},
+		{
+			id: 'cloth-09',
+			category: '运动服',
+			name: '白色运动鞋',
+			description: '白色运动鞋，鞋带系成蝴蝶结，鞋边干净'
+		},
+		{
+			id: 'cloth-10',
+			category: '常服',
+			name: '贝雷帽',
+			description: '藏青色贝雷帽，斜戴在头顶右侧'
+		}
 	];
 }
 
 /** 生成初始地点库：与日程 locationId 相互独立的一等数据。 */
 export function createInitialPlaces(): LocationDef[] {
 	return [
-		{ id: 'school-gate', name: '学院正门', description: '樱花道尽头的校门，晨间常有学生出入' },
-		{ id: 'classroom', name: '教室 2-B', description: '二楼尽头的教室，窗外能看到操场' },
-		{ id: 'cafeteria', name: '食堂', description: '午间最热闹的地方，招牌是咖喱饭' },
-		{ id: 'library', name: '图书馆', description: '安静的阅读空间，三楼据说有禁书区' },
-		{ id: 'rooftop', name: '天台', description: '教学楼顶，午后阳光正好，可以望见整座学园' }
+		{
+			id: 'school-gate',
+			category: '学校',
+			name: '学院正门',
+			description: '樱花道尽头的校门，晨间常有学生出入'
+		},
+		{
+			id: 'classroom',
+			category: '学校',
+			name: '教室 2-B',
+			description: '二楼尽头的教室，窗外能看到操场'
+		},
+		{
+			id: 'cafeteria',
+			category: '学校',
+			name: '食堂',
+			description: '午间最热闹的地方，招牌是咖喱饭'
+		},
+		{
+			id: 'library',
+			category: '学校',
+			name: '图书馆',
+			description: '安静的阅读空间，三楼据说有禁书区'
+		},
+		{ id: 'pool', category: '学校', name: '游泳馆', description: '标准泳池，更衣室在入口左侧' },
+		{
+			id: 'rooftop',
+			category: '学校',
+			name: '天台',
+			description: '教学楼顶，午后阳光正好，可以望见整座学园'
+		}
 	];
 }
 
@@ -187,6 +275,9 @@ function validateOutfit(outfit: OutfitState): void {
 		if (typeof item.name !== 'string' || item.name.trim() === '') {
 			throw new StateValidationError('衣柜条目名称必须是非空字符串');
 		}
+		if (typeof item.category !== 'string') {
+			throw new StateValidationError('衣柜条目分类必须是字符串');
+		}
 		if (typeof item.description !== 'string') {
 			throw new StateValidationError('衣柜条目描述必须是字符串');
 		}
@@ -226,6 +317,9 @@ function validatePlaces(places: LocationDef[]): void {
 		}
 		if (typeof place.name !== 'string' || place.name.trim() === '') {
 			throw new StateValidationError('地点条目名称必须是非空字符串');
+		}
+		if (typeof place.category !== 'string') {
+			throw new StateValidationError('地点条目分类必须是字符串');
 		}
 		if (typeof place.description !== 'string') {
 			throw new StateValidationError('地点条目描述必须是字符串');

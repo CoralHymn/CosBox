@@ -39,8 +39,16 @@ export interface ScheduleState {
 
 /** 穿着状态：结构化服装槽位。 */
 export interface OutfitState {
+	/** 帽子/头饰。 */
+	headwear: string | null;
 	top: string | null;
+	/** 内衣。 */
+	underwear: string | null;
+	/** 内裤。 */
+	underpants: string | null;
 	bottom: string | null;
+	/** 袜子。 */
+	socks: string | null;
 	shoes: string | null;
 	/** 配饰列表，整体替换语义。 */
 	accessories: string[];
@@ -48,9 +56,11 @@ export interface OutfitState {
 	wardrobe: ClothingItem[];
 }
 
-/** 地点状态。 */
+/** 地点状态（当前所在地）。 */
 export interface LocationState {
 	id: string;
+	/** 大类，如「学校」；空串表示未分类。 */
+	category: string;
 	name: string;
 	description: string;
 }
@@ -58,6 +68,8 @@ export interface LocationState {
 /** 衣柜条目：衣物预设 + 穿上后的外观描述。 */
 export interface ClothingItem {
 	id: string;
+	/** 大类，如「常服」「工作服」；空串表示未分类。 */
+	category: string;
 	name: string;
 	/** 穿上后的描述（面料、版型、细节），供 LLM 精确还原穿着。 */
 	description: string;
@@ -66,6 +78,8 @@ export interface ClothingItem {
 /** 地点定义：AI 认知中的已知地点。 */
 export interface LocationDef {
 	id: string;
+	/** 大类，如「学校」；空串表示未分类。 */
+	category: string;
 	name: string;
 	description: string;
 }

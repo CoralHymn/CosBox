@@ -48,10 +48,12 @@ flowchart LR
 
 ## 状态模型
 
-- `outfit`：当前穿着（top / bottom / shoes / accessories）+ `wardrobe` 衣柜（衣物预设与穿后描述）。
-- `location`：当前所在地；`places`：地点库（AI 认知中的全部地点，与日程相互独立）。
+- `outfit`：当前穿着（headwear / top / underwear / underpants / bottom / socks / shoes / accessories）
+  - `wardrobe` 衣柜（衣物预设，带分类与穿后描述）。
+- `location`：当前所在地（带分类）；`places`：地点库（AI 认知中的全部地点，带分类，如「学校 > 食堂」，
+  与日程相互独立）。
 - `schedule`：时间与周期性日程；`attributes`：自由键值属性。
-- LLM 上下文中的状态摘要包含【已知地点】与【衣柜】清单，AI 换装/移动时从清单中选择，而非自行脑补。
+- LLM 上下文中的状态摘要包含【已知地点】与【衣柜】清单（含分类前缀），AI 换装/移动时从清单中选择，而非自行脑补。
 
 ## 模块边界
 

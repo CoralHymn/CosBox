@@ -8,12 +8,20 @@ import type {
 } from '../core/types';
 
 /**
- * 把穿着结构渲染成自然语言，如「白色衬衫、深蓝百褶裙、黑色皮鞋、蝴蝶结发带」。
+ * 把穿着结构渲染成自然语言（按穿戴顺序）：
+ * 如「贝雷帽、白色衬衫、白色棉质内衣、白色棉质内裤、深蓝百褶裙、白色过膝袜、黑色皮鞋、蝴蝶结发带」。
  */
 export function formatOutfit(outfit: OutfitState): string {
-	const parts = [outfit.top, outfit.bottom, outfit.shoes, ...outfit.accessories].filter(
-		(part): part is string => part !== null && part !== ''
-	);
+	const parts = [
+		outfit.headwear,
+		outfit.top,
+		outfit.underwear,
+		outfit.underpants,
+		outfit.bottom,
+		outfit.socks,
+		outfit.shoes,
+		...outfit.accessories
+	].filter((part): part is string => part !== null && part !== '');
 	return parts.length > 0 ? parts.join('、') : '（无穿着描述）';
 }
 
@@ -25,20 +33,30 @@ export function formatAttributes(attributes: Record<string, number | string | bo
 	return parts.length > 0 ? parts.join('，') : '（无属性）';
 }
 
-/** 渲染已知地点库，如「学院正门（樱花道尽头的校门…）；教室 2-B（二楼尽头…）」。 */
+/** 渲染已知地点库（带大类），如「学校 > 食堂（午间最热闹…）；学校 > 游泳馆（标准泳池…）」。 */
 export function formatPlaces(places: LocationDef[]): string {
 	if (places.length === 0) {
 		return '（暂无已知地点）';
 	}
-	return places.map((place) => `${place.name}（${place.description}）`).join('；');
+	return places
+		.map(
+			(place) =>
+				`${place.category ? `${place.category} > ${place.name}` : place.name}（${place.description}）`
+		)
+		.join('；');
 }
 
-/** 渲染衣柜，如「白色衬衫：白色棉质衬衫，领口带细蕾丝；黑色卫衣：宽松…」。 */
+/** 渲染衣柜（带大类），如「常服 > 白色衬衫：白色棉质衬衫…；运动服 > 黑色卫衣：宽松…」。 */
 export function formatWardrobe(wardrobe: ClothingItem[]): string {
 	if (wardrobe.length === 0) {
 		return '（衣柜为空）';
 	}
-	return wardrobe.map((item) => `${item.name}：${item.description}`).join('；');
+	return wardrobe
+		.map(
+			(item) =>
+				`${item.category ? `${item.category} > ${item.name}` : item.name}：${item.description}`
+		)
+		.join('；');
 }
 
 /** 按衣物名查找衣柜条目（当前穿着槽位与衣柜同名匹配）。 */
@@ -72,7 +90,11 @@ export function summarizeState(state: CharacterState): string {
 	const lines = [
 		'【当前状态】',
 		`时间：${formatWorldTime(state.schedule.time)}（${describeCurrentActivity(state.schedule)}）`,
-		`地点：${state.location.name}（${state.location.description}）`,
+		`地点：${
+			state.location.category
+				? `${state.location.category} > ${state.location.name}`
+				: state.location.name
+		}（${state.location.description}）`,
 		`穿着：${formatOutfit(state.outfit)}`,
 		`属性：${formatAttributes(state.attributes)}`,
 		`今日日程：${summarizeSchedule(state.schedule)}`,

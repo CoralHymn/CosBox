@@ -19,18 +19,28 @@
 			)}）</span
 		>
 	</p>
-	<p class="preview-line"><span class="k">地点</span><span>{characterState.location.name}</span></p>
+	<p class="preview-line">
+		<span class="k">地点</span><span
+			>{characterState.location.category
+				? `${characterState.location.category} > ${characterState.location.name}`
+				: characterState.location.name}</span
+		>
+	</p>
 	<p class="preview-line">
 		<span class="k">穿着</span><span>{formatOutfit(characterState.outfit)}</span>
 	</p>
 	<p class="preview-line">
 		<span class="k">地点库</span><span
-			>{characterState.places.map((place) => place.name).join('、')}</span
+			>{characterState.places
+				.map((place) => (place.category ? `${place.category} > ${place.name}` : place.name))
+				.join('、')}</span
 		>
 	</p>
 	<p class="preview-line">
 		<span class="k">衣柜</span><span
-			>{characterState.outfit.wardrobe.map((item) => item.name).join('、')}</span
+			>{characterState.outfit.wardrobe
+				.map((item) => (item.category ? `${item.category} > ${item.name}` : item.name))
+				.join('、')}</span
 		>
 	</p>
 	<p class="preview-line">

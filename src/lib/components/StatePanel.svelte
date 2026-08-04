@@ -13,15 +13,23 @@
 
 	let { characterState, onUpdate }: Props = $props();
 
+	let headwear = $state('');
 	let top = $state('');
+	let underwear = $state('');
+	let underpants = $state('');
 	let bottom = $state('');
+	let socks = $state('');
 	let shoes = $state('');
 	let accessories = $state('');
 	let attrs = $state<AttributeRow[]>([]);
 
 	$effect(() => {
+		headwear = characterState.outfit.headwear ?? '';
 		top = characterState.outfit.top ?? '';
+		underwear = characterState.outfit.underwear ?? '';
+		underpants = characterState.outfit.underpants ?? '';
 		bottom = characterState.outfit.bottom ?? '';
+		socks = characterState.outfit.socks ?? '';
 		shoes = characterState.outfit.shoes ?? '';
 		accessories = characterState.outfit.accessories.join('，');
 		attrs = Object.entries(characterState.attributes).map(([key, value]) => ({
@@ -34,8 +42,12 @@
 		onUpdate(
 			{
 				outfit: {
+					headwear: headwear.trim() === '' ? null : headwear.trim(),
 					top: top.trim() === '' ? null : top.trim(),
+					underwear: underwear.trim() === '' ? null : underwear.trim(),
+					underpants: underpants.trim() === '' ? null : underpants.trim(),
 					bottom: bottom.trim() === '' ? null : bottom.trim(),
+					socks: socks.trim() === '' ? null : socks.trim(),
 					shoes: shoes.trim() === '' ? null : shoes.trim(),
 					accessories: accessories
 						.split(/[,，]/)
@@ -99,11 +111,41 @@
 		<h3 class="card-title">穿着</h3>
 		<div class="grid-2">
 			<div class="field">
+				<label for="outfit-headwear">帽子</label>
+				<input
+					id="outfit-headwear"
+					class="input"
+					bind:value={headwear}
+					list="outfit-wardrobe-list"
+					onchange={commitOutfit}
+				/>
+			</div>
+			<div class="field">
 				<label for="outfit-top">上衣</label>
 				<input
 					id="outfit-top"
 					class="input"
 					bind:value={top}
+					list="outfit-wardrobe-list"
+					onchange={commitOutfit}
+				/>
+			</div>
+			<div class="field">
+				<label for="outfit-underwear">内衣</label>
+				<input
+					id="outfit-underwear"
+					class="input"
+					bind:value={underwear}
+					list="outfit-wardrobe-list"
+					onchange={commitOutfit}
+				/>
+			</div>
+			<div class="field">
+				<label for="outfit-underpants">内裤</label>
+				<input
+					id="outfit-underpants"
+					class="input"
+					bind:value={underpants}
 					list="outfit-wardrobe-list"
 					onchange={commitOutfit}
 				/>
@@ -118,16 +160,26 @@
 					onchange={commitOutfit}
 				/>
 			</div>
-		</div>
-		<div class="field">
-			<label for="outfit-shoes">鞋</label>
-			<input
-				id="outfit-shoes"
-				class="input"
-				bind:value={shoes}
-				list="outfit-wardrobe-list"
-				onchange={commitOutfit}
-			/>
+			<div class="field">
+				<label for="outfit-socks">袜子</label>
+				<input
+					id="outfit-socks"
+					class="input"
+					bind:value={socks}
+					list="outfit-wardrobe-list"
+					onchange={commitOutfit}
+				/>
+			</div>
+			<div class="field">
+				<label for="outfit-shoes">鞋</label>
+				<input
+					id="outfit-shoes"
+					class="input"
+					bind:value={shoes}
+					list="outfit-wardrobe-list"
+					onchange={commitOutfit}
+				/>
+			</div>
 		</div>
 		<datalist id="outfit-wardrobe-list">
 			{#each characterState.outfit.wardrobe as item (item.id)}
