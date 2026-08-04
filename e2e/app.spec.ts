@@ -303,6 +303,76 @@ test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并�
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 3));
 });
 
+test('AI 一次回复可包含多段：工具轮次叙事文本与最终回复都保留', async ({ page }) => {
+	let call = 0;
+	await page.route('**/chat/completions', async (route) => {
+		call += 1;
+		if (call === 1) {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					choices: [
+						{
+							message: {
+								content: '（愣了一下，低头看看自己，脸颊一下子红了）啊！？我……',
+								tool_calls: [
+									{
+										id: 'c1',
+										type: 'function',
+										function: {
+											name: 'set_outfit',
+											arguments: JSON.stringify({ slot: '上衣', item: '黑色卫衣' })
+										}
+									}
+								]
+							}
+						}
+					]
+				})
+			});
+		} else {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					choices: [
+						{
+							message: {
+								content: '（手忙脚乱地把衬衫扣子扣好）呼——这下不会着凉了。'
+							}
+						}
+					]
+				})
+			});
+		}
+	});
+
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#llm-provider').selectOption('deepseek');
+	await page.locator('#llm-api-key').fill('test-key');
+	await page.locator('#ai-tools-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await expect(page.getByText('模型设置已保存')).toBeVisible();
+
+	await page.getByRole('button', { name: /对话/ }).click();
+	const snapshotsBefore = await page.locator('.chip').filter({ hasText: '快照' }).textContent();
+	await page.getByPlaceholder(/输入消息/).fill('好了快穿上吧，别着凉了');
+	await page.getByRole('button', { name: '发送' }).click();
+
+	// 两段 assistant 文本都保留，且工具执行生效
+	await expect(
+		page.getByText('（愣了一下，低头看看自己，脸颊一下子红了）啊！？我……')
+	).toBeVisible();
+	await expect(page.getByText('（手忙脚乱地把衬衫扣子扣好）呼——这下不会着凉了。')).toBeVisible();
+	await expect(page.locator('.message.assistant')).toHaveCount(2);
+	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
+	await expect
+		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
+		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 4));
+});
+
 test('流式输出：开启后按 SSE 逐块渲染，请求携带 stream: true', async ({ page }) => {
 	let requestBody: Record<string, unknown> | null = null;
 	await page.route('**/chat/completions', async (route) => {
