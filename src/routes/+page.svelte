@@ -230,7 +230,8 @@
 			await session.addCheckpoint(result.checkpointDesc);
 		}
 		if (result.helpText !== undefined) {
-			await session.addMessage('system', result.helpText);
+			// 帮助文本只给用户看，不进入发送给 AI 的上下文。
+			await session.addMessage('system', result.helpText, { skipContext: true });
 		} else if (result.message !== '') {
 			await session.addMessage('system', `（命令）${result.message}`);
 		}

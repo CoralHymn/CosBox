@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessageView } from '../core/types';
-import { prepareHistory } from './history';
+import { excludeFromContext, prepareHistory } from './history';
 
 function msg(id: string, content: string): ChatMessageView {
 	return { id, role: 'user', content, timestamp: Number(id) };
@@ -45,5 +45,35 @@ describe('prepareHistory', () => {
 		const result = prepareHistory([], { maxMessages: 5 });
 		expect(result.messages).toEqual([]);
 		expect(result.compressedCount).toBe(0);
+	});
+
+	it('skipContext 消息不进入发送历史，也不计入压缩数', () => {
+		const conversation: ChatMessageView[] = [
+			{ id: '1', role: 'system', content: '可用 RP 快捷命令', timestamp: 1, skipContext: true },
+			{ id: '2', role: 'user', content: '早上好', timestamp: 2 },
+			{ id: '3', role: 'assistant', content: '你好呀', timestamp: 3 }
+		];
+		const result = prepareHistory(conversation, { maxMessages: 2 });
+		expect(result.messages.map((m) => m.content)).toEqual(['早上好', '你好呀']);
+		expect(result.compressedCount).toBe(0);
+	});
+});
+
+describe('excludeFromContext', () => {
+	it('过滤 skipContext 消息，其余原样保留', () => {
+		const conversation: ChatMessageView[] = [
+			{ id: '1', role: 'system', content: '帮助', timestamp: 1, skipContext: true },
+			{ id: '2', role: 'user', content: '你好', timestamp: 2 },
+			{ id: '3', role: 'system', content: '命令已执行', timestamp: 3 }
+		];
+		expect(excludeFromContext(conversation).map((m) => m.id)).toEqual(['2', '3']);
+	});
+
+	it('未标记 skipContext 的消息全部保留', () => {
+		const conversation: ChatMessageView[] = [
+			{ id: '1', role: 'user', content: 'a', timestamp: 1 },
+			{ id: '2', role: 'assistant', content: 'b', timestamp: 2 }
+		];
+		expect(excludeFromContext(conversation)).toEqual(conversation);
 	});
 });

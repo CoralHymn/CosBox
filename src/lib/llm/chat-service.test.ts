@@ -393,6 +393,62 @@ describe('ChatService', () => {
 		expect(result.state?.summary).toBe('chat 摘要');
 		expect(chat).toHaveBeenCalled();
 	});
+
+	it('skipContext 消息不进入发送给模型的消息数组', async () => {
+		const chat = vi.fn(async (_messages: ChatMessage[], _config: LlmConfig) => {
+			void _messages;
+			void _config;
+			return { content: '好的', toolCalls: [] };
+		});
+		const service = new ChatService({ chat });
+		const conversation: ChatMessageView[] = [
+			{
+				id: 'help',
+				role: 'system',
+				content: '可用 RP 快捷命令',
+				timestamp: 0,
+				skipContext: true
+			},
+			{ id: '1', role: 'user', content: '你好', timestamp: 1 }
+		];
+		const { debug } = await service.generateReply(
+			{ state: createInitialState(), conversation, worldInfo: [] },
+			config
+		);
+		expect(debug.messages.map((m) => m.role)).toEqual(['system', 'user']);
+		expect(debug.messages[1]!.content).toBe('你好');
+		const sent = vi.mocked(chat).mock.calls[0]![0] as ChatMessage[];
+		expect(sent.some((m) => m.content.includes('可用 RP 快捷命令'))).toBe(false);
+	});
+
+	it('已有压缩状态时 skipContext 消息同样不进入发送历史', async () => {
+		const chat = vi.fn(async () => ({ content: '好的', toolCalls: [] }));
+		const service = new ChatService({ chat });
+		const conversation: ChatMessageView[] = [
+			{
+				id: 'help',
+				role: 'system',
+				content: '可用 RP 快捷命令',
+				timestamp: 0,
+				skipContext: true
+			},
+			...makeConversation(25)
+		];
+		const { debug } = await service.generateReply(
+			{ state: createInitialState(), conversation, worldInfo: [] },
+			config,
+			{
+				compaction: {
+					contextWindow: 1_000_000,
+					threshold: 0.8,
+					keepRecent: 20,
+					state: { summary: '旧摘要', boundaryId: '20' }
+				}
+			}
+		);
+		expect(debug.messages).toHaveLength(7);
+		expect(debug.messages.some((m) => m.content.includes('可用 RP 快捷命令'))).toBe(false);
+	});
 });
 
 describe('serializeDebugPrompt', () => {

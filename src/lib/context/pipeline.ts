@@ -1,7 +1,12 @@
 import type { CharacterState, ChatMessageView, WorldInfoEntry } from '../core/types';
 import type { ChatMessage } from '../llm/types';
 import type { SearchResult } from '../search/types';
-import { prepareHistory, type HistoryOptions, type HistoryResult } from './history';
+import {
+	excludeFromContext,
+	prepareHistory,
+	type HistoryOptions,
+	type HistoryResult
+} from './history';
 import { summarizeState } from './state-summary';
 import { findWorldInfoHits, type WorldInfoHit } from './world-info';
 
@@ -51,16 +56,18 @@ export function defaultSystemPrompt(name: string): string {
  * 3) 历史压缩。
  */
 export function buildContext(input: ContextPipelineInput): ContextBundle {
+	// 只展示不给模型的消息（如 /help）不参与历史与世界信息触发。
+	const contextConversation = excludeFromContext(input.conversation);
 	const name =
 		(input.characterName && input.characterName.trim()) ||
 		(typeof input.state.attributes.name === 'string' ? input.state.attributes.name : '角色');
 	const stateSummary = summarizeState(input.state);
 	const historyResult: HistoryResult = prepareHistory(
-		input.conversation,
+		contextConversation,
 		input.historyOptions ?? { maxMessages: 20 }
 	);
 	const worldInfoHits = findWorldInfoHits(
-		input.conversation.map((message) => message.content),
+		contextConversation.map((message) => message.content),
 		input.worldInfo
 	);
 	const searchResults = [...(input.searchResults ?? [])];

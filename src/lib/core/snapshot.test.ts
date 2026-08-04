@@ -109,6 +109,24 @@ describe('rebuildFromNodes', () => {
 		expect(result.appliedDeltas).toBe(0);
 	});
 
+	it('消息 delta 携带 skipContext 时重建保留该标记', () => {
+		const nodes = toMap([
+			makeNode('root', null, null, 0),
+			makeNode(
+				'help',
+				'root',
+				{ kind: 'message', role: 'system', content: '可用 RP 快捷命令', skipContext: true },
+				1
+			),
+			makeNode('hi', 'help', { kind: 'message', role: 'user', content: '你好' }, 2)
+		]);
+		const result = rebuildFromNodes(nodes, 'hi', createInitialState());
+		expect(result.messages).toEqual([
+			{ id: 'help', role: 'system', content: '可用 RP 快捷命令', timestamp: 1, skipContext: true },
+			{ id: 'hi', role: 'user', content: '你好', timestamp: 2 }
+		]);
+	});
+
 	it('120+ 次 delta 应用后重建正确（状态+消息+空补丁混合）', () => {
 		const nodes: SnapshotNode[] = [makeNode('root', null, null, 0)];
 		let parent = 'root';

@@ -155,6 +155,8 @@ export interface ChatMessageView {
 	role: MessageRole;
 	content: string;
 	timestamp: number;
+	/** 仅用于界面展示、不进入发送给 LLM 的上下文（如 /help 帮助文本）。 */
+	skipContext?: boolean;
 }
 
 /** 快照元信息：类型 + 人类可读描述。 */
@@ -167,7 +169,7 @@ export interface SnapshotMetadata {
 /** 快照 delta：状态补丁、消息、或空（检查点）。 */
 export type SnapshotDelta =
 	| { kind: 'state'; patch: StatePatch }
-	| { kind: 'message'; role: MessageRole; content: string }
+	| { kind: 'message'; role: MessageRole; content: string; skipContext?: boolean }
 	| null;
 
 /** 版本图节点：单父多子的增量快照。 */

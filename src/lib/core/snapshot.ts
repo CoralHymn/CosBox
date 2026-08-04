@@ -47,7 +47,7 @@ export function isStateDelta(delta: SnapshotDelta): delta is { kind: 'state'; pa
 /** 判断 delta 是否为消息。 */
 export function isMessageDelta(
 	delta: SnapshotDelta
-): delta is { kind: 'message'; role: MessageRole; content: string } {
+): delta is { kind: 'message'; role: MessageRole; content: string; skipContext?: boolean } {
 	return delta !== null && delta.kind === 'message';
 }
 
@@ -114,7 +114,8 @@ export function rebuildFromNodes(
 				id: node.id,
 				role: delta.role,
 				content: delta.content,
-				timestamp: node.timestamp
+				timestamp: node.timestamp,
+				...(delta.skipContext === true ? { skipContext: true } : {})
 			});
 		}
 	}

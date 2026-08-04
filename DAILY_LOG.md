@@ -416,3 +416,27 @@ estimateMessagesTokens`、`sumUsage`、`findModelInfo`（上下文窗口 + 三�
 
 - 单元测试：全量 381 个；覆盖率 100% 语句/行/函数（分支 94.54%，compaction / model-info /
   model-service 三模块 100% 分支）；17 条 e2e 全过；build/check/lint 全绿。
+
+## 2026-08-05（续）：/help 帮助文本不进 LLM 上下文
+
+### 需求
+
+最近一次发送给 AI 的完整提示词中，用户执行 `/help` 产生的 [system] 帮助消息不应进入上下文
+（帮助文本是给用户看的 UI 信息，不是剧情内容）。
+
+### 实现
+
+- `ChatMessageView` 与消息快照 delta 增加可选 `skipContext` 标记；标记随快照持久化，
+  checkout 重建后仍保留（snapshot / character-manager 均有回归测试）。
+- `CharacterManager.addMessage(role, content, { skipContext })` 透传该标记；
+  `/help` 落地时标记 `skipContext: true`——聊天里照常展示，其他斜杠命令的
+  「（命令）…」system 提示仍进入上下文（它们是剧情转场事实）。
+- 新增 `excludeFromContext`：`prepareHistory`（发送历史）、`buildContext`
+  （世界信息触发扫描）、`ChatService.buildSendHistory`（压缩边界与估算）统一在组装前过滤。
+- e2e：开启开发者模式后 `/help` + 发送消息，聊天里可见帮助文本，但完整提示词弹窗中
+  不包含它。
+
+### 门禁
+
+- 单元测试：全量 389 个；覆盖率 100% 语句/行/函数（分支 94.57%）；18 条 e2e 全过；
+  build/check/lint 全绿。

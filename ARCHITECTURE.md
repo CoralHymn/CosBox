@@ -108,6 +108,13 @@ flowchart LR
 输出 `ContextBundle`：`systemMessage`（基础提示 + 状态摘要 + 世界设定）与可直接提交给
 Chat Completions API 的 `messages` 数组。
 
+### 仅展示消息（skipContext）
+
+- `ChatMessageView.skipContext` 标记「只给用户看、不进 LLM 上下文」的消息（如 `/help`
+  帮助文本）：仍在会话与快照中完整保留、照常展示，但 `excludeFromContext` 会在
+  历史组装与世界信息触发前过滤掉它们，发送给 AI 的提示词中不会出现。
+- 标记随消息快照持久化（`SnapshotDelta.message.skipContext`），checkout 重建后仍保留。
+
 ### 上下文用量与费用（侧栏）
 
 - 对话页侧栏「实时状态预览」下方是「上下文用量（估算）」容器：
