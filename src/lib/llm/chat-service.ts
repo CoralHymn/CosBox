@@ -168,9 +168,13 @@ export class ChatService {
 						segments.push({ content: segmentContent, thinking: result.thinking });
 					}
 					const toolMessages: ChatMessage[] = [];
+					const feedbackLines: string[] = [];
 					for (const call of result.toolCalls) {
 						const outcome = await executeStateTool(options.tools, call, options.toolContext);
 						executedTools.push(outcome);
+						feedbackLines.push(
+							`- ${call.name}(${formatToolArguments(call.arguments)}) → ${outcome.output}`
+						);
 						toolMessages.push({
 							role: 'tool',
 							content: outcome.output,
@@ -188,6 +192,7 @@ export class ChatService {
 						...input,
 						state: options.toolContext.getState(),
 						conversation: sendHistory,
+						toolFeedback: `【工具执行反馈】以下工具已成功调用并立即生效，当前状态已同步更新：\n${feedbackLines.join('\n')}`,
 						historyOptions: { maxMessages: Math.max(1, sendHistory.length) }
 					});
 					messages = [{ role: 'system', content: bundle.systemMessage }, ...messages.slice(1)];
@@ -294,6 +299,13 @@ export function serializeDebugPrompt(view: DebugPromptView): string {
 		}
 	}
 	return parts.join('\n\n');
+}
+
+/** 把工具参数格式化为紧凑文本，如「slot=上衣, item=白色衬衫」。 */
+function formatToolArguments(args: Record<string, unknown>): string {
+	return Object.entries(args)
+		.map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+		.join(', ');
 }
 
 /** 合并累计用量：任一为空时原样透传。 */

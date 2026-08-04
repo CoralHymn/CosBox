@@ -286,6 +286,7 @@ test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并�
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.locator('#ai-tools-enabled').check();
+	await page.locator('#dev-mode-enabled').check();
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
 
@@ -301,6 +302,13 @@ test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并�
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 3));
+
+	// 下一轮请求的系统提示带工具执行反馈，让模型确认工具已调用并生效
+	await page.getByRole('button', { name: '开发者：查看最近一次完整提示词' }).click();
+	await expect(page.locator('.prompt-modal-body').getByText('【工具执行反馈】')).toBeVisible();
+	await expect(
+		page.locator('.prompt-modal-body').getByText(/set_outfit\(slot=top, item=黑色卫衣\)/)
+	).toBeVisible();
 });
 
 test('AI 一次回复可包含多段：工具轮次叙事文本与最终回复都保留', async ({ page }) => {

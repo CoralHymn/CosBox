@@ -23,6 +23,8 @@ export interface ContextPipelineInput {
 	historyOptions?: HistoryOptions;
 	/** 允许 AI 调用状态工具时，在系统提示中注入工具使用说明。 */
 	enableStateTools?: boolean;
+	/** 最近一次工具执行反馈（agent 循环注入），让模型确认工具已调用并生效。 */
+	toolFeedback?: string;
 	/** 可选的网络搜索结果，命中时注入系统提示。 */
 	searchResults?: ReadonlyArray<SearchResult>;
 }
@@ -99,7 +101,11 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 					.join('\n')}`
 			: '';
 	const toolBlock = input.enableStateTools === true ? `\n\n${buildToolGuidance()}` : '';
-	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}${toolBlock}`;
+	const feedbackBlock =
+		input.toolFeedback !== undefined && input.toolFeedback.trim() !== ''
+			? `\n\n${input.toolFeedback.trim()}`
+			: '';
+	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}${toolBlock}${feedbackBlock}`;
 	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
 		role: message.role,
 		content: message.content

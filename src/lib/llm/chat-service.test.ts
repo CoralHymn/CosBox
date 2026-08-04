@@ -88,6 +88,10 @@ describe('ChatService', () => {
 		expect(calls).toHaveLength(2);
 		const secondMessages = calls[1]![0] as ChatMessage[];
 		expect(secondMessages[0]!.content).toContain('食堂');
+		// 下一轮系统提示带工具执行反馈，让模型确认工具已调用并生效
+		expect(secondMessages[0]!.content).toContain('【工具执行反馈】');
+		expect(secondMessages[0]!.content).toContain('goto_location(name=食堂)');
+		expect(secondMessages[0]!.content).toContain('已切换地点');
 		expect(
 			secondMessages.some(
 				(message) => message.role === 'tool' && message.content.includes('已切换地点')
