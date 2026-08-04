@@ -1,4 +1,5 @@
 import { StateValidationError } from './errors';
+import { clonePlain } from './clone';
 import type {
 	CharacterAttributes,
 	CharacterState,
@@ -231,16 +232,16 @@ export function applyStateDelta(state: CharacterState, patch: StatePatch): Chara
 
 	const merged: CharacterState = { ...state };
 	if (patch.outfit !== undefined) {
-		merged.outfit = { ...state.outfit, ...structuredClone(patch.outfit) };
+		merged.outfit = { ...state.outfit, ...clonePlain(patch.outfit) };
 	}
 	if (patch.location !== undefined) {
-		merged.location = { ...state.location, ...structuredClone(patch.location) };
+		merged.location = { ...state.location, ...clonePlain(patch.location) };
 	}
 	if (patch.places !== undefined) {
-		merged.places = structuredClone(patch.places);
+		merged.places = clonePlain(patch.places);
 	}
 	if (patch.schedule !== undefined) {
-		merged.schedule = { ...state.schedule, ...structuredClone(patch.schedule) };
+		merged.schedule = { ...state.schedule, ...clonePlain(patch.schedule) };
 	}
 	if (patch.attributes !== undefined) {
 		merged.attributes = mergeAttributes(state.attributes, patch.attributes);

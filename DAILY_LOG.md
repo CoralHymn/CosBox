@@ -245,3 +245,33 @@ UI 增加「地点」与「衣柜」：地点用于让 AI 知道有哪些地点�
 
 - 单元测试：全量 287 个；覆盖率 100% 语句/行/函数（分支 94.6%）；12 条 e2e 全过；
   build/check/lint 全绿。
+
+## 2026-08-05（续）：修复日程编辑 structuredClone 崩溃
+
+### 缺陷
+
+修改日程条目星期或新增条目时报错：`Failed to execute 'structuredClone' on 'Window':
+#<Object> could not be cloned.` 状态更新静默失败（无快照生成）。
+
+### 根因
+
+Svelte 5 的 `$state` 会对 store 数据做响应式代理。日程面板把 `schedule.entries` 中的
+代理对象原样放进 `StatePatch`（展开数组时未改动的条目仍是代理），到达
+`CharacterManager.doUpdate → applyStateDelta` 的 `structuredClone(patch.schedule)` 时，
+`structuredClone` 无法克隆 Svelte 代理（DataCloneError）。地点库/衣柜面板传数组时
+存在同样的隐患。
+
+### 修复
+
+- 新增 `core/clone.ts` 的 `clonePlain`：优先 `structuredClone`，捕获 DataCloneError 后
+  退回 JSON 序列化深拷贝（角色状态数据模型保证 JSON 安全）。
+- `applyStateDelta`（outfit/location/places/schedule/attributes 的补丁克隆）、
+  `CharacterManager.doUpdate`（delta 补丁克隆）、`rebuildFromNodes`（初始状态克隆）
+  全部改用 `clonePlain`，从核心层一劳永逸地兼容响应式代理补丁。
+- 回归测试：`clonePlain` 普通路径与回退路径单测；`CharacterManager.update` 接受含
+  不可克隆属性的补丁；e2e 覆盖「修改条目星期 + 新增条目」且快照数正确增长。
+
+### 门禁
+
+- 单元测试：全量 289 个；覆盖率 100% 语句/行/函数（分支 94.6%）；13 条 e2e 全过；
+  build/check/lint 全绿。

@@ -1,4 +1,5 @@
 import { SnapshotError, StateValidationError } from '../core/errors';
+import { clonePlain } from '../core/clone';
 import { applyStateDelta, addMinutes, createInitialState } from '../core/state';
 import { collectBranchPath, getBranchTips, getChildrenMap, sortNodes } from '../core/snapshot';
 import type {
@@ -179,7 +180,7 @@ export class CharacterManager {
 		const node = await this.deps.snapshots.addSnapshot({
 			parentId: this.headId,
 			metadata: { type: 'state', desc: metadata.desc },
-			delta: { kind: 'state', patch: structuredClone(patch) },
+			delta: { kind: 'state', patch: clonePlain(patch) },
 			timestamp: this.now()
 		});
 		this.headId = node.id;
