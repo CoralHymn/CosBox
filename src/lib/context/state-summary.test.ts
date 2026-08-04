@@ -7,7 +7,8 @@ import {
 	formatWardrobe,
 	findWardrobeItem,
 	summarizeSchedule,
-	summarizeState
+	summarizeState,
+	wardrobeItemsForSlot
 } from './state-summary';
 
 describe('formatOutfit', () => {
@@ -114,6 +115,30 @@ describe('findWardrobeItem', () => {
 
 	it('未命中返回 undefined', () => {
 		expect(findWardrobeItem([], '不存在')).toBeUndefined();
+	});
+});
+
+describe('wardrobeItemsForSlot', () => {
+	it('只返回匹配槽位类型或 any/未标注的条目', () => {
+		const wardrobe = [
+			{ id: 'a', category: '常服', kind: 'top' as const, name: '衬衫', description: '' },
+			{ id: 'b', category: '常服', kind: 'underpants' as const, name: '内裤', description: '' },
+			{ id: 'c', category: '常服', name: '披肩', description: '' },
+			{ id: 'd', category: '常服', kind: 'any' as const, name: '万能披风', description: '' }
+		];
+		expect(wardrobeItemsForSlot(wardrobe, 'top').map((item) => item.name)).toEqual([
+			'衬衫',
+			'披肩',
+			'万能披风'
+		]);
+	});
+
+	it('不匹配的类型被排除（内裤不会出现在上衣槽）', () => {
+		const wardrobe = [
+			{ id: 'a', category: '常服', kind: 'top' as const, name: '衬衫', description: '' },
+			{ id: 'b', category: '常服', kind: 'underpants' as const, name: '内裤', description: '' }
+		];
+		expect(wardrobeItemsForSlot(wardrobe, 'top').map((item) => item.name)).toEqual(['衬衫']);
 	});
 });
 

@@ -375,6 +375,24 @@ describe('validateCharacterState', () => {
 				...base,
 				outfit: {
 					...base.outfit,
+					wardrobe: [{ id: 'w', category: '', kind: 'hat' as never, name: 'x', description: '' }]
+				}
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: {
+					...base.outfit,
+					wardrobe: [{ id: 'w', category: '', kind: 42 as never, name: 'x', description: '' }]
+				}
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: {
+					...base.outfit,
 					wardrobe: [
 						{ id: 'w', category: '', name: 'x', description: '' },
 						{ id: 'w', category: '', name: 'y', description: '' }
@@ -382,6 +400,19 @@ describe('validateCharacterState', () => {
 				}
 			})
 		).toThrow(StateValidationError);
+	});
+
+	it('衣柜条目 kind 缺失视为任意类型（兼容老数据）', () => {
+		const base = createInitialState();
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: {
+					...base.outfit,
+					wardrobe: [{ id: 'w', category: '', name: '披肩', description: '' }]
+				}
+			})
+		).not.toThrow();
 	});
 });
 

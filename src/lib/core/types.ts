@@ -71,9 +71,27 @@ export interface ClothingItem {
 	/** 大类，如「常服」「工作服」；空串表示未分类。 */
 	category: string;
 	name: string;
+	/** 衣物类型（适用槽位）；缺省视为 any（任意槽位可选）。 */
+	kind?: ClothingKind;
 	/** 穿上后的描述（面料、版型、细节），供 LLM 精确还原穿着。 */
 	description: string;
 }
+
+/** 衣物类型：与穿着槽位一一对应；any = 任意槽位可选（兼容未标注的老数据）。 */
+export type ClothingKind =
+	| 'headwear'
+	| 'top'
+	| 'underwear'
+	| 'underpants'
+	| 'bottom'
+	| 'socks'
+	| 'shoes'
+	| 'accessory'
+	| 'any';
+
+/** 命名穿着槽位（OutfitState 中与衣柜条目类型对应的键）。 */
+export type OutfitSlot =
+	'headwear' | 'top' | 'underwear' | 'underpants' | 'bottom' | 'socks' | 'shoes';
 
 /** 地点定义：AI 认知中的已知地点。 */
 export interface LocationDef {

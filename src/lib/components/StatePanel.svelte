@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { AttributeValue, CharacterState, StatePatch } from '../core/types';
+	import type { AttributeValue, CharacterState, OutfitSlot, StatePatch } from '../core/types';
+	import OutfitSlotPicker from './OutfitSlotPicker.svelte';
 
 	interface AttributeRow {
 		key: string;
@@ -13,24 +14,20 @@
 
 	let { characterState, onUpdate }: Props = $props();
 
-	let headwear = $state('');
-	let top = $state('');
-	let underwear = $state('');
-	let underpants = $state('');
-	let bottom = $state('');
-	let socks = $state('');
-	let shoes = $state('');
+	const slots: { key: OutfitSlot; label: string }[] = [
+		{ key: 'headwear', label: '帽子' },
+		{ key: 'top', label: '上衣' },
+		{ key: 'underwear', label: '内衣' },
+		{ key: 'underpants', label: '内裤' },
+		{ key: 'bottom', label: '下装' },
+		{ key: 'socks', label: '袜子' },
+		{ key: 'shoes', label: '鞋' }
+	];
+
 	let accessories = $state('');
 	let attrs = $state<AttributeRow[]>([]);
 
 	$effect(() => {
-		headwear = characterState.outfit.headwear ?? '';
-		top = characterState.outfit.top ?? '';
-		underwear = characterState.outfit.underwear ?? '';
-		underpants = characterState.outfit.underpants ?? '';
-		bottom = characterState.outfit.bottom ?? '';
-		socks = characterState.outfit.socks ?? '';
-		shoes = characterState.outfit.shoes ?? '';
 		accessories = characterState.outfit.accessories.join('，');
 		attrs = Object.entries(characterState.attributes).map(([key, value]) => ({
 			key,
@@ -38,17 +35,16 @@
 		}));
 	});
 
-	function commitOutfit(): void {
+	function commitSlot(slot: OutfitSlot, value: string | null): void {
+		const patch: Partial<typeof characterState.outfit> = {};
+		patch[slot] = value;
+		onUpdate({ outfit: patch }, '更新穿着');
+	}
+
+	function commitAccessories(): void {
 		onUpdate(
 			{
 				outfit: {
-					headwear: headwear.trim() === '' ? null : headwear.trim(),
-					top: top.trim() === '' ? null : top.trim(),
-					underwear: underwear.trim() === '' ? null : underwear.trim(),
-					underpants: underpants.trim() === '' ? null : underpants.trim(),
-					bottom: bottom.trim() === '' ? null : bottom.trim(),
-					socks: socks.trim() === '' ? null : socks.trim(),
-					shoes: shoes.trim() === '' ? null : shoes.trim(),
 					accessories: accessories
 						.split(/[,，]/)
 						.map((part) => part.trim())
@@ -110,90 +106,25 @@
 	<div class="card">
 		<h3 class="card-title">穿着</h3>
 		<div class="grid-2">
-			<div class="field">
-				<label for="outfit-headwear">帽子</label>
-				<input
-					id="outfit-headwear"
-					class="input"
-					bind:value={headwear}
-					list="outfit-wardrobe-list"
-					onchange={commitOutfit}
+			{#each slots as slot (slot.key)}
+				<OutfitSlotPicker
+					idPrefix="outfit"
+					label={slot.label}
+					slot={slot.key}
+					value={characterState.outfit[slot.key] ?? ''}
+					wardrobe={characterState.outfit.wardrobe}
+					onCommit={(value) => commitSlot(slot.key, value)}
 				/>
-			</div>
-			<div class="field">
-				<label for="outfit-top">上衣</label>
-				<input
-					id="outfit-top"
-					class="input"
-					bind:value={top}
-					list="outfit-wardrobe-list"
-					onchange={commitOutfit}
-				/>
-			</div>
-			<div class="field">
-				<label for="outfit-underwear">内衣</label>
-				<input
-					id="outfit-underwear"
-					class="input"
-					bind:value={underwear}
-					list="outfit-wardrobe-list"
-					onchange={commitOutfit}
-				/>
-			</div>
-			<div class="field">
-				<label for="outfit-underpants">内裤</label>
-				<input
-					id="outfit-underpants"
-					class="input"
-					bind:value={underpants}
-					list="outfit-wardrobe-list"
-					onchange={commitOutfit}
-				/>
-			</div>
-			<div class="field">
-				<label for="outfit-bottom">下装</label>
-				<input
-					id="outfit-bottom"
-					class="input"
-					bind:value={bottom}
-					list="outfit-wardrobe-list"
-					onchange={commitOutfit}
-				/>
-			</div>
-			<div class="field">
-				<label for="outfit-socks">袜子</label>
-				<input
-					id="outfit-socks"
-					class="input"
-					bind:value={socks}
-					list="outfit-wardrobe-list"
-					onchange={commitOutfit}
-				/>
-			</div>
-			<div class="field">
-				<label for="outfit-shoes">鞋</label>
-				<input
-					id="outfit-shoes"
-					class="input"
-					bind:value={shoes}
-					list="outfit-wardrobe-list"
-					onchange={commitOutfit}
-				/>
-			</div>
-		</div>
-		<datalist id="outfit-wardrobe-list">
-			{#each characterState.outfit.wardrobe as item (item.id)}
-				<option value={item.name}></option>
 			{/each}
-		</datalist>
-		<div class="field">
-			<label for="outfit-accessories">配饰（用逗号分隔）</label>
-			<input
-				id="outfit-accessories"
-				class="input"
-				bind:value={accessories}
-				onchange={commitOutfit}
-			/>
+			<div class="field">
+				<label for="outfit-accessories">配饰（逗号分隔）</label>
+				<input
+					id="outfit-accessories"
+					class="input"
+					bind:value={accessories}
+					onchange={commitAccessories}
+				/>
+			</div>
 		</div>
 	</div>
 

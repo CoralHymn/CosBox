@@ -38,8 +38,9 @@ test('发送消息：演示模式回复并追加快照', async ({ page }) => {
 test('状态编辑生成快照并在预览中反映', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /状态/ }).click();
-	await page.locator('#outfit-top').fill('红色风衣');
-	await page.locator('#outfit-top').blur();
+	await page.locator('#outfit-top').selectOption('custom');
+	await page.locator('#outfit-top-custom').fill('红色风衣');
+	await page.getByRole('button', { name: '确定' }).click();
 
 	await page.getByRole('button', { name: /对话/ }).click();
 	await expect(page.getByText('红色风衣')).toBeVisible();
@@ -54,8 +55,7 @@ test('版本页切换回退状态与对话', async ({ page }) => {
 	await expect(page.getByText(/演示模式回应/)).toBeVisible();
 
 	await page.getByRole('button', { name: /状态/ }).click();
-	await page.locator('#outfit-top').fill('运动外套');
-	await page.locator('#outfit-top').blur();
+	await page.locator('#outfit-top').selectOption('黑色卫衣');
 
 	await page.getByRole('button', { name: /版本/ }).click();
 	await expect(page.getByText('更新穿着').first()).toBeVisible();
@@ -121,11 +121,16 @@ test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 	await page.locator('#new-item-name').fill('白色连衣裙');
 	await page.locator('#new-item-desc').fill('白色碎花连衣裙，及膝，裙摆很轻');
 	await page.getByRole('button', { name: '添加衣物' }).click();
-	await expect(page.locator('input[placeholder="衣物名"]').last()).toHaveValue('白色连衣裙');
-	await expect(page.locator('input[placeholder="分类"]').last()).toHaveValue('常服');
-	await expect(page.locator('#wardrobe-names option[value="白色连衣裙"]')).toHaveCount(1);
-	await page.locator('#wardrobe-top').fill('白色连衣裙');
-	await page.locator('#wardrobe-top').blur();
+	await expect(page.locator('#wardrobe-top option[value="白色连衣裙"]')).toHaveCount(1);
+	await expect(page.locator('#wardrobe-top option[value="白色棉质内裤"]')).toHaveCount(0);
+	const changfuGroup = page
+		.locator('div.group')
+		.filter({ has: page.locator('.group-name', { hasText: '常服' }) });
+	await expect(changfuGroup.locator('input[placeholder="衣物名"]').last()).toHaveValue(
+		'白色连衣裙'
+	);
+	await expect(changfuGroup.locator('input[placeholder="分类"]').last()).toHaveValue('常服');
+	await page.locator('#wardrobe-top').selectOption('白色连衣裙');
 	await expect(page.getByText('白色连衣裙：白色碎花连衣裙，及膝，裙摆很轻')).toBeVisible();
 
 	// 对话 tab 的实时预览反映新地点与衣柜

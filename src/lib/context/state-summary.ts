@@ -2,6 +2,7 @@ import { describeCurrentActivity, formatMinutesOfDay, formatWorldTime } from '..
 import type {
 	CharacterState,
 	ClothingItem,
+	ClothingKind,
 	LocationDef,
 	OutfitState,
 	ScheduleState
@@ -62,6 +63,13 @@ export function formatWardrobe(wardrobe: ClothingItem[]): string {
 /** 按衣物名查找衣柜条目（当前穿着槽位与衣柜同名匹配）。 */
 export function findWardrobeItem(wardrobe: ClothingItem[], name: string): ClothingItem | undefined {
 	return wardrobe.find((item) => item.name === name);
+}
+
+/** 按槽位类型过滤衣柜候选：kind 匹配该槽位、或 any / 未标注（兼容老数据）。 */
+export function wardrobeItemsForSlot(wardrobe: ClothingItem[], slot: ClothingKind): ClothingItem[] {
+	return wardrobe.filter(
+		(item) => item.kind === slot || item.kind === undefined || item.kind === 'any'
+	);
 }
 
 /**
