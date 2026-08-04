@@ -205,6 +205,9 @@ test('设置页选择主流服务商预设自动填充地址与模型', async ({
 	await expect(page.locator('#llm-base-url')).toHaveValue('http://localhost:11434/v1');
 	await expect(page.locator('#llm-model')).toHaveValue('qwen3:8b');
 
+	// 上下文压缩默认开启，可关闭并随配置保存
+	await expect(page.locator('#auto-compact-enabled')).toBeChecked();
+	await page.locator('#auto-compact-enabled').uncheck();
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
 });
@@ -237,12 +240,16 @@ test('设置：角色档案默认显示、保存不回清、回到默认、开�
 	await page.getByRole('button', { name: /对话/ }).click();
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	const debugBlock = page.locator('.debug-prompt');
-	await debugBlock.getByText(/最近一次发送给 AI 的完整提示词/).click();
-	await expect(page.getByText('【当前状态】').first()).toBeVisible();
-	// 提示词区域可滚动查看完整内容
-	await expect(debugBlock).toHaveCSS('overflow-y', 'auto');
-	await expect(debugBlock.locator('pre').first()).toHaveCSS('white-space', 'pre-wrap');
+	// 开发者模式：打开大尺寸弹窗查看完整提示词，可滚动、可关闭
+	await page.getByRole('button', { name: '开发者：查看最近一次完整提示词' }).click();
+	const promptModal = page.locator('.prompt-modal');
+	await expect(promptModal).toBeVisible();
+	await expect(promptModal.getByText('【当前状态】').first()).toBeVisible();
+	await expect(promptModal.locator('.prompt-modal-body')).toHaveCSS('overflow-y', 'auto');
+	await expect(promptModal.locator('pre').first()).toHaveCSS('white-space', 'pre-wrap');
+	await expect(page.getByRole('button', { name: '复制全部' })).toBeVisible();
+	await promptModal.getByRole('button', { name: '关闭' }).click();
+	await expect(promptModal).not.toBeVisible();
 });
 
 test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {
@@ -319,7 +326,7 @@ test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 	await expect(page.getByText('白色连衣裙').first()).toBeVisible();
 });
 
-test('对话后侧栏显示上下文用量、费用估算与历史压缩开关', async ({ page }) => {
+test('对话后侧栏显示上下文用量、费用估算与压缩状态', async ({ page }) => {
 	await page.goto('/');
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
@@ -331,9 +338,10 @@ test('对话后侧栏显示上下文用量、费用估算与历史压缩开关',
 	const costRow = page.locator('.ctx-row').filter({ hasText: '费用（USD）' });
 	await expect(costRow).toContainText('—');
 
-	// 历史压缩开关可调，且聊天记录不受影响
-	await page.locator('#ctx-history-max').selectOption('10');
-	await expect(page.locator('#ctx-history-max')).toHaveValue('10');
+	// 默认未压缩（对话很短），侧栏显示完整发送；手动压缩给出提示且不动聊天记录
+	await expect(page.getByText(/完整发送全部历史/).first()).toBeVisible();
+	await page.getByRole('button', { name: '立即压缩' }).click();
+	await expect(page.getByText('对话较短，暂无需压缩')).toBeVisible();
 	await expect(page.locator('.message.user')).toHaveCount(1);
 	await expect(page.locator('.message.assistant')).toHaveCount(1);
 });

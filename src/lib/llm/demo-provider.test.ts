@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	DemoLlmClient,
+	buildDemoSummary,
 	buildDemoReply,
 	buildDemoToolResult,
 	extractLine,
@@ -217,5 +218,37 @@ describe('DemoLlmClient', () => {
 		const result = await buildDemoToolResult(messages('随便聊聊'), tools);
 		expect(result.toolCalls).toEqual([]);
 		expect(result.content).toContain('演示模式回应');
+	});
+});
+
+describe('buildDemoSummary / summarize', () => {
+	it('统计条数并引用最近用户消息', () => {
+		const request: ChatMessage[] = [
+			{ role: 'system', content: '摘要提示' },
+			{
+				role: 'user',
+				content: '[user] 你好\n[assistant] 你好呀\n[user] 我们去食堂吧'
+			}
+		];
+		const summary = buildDemoSummary(request);
+		expect(summary).toContain('已将早前 3 条消息总结');
+		expect(summary).toContain('我们去食堂吧');
+	});
+
+	it('无用户行时返回占位', () => {
+		expect(buildDemoSummary([{ role: 'user', content: '[assistant] 只有回复' }])).toContain(
+			'继续角色扮演即可'
+		);
+	});
+
+	it('DemoLlmClient.summarize 返回摘要与用量', async () => {
+		const client = new DemoLlmClient();
+		const result = await client.summarize(
+			[{ role: 'user', content: '[user] hi' }],
+			DEFAULT_LLM_CONFIG
+		);
+		expect(result.summary).toContain('演示摘要');
+		expect(result.usage).toBeDefined();
+		expect(result.usage!.promptTokens).toBeGreaterThan(0);
 	});
 });

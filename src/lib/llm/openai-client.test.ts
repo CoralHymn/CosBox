@@ -411,4 +411,19 @@ describe('OpenAiCompatibleClient', () => {
 		const invalid = await client.chat([], config);
 		expect(invalid.usage).toBeUndefined();
 	});
+
+	it('summarize 把摘要请求当对话发送并取最终文本', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: '生成的延续摘要' } }],
+				usage: { prompt_tokens: 30, completion_tokens: 8 }
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.summarize([{ role: 'user', content: '[user] 早期消息' }], config);
+		expect(result.summary).toBe('生成的延续摘要');
+		expect(result.usage).toEqual({ promptTokens: 30, completionTokens: 8, cachedTokens: 0 });
+	});
 });

@@ -38,6 +38,8 @@
 	let temperature = $state(0.8);
 	let maxTokens = $state(1024);
 	let modelContextWindow = $state<number | undefined>(undefined);
+	let autoCompact = $state(true);
+	let compactThreshold = $state(0.8);
 	let allowAiStateTools = $state(false);
 	let devMode = $state(false);
 	let profileName = $state('');
@@ -74,6 +76,8 @@
 		temperature = config.temperature;
 		maxTokens = config.maxTokens;
 		modelContextWindow = config.modelContextWindow;
+		autoCompact = config.autoCompact !== false;
+		compactThreshold = config.compactThreshold ?? 0.8;
 		allowAiStateTools = config.allowAiStateTools === true;
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
@@ -113,6 +117,8 @@
 			temperature: Math.min(2, Math.max(0, temperature)),
 			maxTokens: Math.max(1, Math.floor(maxTokens)),
 			modelContextWindow,
+			autoCompact,
+			compactThreshold,
 			allowAiStateTools,
 			webSearch: {
 				enabled: searchEnabled,
@@ -362,6 +368,37 @@
 		<p class="muted" style="margin: 0;">
 			开启后，AI
 			可在剧情中自行调用工具更新状态并生成快照，你可以在版本页回溯；关闭则保持纯文本回复。
+		</p>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">上下文压缩</h3>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input
+				id="auto-compact-enabled"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={autoCompact}
+			/>
+			<label for="auto-compact-enabled" class="muted">自动压缩（接近上限时总结早期对话）</label>
+		</div>
+		<div class="field">
+			<label for="compact-threshold">触发阈值：{Math.round(compactThreshold * 100)}%</label>
+			<input
+				id="compact-threshold"
+				type="range"
+				min="0.5"
+				max="0.95"
+				step="0.05"
+				bind:value={compactThreshold}
+				disabled={!autoCompact}
+				style="width: 100%;"
+			/>
+		</div>
+		<p class="muted" style="margin: 0;">
+			与 opencode / Chatbox 一致：当估算用量（含输出预算）达到阈值时，由模型把早期对话总结成
+			延续摘要（保留角色关系、关键事件等细节），最近 20 条消息原样保留；
+			聊天记录与快照不受影响，可随时在对话页侧栏「立即压缩」。
 		</p>
 	</div>
 

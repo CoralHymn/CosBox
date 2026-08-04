@@ -241,6 +241,8 @@ export interface LlmConfigPatch {
 	temperature?: number;
 	maxTokens?: number;
 	modelContextWindow?: number;
+	autoCompact?: boolean;
+	compactThreshold?: number;
 	allowAiStateTools?: boolean;
 	webSearch?: Partial<WebSearchConfig>;
 }
@@ -267,6 +269,8 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		temperature: partial.temperature ?? defaults.temperature,
 		maxTokens: partial.maxTokens ?? defaults.maxTokens,
 		modelContextWindow: partial.modelContextWindow ?? defaults.modelContextWindow,
+		autoCompact: partial.autoCompact ?? defaults.autoCompact ?? true,
+		compactThreshold: partial.compactThreshold ?? defaults.compactThreshold ?? 0.8,
 		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
 		webSearch: search
 	};
