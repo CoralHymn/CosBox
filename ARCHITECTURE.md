@@ -2,10 +2,12 @@
 
 ## 设计原则
 
-1. **状态驱动叙事**：`CharacterState`（outfit / location / schedule / attributes）是应用的第一公民数据。
+1. **状态驱动叙事**：`CharacterState`（outfit / location / places / schedule / attributes）是应用的第一公民数据。
 2. **单一变更入口**：一切状态修改必须经过 `CharacterManager.update()`，先校验、再落快照、后生效。
-3. **无副作用 checkout**：切换分支只做纯重建（读 IndexedDB + 应用 delta），绝不写快照表。
-4. **浏览器内自带版本控制**：以「增量快照链」实现类 Git 语义，不依赖外部 Git 运行时。
+3. **串行化变更**：所有变更（update / addMessage / checkout / advanceTime / addCheckpoint）经内部队列串行落地，
+   避免并发写导致的分支错乱与状态覆盖。
+4. **无副作用 checkout**：切换分支只做纯重建（读 IndexedDB + 应用 delta），绝不写快照表。
+5. **浏览器内自带版本控制**：以「增量快照链」实现类 Git 语义，不依赖外部 Git 运行时。
 
 ## 数据流
 
@@ -43,6 +45,13 @@ flowchart LR
 - **checkout**：`rebuildState(targetId)` 的纯读别名，不产生任何写入。
 
 存储：IndexedDB `snapshots` 表，索引 `id, [parentId+timestamp], parentId, timestamp`。
+
+## 状态模型
+
+- `outfit`：当前穿着（top / bottom / shoes / accessories）+ `wardrobe` 衣柜（衣物预设与穿后描述）。
+- `location`：当前所在地；`places`：地点库（AI 认知中的全部地点，与日程相互独立）。
+- `schedule`：时间与周期性日程；`attributes`：自由键值属性。
+- LLM 上下文中的状态摘要包含【已知地点】与【衣柜】清单，AI 换装/移动时从清单中选择，而非自行脑补。
 
 ## 模块边界
 

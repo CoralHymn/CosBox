@@ -17,9 +17,6 @@
 	let bottom = $state('');
 	let shoes = $state('');
 	let accessories = $state('');
-	let locationId = $state('');
-	let locationName = $state('');
-	let locationDesc = $state('');
 	let attrs = $state<AttributeRow[]>([]);
 
 	$effect(() => {
@@ -27,9 +24,6 @@
 		bottom = characterState.outfit.bottom ?? '';
 		shoes = characterState.outfit.shoes ?? '';
 		accessories = characterState.outfit.accessories.join('，');
-		locationId = characterState.location.id;
-		locationName = characterState.location.name;
-		locationDesc = characterState.location.description;
 		attrs = Object.entries(characterState.attributes).map(([key, value]) => ({
 			key,
 			value: String(value)
@@ -50,19 +44,6 @@
 				}
 			},
 			'更新穿着'
-		);
-	}
-
-	function commitLocation(): void {
-		onUpdate(
-			{
-				location: {
-					id: locationId.trim() === '' ? 'unknown' : locationId.trim(),
-					name: locationName.trim() === '' ? '未命名地点' : locationName.trim(),
-					description: locationDesc.trim()
-				}
-			},
-			'更新地点'
 		);
 	}
 
@@ -110,24 +91,49 @@
 
 <div class="panel">
 	<h2 class="panel-title">角色状态编辑器</h2>
-	<p class="panel-sub">所有变更都会自动生成快照，可通过「版本」页随时回退。</p>
+	<p class="panel-sub">
+		穿着与属性的快速编辑；地点库与衣柜请在对应标签页维护。所有变更都会自动生成快照。
+	</p>
 
 	<div class="card">
 		<h3 class="card-title">穿着</h3>
 		<div class="grid-2">
 			<div class="field">
 				<label for="outfit-top">上衣</label>
-				<input id="outfit-top" class="input" bind:value={top} onchange={commitOutfit} />
+				<input
+					id="outfit-top"
+					class="input"
+					bind:value={top}
+					list="outfit-wardrobe-list"
+					onchange={commitOutfit}
+				/>
 			</div>
 			<div class="field">
 				<label for="outfit-bottom">下装</label>
-				<input id="outfit-bottom" class="input" bind:value={bottom} onchange={commitOutfit} />
+				<input
+					id="outfit-bottom"
+					class="input"
+					bind:value={bottom}
+					list="outfit-wardrobe-list"
+					onchange={commitOutfit}
+				/>
 			</div>
 		</div>
 		<div class="field">
 			<label for="outfit-shoes">鞋</label>
-			<input id="outfit-shoes" class="input" bind:value={shoes} onchange={commitOutfit} />
+			<input
+				id="outfit-shoes"
+				class="input"
+				bind:value={shoes}
+				list="outfit-wardrobe-list"
+				onchange={commitOutfit}
+			/>
 		</div>
+		<datalist id="outfit-wardrobe-list">
+			{#each characterState.outfit.wardrobe as item (item.id)}
+				<option value={item.name}></option>
+			{/each}
+		</datalist>
 		<div class="field">
 			<label for="outfit-accessories">配饰（用逗号分隔）</label>
 			<input
@@ -136,24 +142,6 @@
 				bind:value={accessories}
 				onchange={commitOutfit}
 			/>
-		</div>
-	</div>
-
-	<div class="card">
-		<h3 class="card-title">地点</h3>
-		<div class="field">
-			<label for="loc-name">地点名称</label>
-			<input id="loc-name" class="input" bind:value={locationName} onchange={commitLocation} />
-		</div>
-		<div class="grid-2">
-			<div class="field">
-				<label for="loc-id">地点 id</label>
-				<input id="loc-id" class="input" bind:value={locationId} onchange={commitLocation} />
-			</div>
-			<div class="field">
-				<label for="loc-desc">描述</label>
-				<input id="loc-desc" class="input" bind:value={locationDesc} onchange={commitLocation} />
-			</div>
 		</div>
 	</div>
 

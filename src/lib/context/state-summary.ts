@@ -1,5 +1,11 @@
 import { describeCurrentActivity, formatMinutesOfDay, formatWorldTime } from '../core/state';
-import type { CharacterState, OutfitState, ScheduleState } from '../core/types';
+import type {
+	CharacterState,
+	ClothingItem,
+	LocationDef,
+	OutfitState,
+	ScheduleState
+} from '../core/types';
 
 /**
  * 把穿着结构渲染成自然语言，如「白色衬衫、深蓝百褶裙、黑色皮鞋、蝴蝶结发带」。
@@ -17,6 +23,27 @@ export function formatOutfit(outfit: OutfitState): string {
 export function formatAttributes(attributes: Record<string, number | string | boolean>): string {
 	const parts = Object.entries(attributes).map(([key, value]) => `${key}:${String(value)}`);
 	return parts.length > 0 ? parts.join('，') : '（无属性）';
+}
+
+/** 渲染已知地点库，如「学院正门（樱花道尽头的校门…）；教室 2-B（二楼尽头…）」。 */
+export function formatPlaces(places: LocationDef[]): string {
+	if (places.length === 0) {
+		return '（暂无已知地点）';
+	}
+	return places.map((place) => `${place.name}（${place.description}）`).join('；');
+}
+
+/** 渲染衣柜，如「白色衬衫：白色棉质衬衫，领口带细蕾丝；黑色卫衣：宽松…」。 */
+export function formatWardrobe(wardrobe: ClothingItem[]): string {
+	if (wardrobe.length === 0) {
+		return '（衣柜为空）';
+	}
+	return wardrobe.map((item) => `${item.name}：${item.description}`).join('；');
+}
+
+/** 按衣物名查找衣柜条目（当前穿着槽位与衣柜同名匹配）。 */
+export function findWardrobeItem(wardrobe: ClothingItem[], name: string): ClothingItem | undefined {
+	return wardrobe.find((item) => item.name === name);
 }
 
 /**
@@ -48,7 +75,9 @@ export function summarizeState(state: CharacterState): string {
 		`地点：${state.location.name}（${state.location.description}）`,
 		`穿着：${formatOutfit(state.outfit)}`,
 		`属性：${formatAttributes(state.attributes)}`,
-		`今日日程：${summarizeSchedule(state.schedule)}`
+		`今日日程：${summarizeSchedule(state.schedule)}`,
+		`【已知地点】${formatPlaces(state.places)}`,
+		`【衣柜】${formatWardrobe(state.outfit.wardrobe)}`
 	];
 	return lines.join('\n');
 }

@@ -2,7 +2,16 @@ import { toUserMessage } from '../core/errors';
 import { newId } from '../utils/id';
 
 /** 全局标签页类型。 */
-export type TabId = 'chat' | 'state' | 'schedule' | 'versions' | 'world' | 'transfer' | 'settings';
+export type TabId =
+	| 'chat'
+	| 'state'
+	| 'locations'
+	| 'wardrobe'
+	| 'schedule'
+	| 'versions'
+	| 'world'
+	| 'transfer'
+	| 'settings';
 
 /** 轻提示消息。 */
 export interface Toast {

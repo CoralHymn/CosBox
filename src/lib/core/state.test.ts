@@ -34,6 +34,14 @@ describe('createInitialState', () => {
 		expect(a).not.toBe(b);
 		expect(a.outfit).not.toBe(b.outfit);
 	});
+
+	it('初始状态包含非空地点库与衣柜', () => {
+		const state = createInitialState();
+		expect(state.places.length).toBeGreaterThan(0);
+		expect(state.outfit.wardrobe.length).toBeGreaterThan(0);
+		expect(state.places.some((place) => place.id === state.location.id)).toBe(true);
+		expect(state.outfit.wardrobe.some((item) => item.name === state.outfit.top)).toBe(true);
+	});
 });
 
 describe('createInitialScheduleEntries', () => {
@@ -81,6 +89,23 @@ describe('applyStateDelta', () => {
 		expect(next.attributes.affection).toBe(55);
 		expect(next.attributes.mood).toBe('开心');
 		expect(next.attributes.trust).toBe(20);
+	});
+
+	it('整体替换地点库', () => {
+		const state = createInitialState();
+		const places = [{ id: 'p1', name: '便利店', description: '街角小店' }];
+		const next = applyStateDelta(state, { places });
+		expect(next.places).toEqual(places);
+		expect(next.places).not.toBe(places);
+		expect(next.location.name).toBe(state.location.name);
+	});
+
+	it('整体替换衣柜', () => {
+		const state = createInitialState();
+		const wardrobe = [{ id: 'w1', name: '连衣裙', description: '白色碎花连衣裙' }];
+		const next = applyStateDelta(state, { outfit: { wardrobe } });
+		expect(next.outfit.wardrobe).toEqual(wardrobe);
+		expect(next.outfit.wardrobe).not.toBe(wardrobe);
 	});
 
 	it('空补丁返回等价新对象且不抛错', () => {
@@ -234,6 +259,80 @@ describe('validateCharacterState', () => {
 		);
 		expect(() =>
 			validateCharacterState({ ...base, attributes: { love: [1, 2] } as never })
+		).toThrow(StateValidationError);
+	});
+
+	it('拒绝非法地点库', () => {
+		const base = createInitialState();
+		expect(() => validateCharacterState({ ...base, places: 'x' as never })).toThrow(
+			StateValidationError
+		);
+		expect(() => validateCharacterState({ ...base, places: [null as never] })).toThrow(
+			StateValidationError
+		);
+		expect(() =>
+			validateCharacterState({ ...base, places: [{ id: '', name: 'x', description: '' }] })
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({ ...base, places: [{ id: 1 as never, name: 'x', description: '' }] })
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({ ...base, places: [{ id: 'p', name: '  ', description: '' }] })
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({ ...base, places: [{ id: 'p', name: 'x', description: 1 as never }] })
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				places: [
+					{ id: 'p', name: 'x', description: '' },
+					{ id: 'p', name: 'y', description: '' }
+				]
+			})
+		).toThrow(StateValidationError);
+	});
+
+	it('拒绝非法衣柜', () => {
+		const base = createInitialState();
+		expect(() =>
+			validateCharacterState({ ...base, outfit: { ...base.outfit, wardrobe: 'x' as never } })
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: { ...base.outfit, wardrobe: [null as never] }
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: { ...base.outfit, wardrobe: [{ id: '', name: 'x', description: '' }] }
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: { ...base.outfit, wardrobe: [{ id: 'w', name: '', description: '' }] }
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: { ...base.outfit, wardrobe: [{ id: 'w', name: 'x', description: 1 as never }] }
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: {
+					...base.outfit,
+					wardrobe: [
+						{ id: 'w', name: 'x', description: '' },
+						{ id: 'w', name: 'y', description: '' }
+					]
+				}
+			})
 		).toThrow(StateValidationError);
 	});
 });

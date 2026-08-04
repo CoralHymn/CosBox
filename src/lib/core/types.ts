@@ -44,10 +44,27 @@ export interface OutfitState {
 	shoes: string | null;
 	/** 配饰列表，整体替换语义。 */
 	accessories: string[];
+	/** 衣柜：可选的衣物预设库（含穿后描述），供 AI 换装时挑选。 */
+	wardrobe: ClothingItem[];
 }
 
 /** 地点状态。 */
 export interface LocationState {
+	id: string;
+	name: string;
+	description: string;
+}
+
+/** 衣柜条目：衣物预设 + 穿上后的外观描述。 */
+export interface ClothingItem {
+	id: string;
+	name: string;
+	/** 穿上后的描述（面料、版型、细节），供 LLM 精确还原穿着。 */
+	description: string;
+}
+
+/** 地点定义：AI 认知中的已知地点。 */
+export interface LocationDef {
 	id: string;
 	name: string;
 	description: string;
@@ -62,7 +79,10 @@ export type CharacterAttributes = Record<string, AttributeValue>;
 /** 角色完整状态：穿 / 地 / 程 / 属 四大块。 */
 export interface CharacterState {
 	outfit: OutfitState;
+	/** 当前所在地（地点库 places 中的一项或其快照）。 */
 	location: LocationState;
+	/** 地点库：AI 知道的所有地点，与日程相互独立。 */
+	places: LocationDef[];
 	schedule: ScheduleState;
 	attributes: CharacterAttributes;
 }
@@ -71,6 +91,8 @@ export interface CharacterState {
 export interface StatePatch {
 	outfit?: Partial<OutfitState>;
 	location?: Partial<LocationState>;
+	/** 地点库整体替换。 */
+	places?: LocationDef[];
 	schedule?: Partial<ScheduleState>;
 	attributes?: Partial<CharacterAttributes>;
 }
