@@ -49,6 +49,29 @@ function fetchMock() {
 	return vi.fn<typeof fetch>();
 }
 
+/** 构造 SSE 流式响应（逐块返回，模拟真实流）。 */
+function sseResponse(chunks: string[]): Response {
+	const encoder = new TextEncoder();
+	let index = 0;
+	const body = {
+		getReader: () => ({
+			releaseLock: () => {},
+			read: async () => {
+				if (index >= chunks.length) {
+					return { done: true, value: undefined };
+				}
+				return { done: false, value: encoder.encode(chunks[index++]!) };
+			}
+		})
+	};
+	return {
+		ok: true,
+		status: 200,
+		body: body as unknown as ReadableStream<Uint8Array>,
+		json: async () => ({})
+	} as unknown as Response;
+}
+
 describe('OpenAiCompatibleClient', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -502,5 +525,220 @@ describe('OpenAiCompatibleClient', () => {
 		);
 		const blank = await client.chat([], config);
 		expect(blank.thinking).toBeUndefined();
+	});
+
+	it('流式响应：逐块累积内容、回调 onDelta 并解析 usage', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"role":"assistant","content":"你"}}]}\n\n',
+				'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
+				'data: {"choices":[{"delta":{"content":"呀"}}]}\n\n',
+				'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":2}}}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const deltas: string[] = [];
+		const result = await client.chat([], { ...config, stream: true }, undefined, (delta) =>
+			deltas.push(delta)
+		);
+		expect(deltas).toEqual(['你', '好', '呀']);
+		expect(result.content).toBe('你好呀');
+		expect(result.toolCalls).toEqual([]);
+		expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 3, cachedTokens: 2 });
+		const body = JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string);
+		expect(body.stream).toBe(true);
+		expect(body.stream_options).toEqual({ include_usage: true });
+	});
+
+	it('流式响应：累积流式 tool_calls 增量', async () => {
+		const chunk1 = JSON.stringify({
+			choices: [
+				{
+					delta: {
+						tool_calls: [
+							{
+								index: 0,
+								id: 'c1',
+								type: 'function',
+								function: { name: 'set_outfit', arguments: '{"slot":"top"' }
+							},
+							42,
+							{
+								index: 1,
+								id: 'c2',
+								type: 'function',
+								function: { name: 'goto_location', arguments: '{"name":"食堂"}' }
+							}
+						]
+					}
+				}
+			]
+		});
+		const chunk2 = JSON.stringify({
+			choices: [
+				{
+					delta: {
+						tool_calls: [{ index: 0, function: { arguments: ',"item":"白色衬衫"}' } }]
+					}
+				}
+			]
+		});
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([`data: ${chunk1}\n\n`, `data: ${chunk2}\n\n`, 'data: [DONE]\n\n'])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, { ...config, stream: true });
+		expect(result.toolCalls).toEqual([
+			{ id: 'c1', name: 'set_outfit', arguments: { slot: 'top', item: '白色衬衫' } },
+			{ id: 'c2', name: 'goto_location', arguments: { name: '食堂' } }
+		]);
+		expect(result.content).toBeNull();
+	});
+
+	it('流式响应：累积 reasoning_content 为 thinking', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"reasoning_content":"让我"}}]}\n\n',
+				'data: {"choices":[{"delta":{"reasoning_content":"想想"}}]}\n\n',
+				'data: {"choices":[{"delta":{"content":"回答"}}]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], { ...config, stream: true });
+		expect(result.thinking).toBe('让我想想');
+		expect(result.content).toBe('回答');
+	});
+
+	it('流式模式下端点返回完整 JSON 时降级解析', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue({
+			ok: true,
+			status: 200,
+			body: sseResponse(['{"choices":[{"message":{"content":"完整回复"}}]}']).body,
+			json: async () => ({}),
+			text: async () => ''
+		} as unknown as Response);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], { ...config, stream: true });
+		expect(result.content).toBe('完整回复');
+	});
+
+	it('流式响应流读取失败且为取消时抛友好文案', async () => {
+		const body = {
+			getReader: () => ({
+				releaseLock: () => {},
+				read: async () => Promise.reject(new DOMException('Aborted', 'AbortError'))
+			})
+		};
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(
+				async () =>
+					({
+						ok: true,
+						status: 200,
+						body: body as unknown as ReadableStream<Uint8Array>,
+						json: async () => ({})
+					}) as never
+			)
+		);
+		const client = new OpenAiCompatibleClient();
+		const controller = new AbortController();
+		controller.abort();
+		await expect(client.chat([], { ...config, stream: true }, controller.signal)).rejects.toThrow(
+			'请求已取消'
+		);
+	});
+
+	it('流式响应流读取失败（非取消）抛可读错误', async () => {
+		const body = {
+			getReader: () => ({
+				releaseLock: () => {},
+				read: async () => Promise.reject(new Error('boom'))
+			})
+		};
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(
+				async () =>
+					({
+						ok: true,
+						status: 200,
+						body: body as unknown as ReadableStream<Uint8Array>,
+						json: async () => ({})
+					}) as never
+			)
+		);
+		const client = new OpenAiCompatibleClient();
+		await expect(client.chat([], { ...config, stream: true })).rejects.toThrow(
+			'无法读取流式响应：boom'
+		);
+	});
+
+	it('流式响应流读取失败且异常非 Error 时用通用文案', async () => {
+		const body = {
+			getReader: () => ({
+				releaseLock: () => {},
+				read: async () => Promise.reject('boom')
+			})
+		};
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(
+				async () =>
+					({
+						ok: true,
+						status: 200,
+						body: body as unknown as ReadableStream<Uint8Array>,
+						json: async () => ({})
+					}) as never
+			)
+		);
+		const client = new OpenAiCompatibleClient();
+		await expect(client.chat([], { ...config, stream: true })).rejects.toThrow(
+			'无法读取流式响应：网络错误'
+		);
+	});
+
+	it('流式响应：跳过非法载荷与非对象 delta，无内容时抛错', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: not-json\n\n',
+				'data: "hello"\n\n',
+				'data: {"choices":[42]}\n\n',
+				'data: {"choices":[]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await expect(client.chat([], { ...config, stream: true })).rejects.toThrow('缺少 choices');
+	});
+
+	it('流式模式响应无 body 且非 SSE 时降级解析失败抛错', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(
+				async () =>
+					({
+						ok: true,
+						status: 200,
+						body: null,
+						json: async () => ({})
+					}) as never
+			)
+		);
+		const client = new OpenAiCompatibleClient();
+		await expect(client.chat([], { ...config, stream: true })).rejects.toThrow('无法解析的响应');
 	});
 });

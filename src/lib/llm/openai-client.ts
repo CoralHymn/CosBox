@@ -19,9 +19,10 @@ export class OpenAiCompatibleClient implements LlmClient {
 	async chat(
 		messages: ChatMessage[],
 		config: LlmConfig,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		onDelta?: (delta: string) => void
 	): Promise<LlmChatResult> {
-		return this.chatWithTools(messages, [], config, signal);
+		return this.chatWithTools(messages, [], config, signal, onDelta);
 	}
 
 	/** 上下文压缩摘要：把摘要请求当普通对话发送，取最终文本。 */
@@ -43,7 +44,8 @@ export class OpenAiCompatibleClient implements LlmClient {
 		messages: ChatMessage[],
 		tools: readonly StateToolSchema[],
 		config: LlmConfig,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		onDelta?: (delta: string) => void
 	): Promise<LlmChatResult> {
 		const baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
 		if (baseUrl === '') {
@@ -76,6 +78,10 @@ export class OpenAiCompatibleClient implements LlmClient {
 			);
 		}
 
+		if (config.stream === true) {
+			return await parseStreamedResult(response, onDelta);
+		}
+
 		let data: unknown;
 		try {
 			data = await response.json();
@@ -84,22 +90,211 @@ export class OpenAiCompatibleClient implements LlmClient {
 				`模型服务返回了无法解析的响应：${err instanceof Error ? err.message : 'JSON 错误'}`
 			);
 		}
+		return buildChatResult(data);
+	}
+}
 
-		const content = extractContent(data);
-		const toolCalls = extractToolCalls(data);
-		const usage = extractUsage(data);
-		const thinking = extractThinking(data);
-		if (toolCalls.length > 0) {
-			return { content, toolCalls, usage, thinking };
+/** 从完整 JSON 响应组装结果（非流式 + 流式降级共用）。 */
+function buildChatResult(data: unknown): LlmChatResult {
+	const content = extractContent(data);
+	const toolCalls = extractToolCalls(data);
+	const usage = extractUsage(data);
+	const thinking = extractThinking(data);
+	if (toolCalls.length > 0) {
+		return { content, toolCalls, usage, thinking };
+	}
+	if (content !== null) {
+		const inline = extractInlineToolCall(content);
+		if (inline.length > 0) {
+			return { content: null, toolCalls: inline, usage, thinking };
 		}
-		if (content !== null) {
-			const inline = extractInlineToolCall(content);
-			if (inline.length > 0) {
-				return { content: null, toolCalls: inline, usage, thinking };
+		return { content, toolCalls: [], usage, thinking };
+	}
+	throw new LlmError('模型响应缺少 choices[0].message.content');
+}
+
+/**
+ * 解析 SSE 流式响应：逐块累积 content / reasoning / tool_calls / usage，
+ * 实时回调 onDelta 供 UI 流式渲染。
+ * 端点忽略 stream 直接返回 JSON 时，回退到 buildChatResult 解析。
+ */
+async function parseStreamedResult(
+	response: Response,
+	onDelta: ((delta: string) => void) | undefined
+): Promise<LlmChatResult> {
+	let content = '';
+	const thinkingParts: string[] = [];
+	let usage: TokenUsage | undefined;
+	const toolMap = new Map<number, { id: string; name: string; argumentsRaw: string }>();
+	let sawEvent = false;
+	let rawText = '';
+	try {
+		const result = await readSse(response.body, (payload) => {
+			sawEvent = true;
+			let data: unknown;
+			try {
+				data = JSON.parse(payload);
+			} catch {
+				return;
 			}
-			return { content, toolCalls: [], usage, thinking };
+			const delta = extractStreamDelta(data);
+			if (delta.content !== undefined && delta.content !== '') {
+				content += delta.content;
+				onDelta?.(delta.content);
+			}
+			if (delta.thinking !== undefined && delta.thinking !== '') {
+				thinkingParts.push(delta.thinking);
+			}
+			if (delta.toolCalls !== undefined) {
+				accumulateStreamToolCalls(toolMap, delta.toolCalls);
+			}
+			if (delta.usage !== undefined) {
+				usage = delta.usage;
+			}
+		});
+		rawText = result.rawText;
+	} catch (err) {
+		if (err instanceof Error && err.name === 'AbortError') {
+			throw new LlmError('请求已取消');
 		}
-		throw new LlmError('模型响应缺少 choices[0].message.content');
+		throw new LlmError(`无法读取流式响应：${err instanceof Error ? err.message : '网络错误'}`);
+	}
+
+	// 端点忽略 stream 参数、返回完整 JSON：按非流式解析。
+	if (!sawEvent) {
+		let data: unknown;
+		try {
+			data = JSON.parse(rawText);
+		} catch {
+			throw new LlmError('模型服务返回了无法解析的响应');
+		}
+		return buildChatResult(data);
+	}
+
+	const toolCalls = [...toolMap.entries()]
+		.sort((a, b) => a[0] - b[0])
+		.map(([index, entry]) =>
+			entry.name === ''
+				? null
+				: {
+						id: entry.id === '' ? `call_${index}` : entry.id,
+						name: entry.name,
+						arguments: parseJsonObject(entry.argumentsRaw)
+					}
+		)
+		.filter((call): call is ToolCall => call !== null);
+	const thinking = thinkingParts.join('').trim() || undefined;
+	if (toolCalls.length > 0) {
+		return { content: content === '' ? null : content, toolCalls, usage, thinking };
+	}
+	if (content !== '') {
+		return { content, toolCalls: [], usage, thinking };
+	}
+	throw new LlmError('模型响应缺少 choices[0].message.content');
+}
+
+/** 逐行读取 SSE 流，回调每个 data: 载荷；返回是否收到事件与原始文本。 */
+async function readSse(
+	body: ReadableStream<Uint8Array> | null,
+	onPayload: (payload: string) => void
+): Promise<{ sawEvent: boolean; rawText: string }> {
+	if (body === null) {
+		return { sawEvent: false, rawText: '' };
+	}
+	const reader = body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+	let rawText = '';
+	let sawEvent = false;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			if (value !== undefined) {
+				const text = decoder.decode(value, { stream: true });
+				rawText += text;
+				buffer += text;
+			}
+			let newlineIndex: number;
+			while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+				const line = buffer.slice(0, newlineIndex).replace(/\r$/, '');
+				buffer = buffer.slice(newlineIndex + 1);
+				const trimmed = line.trim();
+				if (trimmed.startsWith('data:')) {
+					const payload = trimmed.slice(5).trim();
+					if (payload !== '' && payload !== '[DONE]') {
+						sawEvent = true;
+						onPayload(payload);
+					}
+				}
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	return { sawEvent, rawText };
+}
+
+/** 提取单个 SSE 块的 delta：content / thinking / tool_calls / usage。 */
+function extractStreamDelta(data: unknown): {
+	content?: string;
+	thinking?: string;
+	toolCalls?: unknown[];
+	usage?: TokenUsage;
+} {
+	if (!isRecord(data)) {
+		return {};
+	}
+	const choices = data.choices;
+	if (!Array.isArray(choices) || choices.length === 0) {
+		// stream_options.include_usage 时最后一个块带 usage、无 choices。
+		const usage = extractUsage(data);
+		return usage === undefined ? {} : { usage };
+	}
+	const delta = isRecord(choices[0]) ? choices[0].delta : undefined;
+	if (!isRecord(delta)) {
+		return {};
+	}
+	const result: { content?: string; thinking?: string; toolCalls?: unknown[] } = {};
+	if (typeof delta.content === 'string') {
+		result.content = delta.content;
+	}
+	const thinking = delta.reasoning_content ?? delta.reasoning;
+	if (typeof thinking === 'string') {
+		result.thinking = thinking;
+	}
+	if (Array.isArray(delta.tool_calls)) {
+		result.toolCalls = delta.tool_calls;
+	}
+	return result;
+}
+
+/** 累积流式 tool_calls 增量（按 index 合并 id/name/arguments 片段）。 */
+function accumulateStreamToolCalls(
+	map: Map<number, { id: string; name: string; argumentsRaw: string }>,
+	entries: unknown[]
+): void {
+	for (const entry of entries) {
+		if (!isRecord(entry)) {
+			continue;
+		}
+		const index = typeof entry.index === 'number' ? entry.index : 0;
+		const current = map.get(index) ?? { id: '', name: '', argumentsRaw: '' };
+		if (typeof entry.id === 'string' && entry.id !== '') {
+			current.id = entry.id;
+		}
+		const fn = entry.function;
+		if (isRecord(fn)) {
+			if (typeof fn.name === 'string' && fn.name !== '') {
+				current.name = fn.name;
+			}
+			if (typeof fn.arguments === 'string') {
+				current.argumentsRaw += fn.arguments;
+			}
+		}
+		map.set(index, current);
 	}
 }
 
@@ -135,6 +330,10 @@ function buildRequestBody(
 		temperature: config.temperature,
 		max_tokens: config.maxTokens
 	};
+	if (config.stream === true) {
+		body.stream = true;
+		body.stream_options = { include_usage: true };
+	}
 	if (tools.length > 0) {
 		body.tools = tools.map(serializeTool);
 	}

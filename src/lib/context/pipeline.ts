@@ -21,6 +21,8 @@ export interface ContextPipelineInput {
 	systemPrompt?: string;
 	/** 历史压缩参数。 */
 	historyOptions?: HistoryOptions;
+	/** 允许 AI 调用状态工具时，在系统提示中注入工具使用说明。 */
+	enableStateTools?: boolean;
 	/** 可选的网络搜索结果，命中时注入系统提示。 */
 	searchResults?: ReadonlyArray<SearchResult>;
 }
@@ -47,6 +49,19 @@ export function defaultSystemPrompt(name: string): string {
 		`- 下列【当前状态】是事实约束：穿着、地点、时间、日程与属性不得违背。\n` +
 		`- 使用自然、简短的口语，符合角色年龄与性格。`
 	);
+}
+
+/** 状态工具使用说明：让模型知道它可以主动调用工具更新剧情状态。 */
+export function buildToolGuidance(): string {
+	return [
+		'【工具使用】',
+		'你可以调用工具主动更新剧情状态，而不是只口头描述：',
+		'- goto_location：切换当前地点（优先从【已知地点】中选择）',
+		'- advance_time：推进世界时间',
+		'- set_outfit：更换穿着（必须从【衣柜】中选择，item 用精确名称；用 null/「无」表示脱掉）',
+		'- set_attribute：设置或更新角色属性',
+		'当剧情需要（离开某地、时间流逝、换装、属性变化）时直接调用工具；工具会立即生效并返回结果。'
+	].join('\n');
 }
 
 /**
@@ -83,7 +98,8 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 					.map((result) => `- ${result.title}：${result.snippet}（${result.url}）`)
 					.join('\n')}`
 			: '';
-	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}`;
+	const toolBlock = input.enableStateTools === true ? `\n\n${buildToolGuidance()}` : '';
+	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}${toolBlock}`;
 	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
 		role: message.role,
 		content: message.content

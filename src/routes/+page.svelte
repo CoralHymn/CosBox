@@ -2,7 +2,11 @@
 	import { onMount } from 'svelte';
 	import type { ChatMessageView, ConfigPatch, StatePatch, WorldInfoEntry } from '../lib/core/types';
 	import { formatWorldTime } from '../lib/core/state';
-	import { buildContext, type ContextBundle, type ContextPipelineInput } from '../lib/context/pipeline';
+	import {
+		buildContext,
+		type ContextBundle,
+		type ContextPipelineInput
+	} from '../lib/context/pipeline';
 	import { KvRepository } from '../lib/db/kv-repo';
 	import { getDb } from '../lib/db/schema';
 	import { SnapshotRepository } from '../lib/db/snapshot-repo';
@@ -85,6 +89,8 @@
 	let compactState = $state<CompactionState | null>(null);
 	/** 正在执行手动压缩。 */
 	let compacting = $state(false);
+	/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
+	let streamingDraft = $state<string | null>(null);
 
 	const providerLabel = $derived.by(() => {
 		if (settings.config.provider === 'demo') {
@@ -140,6 +146,7 @@
 				state: session.state,
 				conversation: session.conversation,
 				worldInfo: worldInfo.entries,
+				enableStateTools: settings.config.allowAiStateTools === true,
 				characterName:
 					settings.profile.name ||
 					(typeof session.state.attributes.name === 'string'
@@ -164,10 +171,14 @@
 							state: compactState
 						}
 					: undefined;
+			streamingDraft = '';
 			const { reply, debug, bundle, usage, compaction, thinking } = await service.generateReply(
 				input,
 				settings.config,
 				{
+					onDelta: (delta) => {
+						streamingDraft = `${streamingDraft ?? ''}${delta}`;
+					},
 					tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 					toolContext: {
 						getState: () => session.state,
@@ -180,10 +191,12 @@
 			debugPrompt = debug;
 			lastContext = { bundle, usage: usage ?? null, compaction };
 			compactState = compaction;
+			streamingDraft = null;
 			await session.addMessage('assistant', reply, { thinking });
 		} catch (err) {
 			toasts.error(err);
 		} finally {
+			streamingDraft = null;
 			busy = false;
 			searching = false;
 		}
@@ -520,6 +533,7 @@
 					{debugPrompt}
 					onPreview={handlePreview}
 					onSend={handleSend}
+					{streamingDraft}
 				/>
 			{:else if tab === 'state'}
 				<StatePanel characterState={session.state} onUpdate={handleStateUpdate} />

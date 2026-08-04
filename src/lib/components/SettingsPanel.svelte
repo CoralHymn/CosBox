@@ -41,6 +41,7 @@
 	let modelContextWindow = $state<number | undefined>(undefined);
 	let autoCompact = $state(true);
 	let compactThreshold = $state(0.8);
+	let stream = $state(false);
 	let allowAiStateTools = $state(false);
 	let devMode = $state(false);
 	let profileName = $state('');
@@ -79,6 +80,7 @@
 		modelContextWindow = config.modelContextWindow;
 		autoCompact = config.autoCompact !== false;
 		compactThreshold = config.compactThreshold ?? 0.8;
+		stream = config.stream === true;
 		allowAiStateTools = config.allowAiStateTools === true;
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
@@ -120,6 +122,7 @@
 			modelContextWindow,
 			autoCompact,
 			compactThreshold,
+			stream,
 			allowAiStateTools,
 			webSearch: {
 				enabled: searchEnabled,
@@ -354,6 +357,10 @@
 
 	<div class="card">
 		<h3 class="card-title">AI 行为</h3>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input id="stream-enabled" class="checkbox" type="checkbox" bind:checked={stream} />
+			<label for="stream-enabled" class="muted">流式输出（边生成边显示回复）</label>
+		</div>
 		<div class="row-actions" style="margin-bottom: 10px;">
 			<input
 				id="ai-tools-enabled"
