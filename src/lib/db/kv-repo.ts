@@ -1,0 +1,46 @@
+import { StorageError } from '../core/errors';
+import type { KvRecord, CosBoxDatabase } from './schema';
+
+/**
+ * 应用键值仓储：设置、上次 checkout 的 head 等轻量元数据。
+ */
+export class KvRepository {
+	constructor(private readonly database: CosBoxDatabase) {}
+
+	/** 读取值；键不存在返回 undefined。 */
+	async get<T>(key: string): Promise<T | undefined> {
+		try {
+			const record = await this.database.kv.get(key);
+			return record?.value as T | undefined;
+		} catch (err) {
+			throw new StorageError(`读取设置失败：${key}`, { cause: err });
+		}
+	}
+
+	/** 写入值（upsert）。 */
+	async set<T>(key: string, value: T): Promise<void> {
+		try {
+			await this.database.kv.put({ key, value });
+		} catch (err) {
+			throw new StorageError(`保存设置失败：${key}`, { cause: err });
+		}
+	}
+
+	/** 删除键。 */
+	async remove(key: string): Promise<void> {
+		try {
+			await this.database.kv.delete(key);
+		} catch (err) {
+			throw new StorageError(`删除设置失败：${key}`, { cause: err });
+		}
+	}
+
+	/** 读取全部记录。 */
+	async getAll(): Promise<KvRecord[]> {
+		try {
+			return await this.database.kv.toArray();
+		} catch (err) {
+			throw new StorageError('读取全部设置失败', { cause: err });
+		}
+	}
+}

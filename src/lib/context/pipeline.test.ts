@@ -1,0 +1,98 @@
+import { describe, expect, it } from 'vitest';
+import { createInitialState } from '../core/state';
+import type { ChatMessageView, WorldInfoEntry } from '../core/types';
+import { buildContext, defaultSystemPrompt } from './pipeline';
+
+function history(): ChatMessageView[] {
+	return [
+		{ id: '1', role: 'user', content: '早上好', timestamp: 1 },
+		{ id: '2', role: 'assistant', content: '早上好呀', timestamp: 2 }
+	];
+}
+
+function worldInfo(): WorldInfoEntry[] {
+	return [
+		{
+			id: 'w1',
+			keys: ['图书馆'],
+			content: '图书馆是校园传说发生地。',
+			enabled: true,
+			priority: 100
+		}
+	];
+}
+
+describe('defaultSystemPrompt', () => {
+	it('生成包含角色名的提示', () => {
+		expect(defaultSystemPrompt('绫音')).toContain('「绫音」');
+		expect(defaultSystemPrompt('绫音')).toContain('当前状态');
+	});
+});
+
+describe('buildContext', () => {
+	it('组装系统消息：基础提示 + 状态摘要 + 世界信息命中', () => {
+		const conversation = [
+			{ id: '1', role: 'user' as const, content: '我们去图书馆吧', timestamp: 1 },
+			{ id: '2', role: 'assistant' as const, content: '好啊', timestamp: 2 }
+		];
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: worldInfo(),
+			characterName: '绫音'
+		});
+		expect(bundle.systemMessage).toContain('「绫音」');
+		expect(bundle.systemMessage).toContain('时间：周一 08:00');
+		expect(bundle.systemMessage).toContain('图书馆是校园传说发生地。');
+		expect(bundle.worldInfoHits).toHaveLength(1);
+		expect(bundle.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+		expect(bundle.compressedCount).toBe(0);
+	});
+
+	it('无命中时不注入世界设定块', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: worldInfo()
+		});
+		expect(bundle.systemMessage).not.toContain('【世界设定】');
+		expect(bundle.worldInfoHits).toEqual([]);
+	});
+
+	it('角色名回退到 attributes.name', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: []
+		});
+		expect(bundle.systemMessage).toContain('「绫音」');
+	});
+
+	it('自定义 systemPrompt 覆盖默认模板', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: [],
+			systemPrompt: '自定义规则'
+		});
+		expect(bundle.systemMessage.startsWith('自定义规则')).toBe(true);
+		expect(bundle.systemMessage).not.toContain('你是「');
+	});
+
+	it('历史压缩生效并体现在消息数组', () => {
+		const conversation = [
+			{ id: '1', role: 'user' as const, content: 'a', timestamp: 1 },
+			{ id: '2', role: 'user' as const, content: 'b', timestamp: 2 },
+			{ id: '3', role: 'user' as const, content: 'c', timestamp: 3 }
+		];
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: [],
+			historyOptions: { maxMessages: 1 }
+		});
+		expect(bundle.compressedCount).toBe(2);
+		expect(bundle.messages[0]!.role).toBe('system');
+		expect(bundle.messages[0]!.content).toContain('已压缩');
+	});
+});
