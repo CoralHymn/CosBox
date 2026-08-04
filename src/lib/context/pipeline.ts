@@ -1,0 +1,82 @@
+import type { CharacterState, ChatMessageView, WorldInfoEntry } from '../core/types';
+import type { ChatMessage } from '../llm/types';
+import { prepareHistory, type HistoryOptions, type HistoryResult } from './history';
+import { summarizeState } from './state-summary';
+import { findWorldInfoHits, type WorldInfoHit } from './world-info';
+
+/** 上下文管道的输入：当前状态 + 最近对话 + 世界信息。 */
+export interface ContextPipelineInput {
+	state: CharacterState;
+	conversation: ReadonlyArray<ChatMessageView>;
+	worldInfo: ReadonlyArray<WorldInfoEntry>;
+	/** 角色名（默认取 attributes.name）。 */
+	characterName?: string;
+	/** 自定义系统提示（默认使用内置角色扮演模板）。 */
+	systemPrompt?: string;
+	/** 历史压缩参数。 */
+	historyOptions?: HistoryOptions;
+}
+
+/** 上下文管道的结构化输出。 */
+export interface ContextBundle {
+	/** 最终系统消息：基础提示 + 状态摘要 + 世界信息命中。 */
+	systemMessage: string;
+	/** 可直接发给 OpenAI-compatible API 的消息数组。 */
+	messages: ChatMessage[];
+	stateSummary: string;
+	worldInfoHits: WorldInfoHit[];
+	/** 处理后的历史（可能含压缩占位）。 */
+	history: ChatMessageView[];
+	compressedCount: number;
+}
+
+/** 默认角色扮演系统提示模板。 */
+export function defaultSystemPrompt(name: string): string {
+	return (
+		`你是「${name}」，一名生活在虚拟学园中的角色。请以沉浸式角色扮演回应：\n` +
+		`- 始终以角色身份说话，绝不承认自己是 AI 或模型。\n` +
+		`- 下列【当前状态】是事实约束：穿着、地点、时间、日程与属性不得违背。\n` +
+		`- 使用自然、简短的口语，符合角色年龄与性格。`
+	);
+}
+
+/**
+ * 组装上下文：
+ * 1) 世界信息关键词触发；
+ * 2) 状态摘要注入；
+ * 3) 历史压缩。
+ */
+export function buildContext(input: ContextPipelineInput): ContextBundle {
+	const name =
+		(input.characterName && input.characterName.trim()) ||
+		(typeof input.state.attributes.name === 'string' ? input.state.attributes.name : '角色');
+	const stateSummary = summarizeState(input.state);
+	const historyResult: HistoryResult = prepareHistory(
+		input.conversation,
+		input.historyOptions ?? { maxMessages: 20 }
+	);
+	const worldInfoHits = findWorldInfoHits(
+		input.conversation.map((message) => message.content),
+		input.worldInfo
+	);
+
+	const worldInfoBlock =
+		worldInfoHits.length > 0
+			? `\n【世界设定】\n${worldInfoHits.map((hit) => `- ${hit.content}`).join('\n')}`
+			: '';
+	const basePrompt = input.systemPrompt?.trim() || defaultSystemPrompt(name);
+	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}`;
+	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
+		role: message.role,
+		content: message.content
+	}));
+
+	return {
+		systemMessage,
+		messages,
+		stateSummary,
+		worldInfoHits,
+		history: historyResult.messages,
+		compressedCount: historyResult.compressedCount
+	};
+}

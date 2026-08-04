@@ -1,0 +1,227 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { StateValidationError } from '../core/errors';
+import { createInitialState } from '../core/state';
+import { KvRepository } from '../db/kv-repo';
+import { CosBoxDatabase } from '../db/schema';
+import { SnapshotRepository } from '../db/snapshot-repo';
+import { CharacterManager } from './character-manager';
+
+describe('CharacterManager', () => {
+	let db: CosBoxDatabase;
+	let snapshots: SnapshotRepository;
+	let kv: KvRepository;
+	let clock: number;
+
+	beforeEach(() => {
+		db = new CosBoxDatabase(`test-mgr-${Math.random().toString(36).slice(2)}`);
+		snapshots = new SnapshotRepository(db);
+		kv = new KvRepository(db);
+		clock = 1000;
+	});
+
+	afterEach(async () => {
+		await db.close();
+	});
+
+	function createManager(): CharacterManager {
+		return new CharacterManager({
+			snapshots,
+			kv,
+			now: () => {
+				clock += 1;
+				return clock;
+			}
+		});
+	}
+
+	it('init 在空库创建根快照', async () => {
+		const manager = createManager();
+		await manager.init();
+		expect(await snapshots.count()).toBe(1);
+		expect(manager.getHeadId()).not.toBeNull();
+		expect(manager.getState().attributes.name).toBe('绫音');
+	});
+
+	it('init 幂等', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.init();
+		expect(await snapshots.count()).toBe(1);
+	});
+
+	it('init 恢复 kv 中保存的 head', async () => {
+		const manager = createManager();
+		await manager.init();
+		const head = manager.getHeadId()!;
+		const manager2 = createManager();
+		await manager2.init();
+		expect(manager2.getHeadId()).toBe(head);
+	});
+
+	it('init 在 kv 缺失时选择最新分支 tip', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await manager.update({ outfit: { top: '毛衣' } }, { desc: '分支A换装' });
+		await manager.addMessage('user', '分支A');
+		await manager.checkout(root);
+		await manager.update({ outfit: { top: '运动服' } }, { desc: '分支B换装' });
+		const latest = manager.getHeadId()!;
+		expect(manager.getBranches().length).toBe(2);
+		await kv.remove('lastHeadId');
+		const manager2 = createManager();
+		await manager2.init();
+		expect(manager2.getHeadId()).toBe(latest);
+		expect(manager2.getState().outfit.top).toBe('运动服');
+	});
+
+	it('update 校验、落快照、应用状态并推进 head', async () => {
+		const manager = createManager();
+		await manager.init();
+		const node = await manager.update(
+			{ location: { id: 'lib', name: '图书馆' } },
+			{ desc: '移动到图书馆' }
+		);
+		expect(manager.getHeadId()).toBe(node.id);
+		expect(manager.getState().location.name).toBe('图书馆');
+		expect(await snapshots.count()).toBe(2);
+		expect(node.delta).toEqual({
+			kind: 'state',
+			patch: { location: { id: 'lib', name: '图书馆' } }
+		});
+	});
+
+	it('update 非法补丁抛错且不产生快照', async () => {
+		const manager = createManager();
+		await manager.init();
+		await expect(
+			manager.update({ schedule: { time: { day: 9, hour: 0, minute: 0 } } }, { desc: '非法' })
+		).rejects.toThrow(StateValidationError);
+		expect(await snapshots.count()).toBe(1);
+	});
+
+	it('addMessage 追加消息快照并重建会话', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '你好');
+		await manager.addMessage('assistant', '你也好');
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['你好', '你也好']);
+		expect(manager.getConversation()[0]!.role).toBe('user');
+	});
+
+	it('addMessage 空内容抛错', async () => {
+		const manager = createManager();
+		await manager.init();
+		await expect(manager.addMessage('user', '   ')).rejects.toThrow(StateValidationError);
+	});
+
+	it('addMessage 支持 system 角色', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('system', '旁白：远处传来钟声');
+		expect(manager.getConversation().map((m) => m.role)).toEqual(['system']);
+	});
+
+	it('未注入 now 时回退到 Date.now', async () => {
+		const manager = new CharacterManager({ snapshots, kv });
+		await manager.init();
+		expect(manager.getHeadId()).not.toBeNull();
+		expect(manager.getState().schedule.time.hour).toBe(8);
+	});
+
+	it('checkout 切换状态与会话且不产生新快照', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await manager.update({ outfit: { top: '卫衣' } }, { desc: '换装A' });
+		await manager.addMessage('user', '分支A消息');
+		const branchAHead = manager.getHeadId()!;
+		const countBefore = await snapshots.count();
+
+		await manager.checkout(root);
+		expect(manager.getHeadId()).toBe(root);
+		expect(manager.getState().outfit.top).toBe(createInitialState().outfit.top);
+		expect(manager.getConversation()).toEqual([]);
+		expect(await snapshots.count()).toBe(countBefore);
+
+		// 从根再开一条新分支
+		await manager.addMessage('user', '分支B消息');
+		expect(manager.getHeadId()).not.toBe(branchAHead);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['分支B消息']);
+		expect(
+			manager
+				.getBranches()
+				.map((b) => b.tipId)
+				.sort()
+		).toEqual([branchAHead, manager.getHeadId()!].sort());
+	});
+
+	it('checkout 不存在的 id 抛 SnapshotError 且保持原状', async () => {
+		const manager = createManager();
+		await manager.init();
+		const head = manager.getHeadId();
+		await expect(manager.checkout('ghost')).rejects.toThrow();
+		expect(manager.getHeadId()).toBe(head);
+	});
+
+	it('advanceTime 推进时间并生成快照', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.advanceTime(30);
+		expect(manager.getState().schedule.time.minute).toBe(30);
+		await manager.advanceTime(-60);
+		expect(manager.getState().schedule.time.hour).toBe(7);
+		expect(manager.getState().schedule.time.minute).toBe(30);
+		await expect(manager.advanceTime(Number.NaN)).rejects.toThrow(StateValidationError);
+	});
+
+	it('addCheckpoint 创建空 delta 快照，空描述用默认值', async () => {
+		const manager = createManager();
+		await manager.init();
+		const node = await manager.addCheckpoint('   ');
+		expect(node.delta).toBeNull();
+		expect(node.metadata.desc).toBe('手动检查点');
+		expect(manager.getHeadId()).toBe(node.id);
+	});
+
+	it('subscribe 在变更后收到通知，unsubscribe 生效', async () => {
+		const manager = createManager();
+		await manager.init();
+		let calls = 0;
+		const unsubscribe = manager.subscribe(() => {
+			calls += 1;
+		});
+		await manager.addMessage('user', 'hi');
+		expect(calls).toBeGreaterThan(0);
+		unsubscribe();
+		const before = calls;
+		await manager.addMessage('assistant', 'yo');
+		expect(calls).toBe(before);
+	});
+
+	it('snapshot() 返回组合视图', async () => {
+		const manager = createManager();
+		await manager.init();
+		const view = manager.snapshot();
+		expect(view.headId).toBe(manager.getHeadId());
+		expect(view.state).toBe(manager.getState());
+		expect(view.snapshots.length).toBe(1);
+	});
+
+	it('公开 getter 返回内部字段', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', 'hi');
+		expect(manager.getSnapshots().length).toBe(2);
+		expect(manager.getBranches()).toHaveLength(1);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['hi']);
+	});
+
+	it('未显式 init 时通过 ensureInit 自动初始化', async () => {
+		const manager = createManager();
+		await manager.addMessage('user', '自动初始化');
+		expect(manager.getHeadId()).not.toBeNull();
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['自动初始化']);
+		expect(await snapshots.count()).toBe(2);
+	});
+});
