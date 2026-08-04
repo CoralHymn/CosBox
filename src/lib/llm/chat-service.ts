@@ -52,6 +52,8 @@ export interface GenerateReplyOptions {
 	maxToolTurns?: number;
 	/** 自动上下文压缩配置；缺省 = 不压缩、完整发送历史。 */
 	compaction?: CompactionOptions;
+	/** 流式输出回调：真实端点按块回调增量文本，供 UI 边生成边显示。 */
+	onDelta?: (delta: string) => void;
 }
 
 /** 默认最大工具轮数：超过后停止并以提示文本收尾。 */
@@ -131,7 +133,13 @@ export class ChatService {
 				const maxTurns = options.maxToolTurns ?? DEFAULT_MAX_TOOL_TURNS;
 				for (let turn = 0; turn < maxTurns; turn += 1) {
 					debug = { systemMessage: messages[0]!.content, messages };
-					const result = await this.client.chatWithTools(messages, options.tools, config, signal);
+					const result = await this.client.chatWithTools(
+						messages,
+						options.tools,
+						config,
+						signal,
+						options.onDelta
+					);
 					usage = mergeUsage(usage, result.usage);
 					if (result.toolCalls.length === 0) {
 						return {
@@ -181,7 +189,7 @@ export class ChatService {
 			}
 		}
 
-		const result = await this.client.chat(messages, config, signal);
+		const result = await this.client.chat(messages, config, signal, options.onDelta);
 		return {
 			reply: result.content ?? '',
 			bundle,

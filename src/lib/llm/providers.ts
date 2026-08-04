@@ -243,6 +243,7 @@ export interface LlmConfigPatch {
 	modelContextWindow?: number;
 	autoCompact?: boolean;
 	compactThreshold?: number;
+	stream?: boolean;
 	allowAiStateTools?: boolean;
 	webSearch?: Partial<WebSearchConfig>;
 }
@@ -271,6 +272,7 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		modelContextWindow: partial.modelContextWindow ?? defaults.modelContextWindow,
 		autoCompact: partial.autoCompact ?? defaults.autoCompact ?? true,
 		compactThreshold: partial.compactThreshold ?? defaults.compactThreshold ?? 0.8,
+		stream: partial.stream ?? defaults.stream ?? false,
 		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
 		webSearch: search
 	};

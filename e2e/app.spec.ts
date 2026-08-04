@@ -303,6 +303,59 @@ test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并�
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 3));
 });
 
+test('流式输出：开启后按 SSE 逐块渲染，请求携带 stream: true', async ({ page }) => {
+	let requestBody: Record<string, unknown> | null = null;
+	await page.route('**/chat/completions', async (route) => {
+		requestBody = route.request().postDataJSON();
+		const chunks = [
+			'data: {"choices":[{"delta":{"role":"assistant","content":"你"}}]}\n\n',
+			'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
+			'data: {"choices":[{"delta":{"content":"呀"}}]}\n\n',
+			'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3}}\n\n',
+			'data: [DONE]\n\n'
+		];
+		await route.fulfill({
+			status: 200,
+			contentType: 'text/event-stream',
+			body: chunks.join('')
+		});
+	});
+
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#llm-provider').selectOption('deepseek');
+	await page.locator('#llm-api-key').fill('test-key');
+	await page.locator('#stream-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await expect(page.getByText('模型设置已保存')).toBeVisible();
+
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.locator('.message.assistant').last()).toContainText('你好呀');
+	expect(requestBody).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+});
+
+test('启用状态工具后，系统提示注入工具使用说明', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#ai-tools-enabled').check();
+	await page.locator('#dev-mode-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await expect(page.getByText('模型设置已保存')).toBeVisible();
+
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	await page.getByRole('button', { name: '开发者：查看最近一次完整提示词' }).click();
+	const promptBody = page.locator('.prompt-modal-body');
+	await expect(promptBody.getByText('【工具使用】')).toBeVisible();
+	await expect(promptBody.getByText(/set_outfit/)).toBeVisible();
+	await expect(promptBody.getByText(/goto_location/)).toBeVisible();
+});
+
 test('RP 斜杠命令：/goto /wear /time /help 直接修改状态', async ({ page }) => {
 	await page.goto('/');
 

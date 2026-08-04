@@ -466,6 +466,36 @@ describe('ChatService', () => {
 		expect(reply).toBe('最终回答');
 		expect(thinking).toBe('让我先想想');
 	});
+
+	it('透传流式增量回调给客户端', async () => {
+		const onDelta = vi.fn();
+		const client: LlmClient = {
+			chat: vi.fn(
+				async (
+					_messages: ChatMessage[],
+					_config: LlmConfig,
+					_signal?: AbortSignal,
+					delta?: (text: string) => void
+				) => {
+					void _messages;
+					void _config;
+					void _signal;
+					delta?.('流');
+					delta?.('式');
+					return { content: '流式回复', toolCalls: [] };
+				}
+			)
+		};
+		const service = new ChatService(client);
+		const { reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ onDelta }
+		);
+		expect(reply).toBe('流式回复');
+		expect(onDelta).toHaveBeenNthCalledWith(1, '流');
+		expect(onDelta).toHaveBeenNthCalledWith(2, '式');
+	});
 });
 
 describe('serializeDebugPrompt', () => {

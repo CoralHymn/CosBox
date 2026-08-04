@@ -19,6 +19,8 @@ export interface LlmConfig {
 	autoCompact?: boolean;
 	/** 压缩触发阈值：估计用量（含输出预算）占上下文窗口的比例（缺省 0.8）。 */
 	compactThreshold?: number;
+	/** 流式输出：边生成边显示（真实端点按 SSE 解析；demo 保持一次性返回）。 */
+	stream?: boolean;
 	/** 是否允许 AI 在对话中调用状态工具（改地点/时间/穿着/属性）。缺省视为关闭。 */
 	allowAiStateTools?: boolean;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
@@ -76,7 +78,12 @@ export interface LlmChatResult {
 
 /** 统一的 LLM 客户端接口。chatWithTools 可选：客户端不支持工具时退化为纯文本对话。 */
 export interface LlmClient {
-	chat(messages: ChatMessage[], config: LlmConfig, signal?: AbortSignal): Promise<LlmChatResult>;
+	chat(
+		messages: ChatMessage[],
+		config: LlmConfig,
+		signal?: AbortSignal,
+		onDelta?: (delta: string) => void
+	): Promise<LlmChatResult>;
 	/** 上下文压缩用的延续摘要；不实现时由 ChatService 用 chat 兜底。 */
 	summarize?(
 		request: ChatMessage[],
@@ -87,7 +94,8 @@ export interface LlmClient {
 		messages: ChatMessage[],
 		tools: readonly StateToolSchema[],
 		config: LlmConfig,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		onDelta?: (delta: string) => void
 	): Promise<LlmChatResult>;
 }
 
@@ -102,6 +110,7 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	maxTokens: 1024,
 	autoCompact: true,
 	compactThreshold: DEFAULT_COMPACT_THRESHOLD,
+	stream: false,
 	allowAiStateTools: false,
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };

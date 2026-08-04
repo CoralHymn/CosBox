@@ -38,6 +38,8 @@
 		/** 输入预览：返回「当前输入框内容点击发送会发送给 AI 什么」。 */
 		onPreview: (draft: string) => PromptPreviewResult;
 		onSend: (content: string, options: { search: boolean }) => void;
+		/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
+		streamingDraft: string | null;
 	}
 
 	let {
@@ -57,7 +59,8 @@
 		developerMode,
 		debugPrompt,
 		onPreview,
-		onSend
+		onSend,
+		streamingDraft
 	}: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
 	/** 输入框当前草稿（供预览）。 */
@@ -73,6 +76,7 @@
 
 	$effect(() => {
 		void conversation;
+		void streamingDraft;
 		if (listEl !== null) {
 			listEl.scrollTop = listEl.scrollHeight;
 		}
@@ -135,7 +139,7 @@
 
 <div class="chat-layout">
 	<div class="chat-panel">
-		{#if conversation.length === 0}
+		{#if conversation.length === 0 && (streamingDraft === null || streamingDraft === '')}
 			<div class="empty-chat">
 				<div>
 					<p style="font-size: 15px; margin: 0 0 6px;">开始一段新的故事吧</p>
@@ -147,6 +151,16 @@
 				{#each conversation as message (message.id)}
 					<MessageBubble {message} />
 				{/each}
+				{#if streamingDraft !== null && streamingDraft !== ''}
+					<MessageBubble
+						message={{
+							id: 'stream-draft',
+							role: 'assistant',
+							content: streamingDraft,
+							timestamp: Date.now()
+						}}
+					/>
+				{/if}
 			</div>
 		{/if}
 		{#if developerMode}

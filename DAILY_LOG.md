@@ -533,6 +533,39 @@ AI 在思考中说要用 `set_outfit` 更新穿着（穿上白色衬衫），但
 - 单元测试：全量 404 个；覆盖率 100% 语句/行/函数（分支 94.67%）；21 条 e2e 全过；
   build/check/lint 全绿。
 
+## 2026-08-05（续）：工具使用引导 + 流式输出
+
+### 需求反馈
+
+1. 提示词里没有任何「自行调用工具更新状态」的引导——这很可能就是 AI 只在思考里说要用
+   `set_outfit` 却不真正调用的原因。
+2. 希望支持流式输出，并在设置内可调整。
+
+### 实现
+
+**工具使用引导**
+
+- 开启「允许 AI 自主修改状态」后，系统提示末尾追加【工具使用】块（`buildToolGuidance`）：
+  「你可以调用工具主动更新剧情状态，而不是只口头描述」，列出 goto_location /
+  advance_time / set_outfit / set_attribute 及使用要点。
+- 通过 `ContextPipelineInput.enableStateTools` 注入；未开启时不影响。
+- e2e：开启状态工具后，开发者弹窗里的完整提示词可见【工具使用】与工具名。
+
+**流式输出**
+
+- `LlmConfig.stream`（默认关，设置「AI 行为」卡片可开关）。
+- 开启后请求带 `stream: true` + `stream_options.include_usage`；OpenAI 兼容客户端
+  按 SSE 逐块解析 content / reasoning_content / tool_calls / usage，
+  `onDelta` 实时回调增量文本；对话区先显示草稿气泡，完成后以最终文本落快照。
+- 端点忽略 stream 返回完整 JSON 时自动降级；demo 模式不流式。
+- e2e：拦截 `**/chat/completions` 返回 SSE 分块，断言最终文本渲染且请求体
+  `stream: true`。
+
+### 门禁
+
+- 单元测试：全量 418 个；覆盖率 100% 语句/行/函数（分支 94.38%）；23 条 e2e 全过；
+  build/check/lint 全绿。
+
 ## 2026-08-05（续）：模型输入改为可点击下拉 + Max Tokens 说明
 
 ### 需求

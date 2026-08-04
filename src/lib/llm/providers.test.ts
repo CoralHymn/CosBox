@@ -114,4 +114,9 @@ describe('normalizeLlmConfig', () => {
 		expect(normalizeLlmConfig({}).autoCompact).toBe(true);
 		expect(normalizeLlmConfig({}).compactThreshold).toBe(0.8);
 	});
+
+	it('保留 stream，缺省回退 false', () => {
+		expect(normalizeLlmConfig({ stream: true }).stream).toBe(true);
+		expect(normalizeLlmConfig({}).stream).toBe(false);
+	});
 });

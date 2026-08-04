@@ -20,9 +20,11 @@ export class DemoLlmClient implements LlmClient {
 	async chat(
 		messages: ChatMessage[],
 		_config: LlmConfig,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		_onDelta?: (delta: string) => void
 	): Promise<LlmChatResult> {
 		await delay(250, signal);
+		void _onDelta;
 		const content = buildDemoReply(messages);
 		return {
 			content,

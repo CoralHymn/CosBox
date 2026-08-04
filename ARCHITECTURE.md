@@ -111,6 +111,13 @@ flowchart LR
 输出 `ContextBundle`：`systemMessage`（基础提示 + 状态摘要 + 世界设定）与可直接提交给
 Chat Completions API 的 `messages` 数组。
 
+### 工具使用引导
+
+- 开启「允许 AI 自主修改状态」后，系统提示末尾追加【工具使用】说明：告知模型它**可以
+  直接调用** `goto_location / advance_time / set_outfit / set_attribute` 更新剧情状态，
+  而不是只口头描述——避免模型在思考里「想调用」却不发出 tool_call。
+- 引导文本由 `buildToolGuidance()` 生成，随 `ContextPipelineInput.enableStateTools` 注入。
+
 ### 仅展示消息（skipContext）
 
 - `ChatMessageView.skipContext` 标记「只给用户看、不进 LLM 上下文」的消息（如 `/help`
@@ -153,6 +160,13 @@ Chat Completions API 的 `messages` 数组。
 - 模型输入框是受控 combobox：点击/聚焦即弹出候选下拉（服务端拉取列表优先，未拉取时用
   预设建议），输入即时过滤、↑/↓ + Enter 键盘选择，同时仍允许直接输入自定义模型 id；
   `Max Tokens` 是单次回复的输出上限（`max_tokens`），同时作为自动压缩的预留输出预算。
+
+### 流式输出
+
+- 设置「流式输出」开启后，请求带 `stream: true` + `stream_options.include_usage`；
+  OpenAI 兼容客户端按 SSE 逐块解析 content / reasoning / tool_calls / usage，
+  通过 `onDelta` 实时回调增量文本，对话区边生成边显示（完成后落快照）。
+- 端点忽略 stream 参数返回完整 JSON 时自动降级为非流式解析；demo 模式不流式（一次性返回）。
 
 ## Agent 工具循环
 

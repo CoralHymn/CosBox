@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState } from '../core/state';
 import type { ChatMessageView, WorldInfoEntry } from '../core/types';
-import { buildContext, defaultSystemPrompt } from './pipeline';
+import { buildContext, buildToolGuidance, defaultSystemPrompt } from './pipeline';
 
 function history(): ChatMessageView[] {
 	return [
@@ -26,6 +26,17 @@ describe('defaultSystemPrompt', () => {
 	it('生成包含角色名的提示', () => {
 		expect(defaultSystemPrompt('绫音')).toContain('「绫音」');
 		expect(defaultSystemPrompt('绫音')).toContain('当前状态');
+	});
+});
+
+describe('buildToolGuidance', () => {
+	it('包含状态工具名称与调用说明', () => {
+		const text = buildToolGuidance();
+		expect(text).toContain('【工具使用】');
+		expect(text).toContain('goto_location');
+		expect(text).toContain('set_outfit');
+		expect(text).toContain('advance_time');
+		expect(text).toContain('set_attribute');
 	});
 });
 
@@ -155,5 +166,25 @@ describe('buildContext', () => {
 		expect(bundle.systemMessage).not.toContain('不应触发');
 		expect(bundle.systemMessage).toContain('图书馆是校园传说发生地。');
 		expect(bundle.history.map((m) => m.id)).toEqual(['1']);
+	});
+
+	it('启用状态工具时系统提示注入工具使用说明', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: [],
+			enableStateTools: true
+		});
+		expect(bundle.systemMessage).toContain('【工具使用】');
+		expect(bundle.systemMessage).toContain('set_outfit');
+	});
+
+	it('未启用状态工具时不注入工具说明', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: []
+		});
+		expect(bundle.systemMessage).not.toContain('【工具使用】');
 	});
 });
