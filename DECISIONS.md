@@ -1,0 +1,73 @@
+# 关键决策记录（DECISIONS）
+
+本文件记录与规格相关的 trade-off；格式：问题 → 选择 → 理由 / 代价。
+
+## D1：状态第一公民 vs 消息附件
+
+**问题**：聊天消息天然是线性的，若把状态挂在消息上，回溯与分支会非常痛苦。
+**选择**：`CharacterState` 独立存在；消息与状态变更都作为版本图节点，重建时分别产出「状态」与「会话」。
+**理由**：状态可以独立演化；消息可以带着当时的语境被回溯。
+**代价**：状态与消息在时间上解耦——重建出的会话不附带逐条状态快照，需要时可从版本图按时间线交叉读取。
+
+## D2：增量快照链 vs 真 Git / 全量快照
+
+**问题**：规格要求内置类 Git 版本控制，但禁止外部 Git 运行时；全量快照会随会话膨胀。
+**选择**：单父多子的 delta 链（`delta: StatePatch | Message | null`），IndexedDB 单表存储。
+**理由**：增量存储体积小；`[parentId+timestamp]` 索引支持高效分支枚举；100+ 次 delta 重建有测试保障。
+**代价**：长链重建是 O(链长)；当前规模（单用户、会话级）完全可接受。若未来需要超大历史，可在 `rebuildState` 前做基线压缩快照。
+
+## D3：checkout 无副作用
+
+**问题**：切换分支时若写回「当前指针」到快照表，会污染版本历史。
+**选择**：checkout = `rebuildState(targetId)` 纯读 + 内存态替换；「当前 head」存 kv 表（`lastHeadId`）而非 snapshots 表。
+**理由**：分支切换不产生任何新节点；测试断言快照计数不变。
+
+## D4：LLM 接入方式
+
+**问题**：规格允许 LiteLLM SDK 或 OpenAI-compatible API；但 LiteLLM 官方 SDK 是 Python 包，浏览器无法加载。
+**选择**：实现 OpenAI-compatible fetch 客户端（`/chat/completions`），推荐用 LiteLLM Proxy 作为本地网关；另内置离线 `demo` provider 保证零配置可运行与 e2e 确定性。
+**理由**：任何兼容端点（LiteLLM / vLLM / Ollama / OpenAI）一行配置即可接入；demo 模式让 P0 链路离线可演示。
+
+## D5：历史压缩策略
+
+**问题**：无 LLM 时也要有确定性的压缩行为。
+**选择**：规则压缩——超出 `maxMessages` 保留最近 N 条，插入「早前对话已压缩：M 条」占位；单条超长截断。
+**理由**：确定性、可测试、零成本；`HistoryOptions` 预留后续接入 LLM 摘要的升级点。
+
+## D6：World Info 触发匹配
+
+**问题**：关键词匹配的边界处理。
+**选择**：归一化后子串匹配（trim + lowercase），多词关键词按字面连续匹配；禁用条目与空关键词跳过；结果按 priority 降序。
+**理由**：对中文（无词边界）友好；行为可预期。
+**代价**：英文不做词边界，`love` 会命中 `glove`。可作为后续增强（词边界正则），当前文档化接受。
+
+## D7：编辑器提交语义
+
+**问题**：输入框每键一次快照会让版本树爆炸。
+**选择**：编辑器使用本地草稿，`blur`/`change` 时一次性 `CharacterStore.update()` 提交。
+**理由**：每个可见的稳定状态变更对应一个快照；避免按键级噪音。
+
+## D8：类型深度可选补丁
+
+**问题**：`Partial<CharacterState>` 只让顶层可选，`{ outfit: { top } }` 无法通过类型检查（svelte-check 早期暴露）。
+**选择**：定义 `StatePatch`（outfit/location/schedule/attributes 各为 Partial），并用于 delta 与 `update()` 签名。
+**理由**：把「部分更新」的意图写进类型系统；配合严格模式与零 `any`。
+
+## D9：覆盖率口径
+
+**问题**：UI 组件单测成本高、收益低。
+**选择**：核心抽象层（core/context/db/manager/llm/import-export/utils）用 Vitest 达到语句/行/函数 100%（分支 94%）；UI 行为用 Playwright e2e 覆盖。
+**理由**：业务正确性集中在纯函数与仓储；组件是薄展示层，e2e 更能反映真实用户流程。
+**未覆盖分支说明**：`CharacterManager` 中 `headId === null` 的防御分支与「tips 为空」分支经分析不可达（init 后 head 必非空；count>0 必有至少一个 tip），保留为防御性代码并有测试锁定主路径。
+
+## D10：数据库实例管理
+
+**问题**：全局单例 db 会让测试互相污染。
+**选择**：`CosBoxDatabase` 可独立实例化；测试用随机库名；应用侧用 `getDb()` 单例。
+
+## D11：SillyTavern V3 映射
+
+**问题**：V3 卡片是文本中心结构，与结构化状态不对齐。
+**选择**：`description/personality/scenario` → 世界书条目（comment 标签标记）；`name/tags/creator/version` → 属性；`first_mes` → 初始问候消息；`system_prompt` → 角色档案；`character_book` → 世界书条目（保留 enabled/insertion_order）。导出做反向映射。
+**理由**：文本设定留在「可被关键词触发」的世界书里，与状态语义一致；comment 标签保证导出 round-trip 稳定。
+**代价**：数值型属性（如 affection）无法从 V3 还原，V3 规范本身不含该信息。
