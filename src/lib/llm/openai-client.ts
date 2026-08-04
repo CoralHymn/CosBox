@@ -5,7 +5,8 @@ import type {
 	LlmClient,
 	LlmConfig,
 	StateToolSchema,
-	ToolCall
+	ToolCall,
+	TokenUsage
 } from './types';
 
 /**
@@ -14,9 +15,12 @@ import type {
  */
 export class OpenAiCompatibleClient implements LlmClient {
 	/** 发送对话并返回 assistant 文本。失败统一抛 LlmError。 */
-	async chat(messages: ChatMessage[], config: LlmConfig, signal?: AbortSignal): Promise<string> {
-		const result = await this.chatWithTools(messages, [], config, signal);
-		return result.content ?? '';
+	async chat(
+		messages: ChatMessage[],
+		config: LlmConfig,
+		signal?: AbortSignal
+	): Promise<LlmChatResult> {
+		return this.chatWithTools(messages, [], config, signal);
 	}
 
 	/**
@@ -72,15 +76,16 @@ export class OpenAiCompatibleClient implements LlmClient {
 
 		const content = extractContent(data);
 		const toolCalls = extractToolCalls(data);
+		const usage = extractUsage(data);
 		if (toolCalls.length > 0) {
-			return { content, toolCalls };
+			return { content, toolCalls, usage };
 		}
 		if (content !== null) {
 			const inline = extractInlineToolCall(content);
 			if (inline.length > 0) {
-				return { content: null, toolCalls: inline };
+				return { content: null, toolCalls: inline, usage };
 			}
-			return { content, toolCalls: [] };
+			return { content, toolCalls: [], usage };
 		}
 		throw new LlmError('模型响应缺少 choices[0].message.content');
 	}
@@ -175,6 +180,39 @@ function extractToolCalls(data: unknown): ToolCall[] {
 		});
 	});
 	return calls;
+}
+
+/**
+ * 从响应中提取 usage 用量：
+ * prompt_tokens / completion_tokens 必填（可为 0），
+ * prompt_tokens_details.cached_tokens 可选（部分端点提供）。
+ * 字段缺失或非法时按 0 处理；完全缺失 usage 返回 undefined。
+ */
+function extractUsage(data: unknown): TokenUsage | undefined {
+	if (!isRecord(data) || !isRecord(data.usage)) {
+		return undefined;
+	}
+	const usage = data.usage;
+	const promptTokens = toNonNegativeInt(usage.prompt_tokens);
+	const completionTokens = toNonNegativeInt(usage.completion_tokens);
+	if (promptTokens === null && completionTokens === null) {
+		return undefined;
+	}
+	const details = usage.prompt_tokens_details;
+	const cachedTokens = toNonNegativeInt(isRecord(details) ? details.cached_tokens : undefined);
+	return {
+		promptTokens: promptTokens ?? 0,
+		completionTokens: completionTokens ?? 0,
+		cachedTokens: cachedTokens ?? 0
+	};
+}
+
+/** 读取非负整数；缺失/非法返回 null。 */
+function toNonNegativeInt(value: unknown): number | null {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+		return null;
+	}
+	return Math.floor(value);
 }
 
 /** 兼容纯文本 JSON 工具调用形态：{"tool": "...", "args": {...}}。 */

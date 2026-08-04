@@ -10,7 +10,7 @@
 	let { characterState }: Props = $props();
 </script>
 
-<aside class="side-preview">
+<div class="state-preview">
 	<p class="card-title">实时状态预览</p>
 	<p class="preview-line">
 		<span class="k">时间</span><span
@@ -35,4 +35,4 @@
 	<p class="preview-line">
 		<span class="k">日程</span><span>{summarizeSchedule(characterState.schedule)}</span>
 	</p>
-</aside>
+</div>

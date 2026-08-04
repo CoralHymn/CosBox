@@ -88,10 +88,7 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 
 	await page.getByRole('button', { name: /版本/ }).click();
 	await expect(page.locator('.branch-card')).toHaveCount(2);
-	const snapshotsBefore = await page
-		.locator('.chip')
-		.filter({ hasText: '快照' })
-		.textContent();
+	const snapshotsBefore = await page.locator('.chip').filter({ hasText: '快照' }).textContent();
 
 	page.on('dialog', (dialog) => void dialog.accept());
 	await page.getByRole('button', { name: '删除' }).first().click();
@@ -240,8 +237,12 @@ test('设置：角色档案默认显示、保存不回清、回到默认、开�
 	await page.getByRole('button', { name: /对话/ }).click();
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await page.getByText(/最近一次发送给 AI 的完整提示词/).click();
+	const debugBlock = page.locator('.debug-prompt');
+	await debugBlock.getByText(/最近一次发送给 AI 的完整提示词/).click();
 	await expect(page.getByText('【当前状态】').first()).toBeVisible();
+	// 提示词区域可滚动查看完整内容
+	await expect(debugBlock).toHaveCSS('overflow-y', 'auto');
+	await expect(debugBlock.locator('pre').first()).toHaveCSS('white-space', 'pre-wrap');
 });
 
 test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {
@@ -316,4 +317,50 @@ test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 	await page.getByRole('button', { name: /对话/ }).click();
 	await expect(page.getByText('校外 > 海边')).toBeVisible();
 	await expect(page.getByText('白色连衣裙').first()).toBeVisible();
+});
+
+test('对话后侧栏显示上下文用量、费用估算与历史压缩开关', async ({ page }) => {
+	await page.goto('/');
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	await expect(page.getByText('上下文用量（估算）')).toBeVisible();
+	await expect(page.getByText('输入 / 已缓存')).toBeVisible();
+	// 演示模式默认模型不在本地定价表 → 费用显示「—」
+	const costRow = page.locator('.ctx-row').filter({ hasText: '费用（USD）' });
+	await expect(costRow).toContainText('—');
+
+	// 历史压缩开关可调，且聊天记录不受影响
+	await page.locator('#ctx-history-max').selectOption('10');
+	await expect(page.locator('#ctx-history-max')).toHaveValue('10');
+	await expect(page.locator('.message.user')).toHaveCount(1);
+	await expect(page.locator('.message.assistant')).toHaveCount(1);
+});
+
+test('设置：获取模型列表自动填充上下文窗口，连接测试验证 API', async ({ page }) => {
+	await page.route('**/models', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				data: [{ id: 'mock-model-a', context_window: 64000 }, { id: 'mock-model-b' }]
+			})
+		})
+	);
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#llm-provider').selectOption('deepseek');
+
+	await page.getByRole('button', { name: '获取模型列表' }).click();
+	await expect(page.getByText(/已获取 2 个模型/)).toBeVisible();
+	// 服务端模型列表替代写死的候选
+	await expect(page.locator('#llm-model-list option[value="mock-model-a"]')).toHaveCount(1);
+	await expect(page.locator('#llm-model-list option[value="deepseek-v4-flash"]')).toHaveCount(0);
+	// 输入已知模型后自动填充上下文窗口
+	await page.locator('#llm-model').fill('mock-model-a');
+	await expect(page.getByText('上下文窗口：64000 tokens')).toBeVisible();
+
+	await page.getByRole('button', { name: '连接测试' }).click();
+	await expect(page.getByText('连接成功，API 可用')).toBeVisible();
 });

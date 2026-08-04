@@ -1,13 +1,24 @@
 <script lang="ts">
+	import type { ContextBundle } from '../context/pipeline';
 	import type { CharacterState, ChatMessageView } from '../core/types';
 	import type { DebugPromptView } from '../llm/chat-service';
+	import type { LlmConfig, TokenUsage } from '../llm/types';
 	import ChatInput from './ChatInput.svelte';
+	import ContextPanel from './ContextPanel.svelte';
 	import MessageBubble from './MessageBubble.svelte';
 	import StatePreview from './StatePreview.svelte';
 
 	interface Props {
 		conversation: ChatMessageView[];
 		characterState: CharacterState;
+		config: LlmConfig;
+		/** 最近一次请求的上下文包；null 表示尚未发送消息。 */
+		context: ContextBundle | null;
+		/** 最近一次请求的 token 用量。 */
+		usage: TokenUsage | null;
+		/** 发送给模型的历史消息条数上限。 */
+		historyMaxMessages: number;
+		onHistoryMaxChange: (max: number) => void;
 		busy: boolean;
 		searchSupported: boolean;
 		searching: boolean;
@@ -16,8 +27,21 @@
 		onSend: (content: string, options: { search: boolean }) => void;
 	}
 
-	let { conversation, characterState, busy, searchSupported, searching, developerMode, debugPrompt, onSend }: Props =
-		$props();
+	let {
+		conversation,
+		characterState,
+		config,
+		context,
+		usage,
+		historyMaxMessages,
+		onHistoryMaxChange,
+		busy,
+		searchSupported,
+		searching,
+		developerMode,
+		debugPrompt,
+		onSend
+	}: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
 
 	$effect(() => {
@@ -67,5 +91,8 @@
 			{onSend}
 		/>
 	</div>
-	<StatePreview {characterState} />
+	<aside class="side-preview">
+		<StatePreview {characterState} />
+		<ContextPanel {config} {context} {usage} {historyMaxMessages} {onHistoryMaxChange} />
+	</aside>
 </div>

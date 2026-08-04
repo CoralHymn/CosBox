@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { ConfigPatch, StatePatch, WorldInfoEntry } from '../lib/core/types';
 	import { formatWorldTime } from '../lib/core/state';
-	import type { ContextPipelineInput } from '../lib/context/pipeline';
+	import type { ContextBundle, ContextPipelineInput } from '../lib/context/pipeline';
 	import { KvRepository } from '../lib/db/kv-repo';
 	import { getDb } from '../lib/db/schema';
 	import { SnapshotRepository } from '../lib/db/snapshot-repo';
@@ -17,7 +17,9 @@
 	import { DemoLlmClient } from '../lib/llm/demo-provider';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
+	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
 	import { STATE_TOOLS } from '../lib/llm/state-tools';
+	import type { LlmConfig, TokenUsage } from '../lib/llm/types';
 	import type { SearchResult } from '../lib/search/types';
 	import { WebSearchClient } from '../lib/search/search-client';
 	import type { AppProfile } from '../lib/stores/settings.svelte';
@@ -59,6 +61,13 @@
 	let ready = $state(false);
 	/** 开发者模式下展示的最近一次发送给 AI 的完整提示词。 */
 	let debugPrompt = $state<DebugPromptView | null>(null);
+	/** 最近一次请求的上下文包与用量（供侧栏上下文面板展示）。 */
+	let lastContext = $state<{ bundle: ContextBundle | null; usage: TokenUsage | null }>({
+		bundle: null,
+		usage: null
+	});
+	/** 发送给模型的历史消息条数上限；压缩只影响请求内容，不动本地历史。 */
+	let historyMaxMessages = $state(20);
 
 	const providerLabel = $derived.by(() => {
 		if (settings.config.provider === 'demo') {
@@ -113,6 +122,7 @@
 			const input: ContextPipelineInput = {
 				state: session.state,
 				conversation: session.conversation,
+				historyOptions: { maxMessages: historyMaxMessages },
 				worldInfo: worldInfo.entries,
 				characterName:
 					settings.profile.name ||
@@ -125,7 +135,7 @@
 			const service = new ChatService(
 				settings.config.provider === 'demo' ? demoClient : openAiClient
 			);
-			const { reply, debug } = await service.generateReply(input, settings.config, {
+			const { reply, debug, bundle, usage } = await service.generateReply(input, settings.config, {
 				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 				toolContext: {
 					getState: () => session.state,
@@ -134,6 +144,7 @@
 				}
 			});
 			debugPrompt = debug;
+			lastContext = { bundle, usage: usage ?? null };
 			await session.addMessage('assistant', reply);
 		} catch (err) {
 			toasts.error(err);
@@ -275,6 +286,28 @@
 		}
 	}
 
+	/** 获取模型列表（使用设置面板当前草稿配置）。失败返回空列表并由面板显示 toast。 */
+	async function handleFetchModels(draft: LlmConfig): Promise<FetchedModel[]> {
+		try {
+			const models = await fetchModelList(draft.baseUrl, draft.apiKey);
+			toasts.success(`获取到 ${models.length} 个模型`);
+			return models;
+		} catch (err) {
+			toasts.error(err);
+			return [];
+		}
+	}
+
+	/** 连接测试：验证当前草稿配置的端点与 API Key 是否可用。 */
+	async function handleTestConnection(draft: LlmConfig): Promise<void> {
+		try {
+			await testConnection(draft.baseUrl, draft.apiKey);
+			toasts.success('连接成功，API 可用');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
 	async function handleImport(text: string): Promise<void> {
 		try {
 			const card = parseCharaCard(text);
@@ -355,11 +388,16 @@
 				<ChatPanel
 					conversation={session.conversation}
 					characterState={session.state}
+					config={settings.config}
+					context={lastContext.bundle}
+					usage={lastContext.usage}
+					{historyMaxMessages}
+					onHistoryMaxChange={(max) => (historyMaxMessages = max)}
 					{busy}
 					{searchSupported}
 					{searching}
 					developerMode={settings.developerMode}
-					debugPrompt={debugPrompt}
+					{debugPrompt}
 					onSend={handleSend}
 				/>
 			{:else if tab === 'state'}
@@ -409,6 +447,8 @@
 					onSaveProfile={handleSaveProfile}
 					onResetProfile={handleResetProfile}
 					onSaveDeveloperMode={handleSaveDeveloperMode}
+					onFetchModels={handleFetchModels}
+					onTestConnection={handleTestConnection}
 				/>
 			{/if}
 		</main>

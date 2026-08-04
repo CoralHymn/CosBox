@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { findModelInfo } from '../llm/model-info';
+	import type { FetchedModel } from '../llm/model-service';
 	import { CUSTOM_PROVIDER_ID, findProviderPreset, LLM_PROVIDER_PRESETS } from '../llm/providers';
 	import { DEFAULT_LLM_CONFIG, type LlmConfig } from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
@@ -12,10 +14,21 @@
 		onSaveProfile: (profile: AppProfile) => Promise<void>;
 		onResetProfile: () => Promise<void>;
 		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
+		onFetchModels: (draft: LlmConfig) => Promise<FetchedModel[]>;
+		onTestConnection: (draft: LlmConfig) => Promise<void>;
 	}
 
-	let { config, profile, developerMode, onSaveConfig, onSaveProfile, onResetProfile, onSaveDeveloperMode }: Props =
-		$props();
+	let {
+		config,
+		profile,
+		developerMode,
+		onSaveConfig,
+		onSaveProfile,
+		onResetProfile,
+		onSaveDeveloperMode,
+		onFetchModels,
+		onTestConnection
+	}: Props = $props();
 
 	/** 服务商选择：'demo' | 预设 id | CUSTOM_PROVIDER_ID。 */
 	let presetSelection = $state<string>('demo');
@@ -24,11 +37,17 @@
 	let model = $state('');
 	let temperature = $state(0.8);
 	let maxTokens = $state(1024);
+	let modelContextWindow = $state<number | undefined>(undefined);
 	let allowAiStateTools = $state(false);
 	let devMode = $state(false);
 	let profileName = $state('');
 	let systemPrompt = $state('');
 	let saving = $state(false);
+	let fetchingModels = $state(false);
+	let testingConnection = $state(false);
+	/** 「获取模型列表」拉取到的模型 id 与上下文窗口。 */
+	let availableModels = $state<string[]>([]);
+	let modelContexts = $state<Record<string, number>>({});
 
 	/** 网络搜索配置草稿。 */
 	let searchEnabled = $state(false);
@@ -37,6 +56,10 @@
 	let searchMaxResults = $state(5);
 
 	const currentPreset = $derived(findProviderPreset(presetSelection));
+	/** 模型候选：拉取到列表后优先使用服务端列表，否则回退预设建议。 */
+	const modelCandidates = $derived(
+		availableModels.length > 0 ? availableModels : (currentPreset?.models ?? [])
+	);
 
 	$effect(() => {
 		presetSelection =
@@ -50,6 +73,7 @@
 		model = config.model;
 		temperature = config.temperature;
 		maxTokens = config.maxTokens;
+		modelContextWindow = config.modelContextWindow;
 		allowAiStateTools = config.allowAiStateTools === true;
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
@@ -64,15 +88,39 @@
 	function selectProvider(id: string): void {
 		presetSelection = id;
 		if (id === 'demo' || id === CUSTOM_PROVIDER_ID) {
+			modelContextWindow = undefined;
 			return;
 		}
 		const preset = findProviderPreset(id);
 		if (!preset) {
 			presetSelection = CUSTOM_PROVIDER_ID;
+			modelContextWindow = undefined;
 			return;
 		}
 		baseUrl = preset.baseUrl;
 		model = preset.defaultModel;
+		modelContextWindow = findModelInfo(preset.defaultModel)?.contextWindow;
+	}
+
+	/** 从当前表单构建完整配置草稿（保存、获取模型列表、连接测试共用）。 */
+	function buildConfig(): LlmConfig {
+		return {
+			provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
+			providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
+			baseUrl: baseUrl.trim(),
+			apiKey: apiKey.trim(),
+			model: model.trim() || DEFAULT_LLM_CONFIG.model,
+			temperature: Math.min(2, Math.max(0, temperature)),
+			maxTokens: Math.max(1, Math.floor(maxTokens)),
+			modelContextWindow,
+			allowAiStateTools,
+			webSearch: {
+				enabled: searchEnabled,
+				provider: searchProvider,
+				apiKey: searchApiKey.trim(),
+				maxResults: Math.min(10, Math.max(1, Math.floor(searchMaxResults)))
+			}
+		};
 	}
 
 	async function save(): Promise<void> {
@@ -82,22 +130,7 @@
 			const name = profileName.trim();
 			const prompt = systemPrompt.trim() || null;
 			const dev = devMode;
-			await onSaveConfig({
-				provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
-				providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
-				baseUrl: baseUrl.trim(),
-				apiKey: apiKey.trim(),
-				model: model.trim() || DEFAULT_LLM_CONFIG.model,
-				temperature: Math.min(2, Math.max(0, temperature)),
-				maxTokens: Math.max(1, Math.floor(maxTokens)),
-				allowAiStateTools,
-				webSearch: {
-					enabled: searchEnabled,
-					provider: searchProvider,
-					apiKey: searchApiKey.trim(),
-					maxResults: Math.min(10, Math.max(1, Math.floor(searchMaxResults)))
-				}
-			});
+			await onSaveConfig(buildConfig());
 			await onSaveProfile({ name, systemPrompt: prompt });
 			await onSaveDeveloperMode(dev);
 		} finally {
@@ -108,6 +141,52 @@
 	/** 「回到默认」仅重置角色档案，不动其他设置。 */
 	async function resetProfile(): Promise<void> {
 		await onResetProfile();
+	}
+
+	/** 拉取模型列表并填充 datalist；自动补全当前模型的上下文窗口。 */
+	async function fetchModels(): Promise<void> {
+		if (presetSelection === 'demo') {
+			return;
+		}
+		fetchingModels = true;
+		try {
+			const models = await onFetchModels(buildConfig());
+			availableModels = models.map((entry) => entry.id);
+			const contexts: Record<string, number> = {};
+			for (const entry of models) {
+				if (entry.contextWindow !== undefined) {
+					contexts[entry.id] = entry.contextWindow;
+				}
+			}
+			modelContexts = contexts;
+			const known = contexts[model.trim()];
+			if (known !== undefined) {
+				modelContextWindow = known;
+			}
+		} finally {
+			fetchingModels = false;
+		}
+	}
+
+	/** 连接测试：验证当前草稿的端点和 Key。 */
+	async function test(): Promise<void> {
+		if (presetSelection === 'demo') {
+			return;
+		}
+		testingConnection = true;
+		try {
+			await onTestConnection(buildConfig());
+		} finally {
+			testingConnection = false;
+		}
+	}
+
+	/** 手动输入模型时，若已拉取到该模型的上下文窗口则自动填充。 */
+	function onModelInput(): void {
+		const known = modelContexts[model.trim()];
+		if (known !== undefined) {
+			modelContextWindow = known;
+		}
 	}
 </script>
 
@@ -163,17 +242,43 @@
 					id="llm-model"
 					class="input"
 					bind:value={model}
+					oninput={onModelInput}
 					list="llm-model-list"
 					placeholder="模型 id"
 				/>
 				<datalist id="llm-model-list">
-					{#each currentPreset?.models ?? [] as candidate (candidate)}
+					{#each modelCandidates as candidate (candidate)}
 						<option value={candidate}></option>
 					{/each}
 				</datalist>
+				<p class="muted" style="margin-top: 2px;">
+					上下文窗口：{modelContextWindow ?? findModelInfo(model.trim())?.contextWindow ?? '未知'} tokens
+				</p>
 			</div>
 			{#if currentPreset?.notes}
 				<p class="muted" style="margin-top: 2px;">{currentPreset.notes}</p>
+			{/if}
+			<div class="row-actions" style="margin-bottom: 10px;">
+				<button
+					class="btn btn-small"
+					onclick={fetchModels}
+					disabled={fetchingModels || testingConnection}
+				>
+					{fetchingModels ? '获取中…' : '获取模型列表'}
+				</button>
+				<button class="btn btn-small" onclick={test} disabled={fetchingModels || testingConnection}>
+					{testingConnection ? '测试中…' : '连接测试'}
+				</button>
+			</div>
+			{#if availableModels.length > 0}
+				<p class="muted" style="margin: 0 0 10px;">
+					已获取 {availableModels.length} 个模型；选择或输入已知模型后自动填充上下文窗口。
+				</p>
+			{:else}
+				<p class="muted" style="margin: 0 0 10px;">
+					获取模型列表将拉取该端点支持的模型并替代写死的候选列表；连接测试用于验证地址与 Key
+					是否有效。
+				</p>
 			{/if}
 		{/if}
 
@@ -244,11 +349,19 @@
 	<div class="card">
 		<h3 class="card-title">AI 行为</h3>
 		<div class="row-actions" style="margin-bottom: 10px;">
-			<input id="ai-tools-enabled" class="checkbox" type="checkbox" bind:checked={allowAiStateTools} />
-			<label for="ai-tools-enabled" class="muted">允许 AI 自主修改状态（地点 / 时间 / 穿着 / 属性）</label>
+			<input
+				id="ai-tools-enabled"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={allowAiStateTools}
+			/>
+			<label for="ai-tools-enabled" class="muted"
+				>允许 AI 自主修改状态（地点 / 时间 / 穿着 / 属性）</label
+			>
 		</div>
 		<p class="muted" style="margin: 0;">
-			开启后，AI 可在剧情中自行调用工具更新状态并生成快照，你可以在版本页回溯；关闭则保持纯文本回复。
+			开启后，AI
+			可在剧情中自行调用工具更新状态并生成快照，你可以在版本页回溯；关闭则保持纯文本回复。
 		</p>
 	</div>
 

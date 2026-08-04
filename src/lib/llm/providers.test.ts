@@ -100,4 +100,10 @@ describe('normalizeLlmConfig', () => {
 		expect(result.webSearch.apiKey).toBe(DEFAULT_WEB_SEARCH_CONFIG.apiKey);
 		expect(result.webSearch.maxResults).toBe(DEFAULT_WEB_SEARCH_CONFIG.maxResults);
 	});
+
+	it('保留 modelContextWindow，缺省时为 undefined', () => {
+		const result = normalizeLlmConfig({ modelContextWindow: 65_536 });
+		expect(result.modelContextWindow).toBe(65_536);
+		expect(normalizeLlmConfig({}).modelContextWindow).toBeUndefined();
+	});
 });
