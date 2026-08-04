@@ -61,9 +61,12 @@ test('版本页切换回退状态与对话', async ({ page }) => {
 	await expect(page.getByText('更新穿着').first()).toBeVisible();
 	await expect(page.getByText('分支列表').first()).toBeVisible();
 
-	// 分支默认收起：先展开，再切换回根快照（第一个「切换」按钮即根节点）
+	// 分支默认收起：先展开，验证链内「新的在上、旧的在下」，再切换回根快照
 	await page.getByRole('button', { name: '展开' }).first().click();
-	await page.getByRole('button', { name: '切换' }).first().click();
+	const chainRows = page.locator('.branch-chain .version-row');
+	await expect(chainRows.first()).toContainText('更新穿着');
+	await expect(chainRows.last()).toContainText('初始状态');
+	await chainRows.locator('button', { hasText: '切换' }).last().click();
 	await page.getByRole('button', { name: /对话/ }).click();
 	await expect(page.getByText('白色衬衫').first()).toBeVisible();
 	await expect(page.getByText(/早上好/)).not.toBeVisible();
@@ -80,7 +83,11 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 	// 切回根，再开分支 B：中午好
 	await page.getByRole('button', { name: /版本/ }).click();
 	await page.getByRole('button', { name: '展开' }).first().click();
-	await page.getByRole('button', { name: '切换' }).first().click();
+	await page
+		.locator('.branch-chain .version-row')
+		.locator('button', { hasText: '切换' })
+		.last()
+		.click();
 	await page.getByRole('button', { name: /对话/ }).click();
 	await page.getByPlaceholder(/输入消息/).fill('中午好');
 	await page.getByRole('button', { name: '发送' }).click();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessageView } from '../core/types';
-import { excludeFromContext, prepareHistory } from './history';
+import { excludeFromContext, HELP_TEXT_PREFIX, prepareHistory } from './history';
 
 function msg(id: string, content: string): ChatMessageView {
 	return { id, role: 'user', content, timestamp: Number(id) };
@@ -75,5 +75,21 @@ describe('excludeFromContext', () => {
 			{ id: '2', role: 'assistant', content: 'b', timestamp: 2 }
 		];
 		expect(excludeFromContext(conversation)).toEqual(conversation);
+	});
+
+	it('按内容识别早期未打标记的 /help 消息并排除', () => {
+		const conversation: ChatMessageView[] = [
+			{
+				id: 'legacy-help',
+				role: 'system',
+				content: `${HELP_TEXT_PREFIX}：\n/help — 显示帮助`,
+				timestamp: 1
+			},
+			{ id: '2', role: 'user', content: '你好', timestamp: 2 }
+		];
+		expect(excludeFromContext(conversation).map((m) => m.id)).toEqual(['2']);
+		expect(
+			prepareHistory(conversation, { maxMessages: 10 }).messages.map((m) => m.content)
+		).toEqual(['你好']);
 	});
 });

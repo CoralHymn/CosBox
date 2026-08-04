@@ -156,9 +156,7 @@
 						开发者：查看最近一次完整提示词
 					</button>
 				{/if}
-				<button class="btn btn-small" onclick={openPreview}>
-					开发者：预览输入框提示词
-				</button>
+				<button class="btn btn-small" onclick={openPreview}> 开发者：预览输入框提示词 </button>
 			</div>
 			{#if modal !== null}
 				<div
@@ -187,10 +185,12 @@
 								<p class="muted" style="margin: 0 0 4px;">system</p>
 								<pre>{modal.view.systemMessage}</pre>
 								{#each modal.view.messages as message, i (i)}
-									<p class="muted" style="margin: 10px 0 4px;">[{message.role}]</p>
-									<pre>{message.content}</pre>
-									{#if message.toolCalls !== undefined && message.toolCalls.length > 0}
-										<pre>{JSON.stringify(message.toolCalls, null, 2)}</pre>
+									{#if !(i === 0 && message.role === 'system' && message.content === modal.view.systemMessage)}
+										<p class="muted" style="margin: 10px 0 4px;">[{message.role}]</p>
+										<pre>{message.content}</pre>
+										{#if message.toolCalls !== undefined && message.toolCalls.length > 0}
+											<pre>{JSON.stringify(message.toolCalls, null, 2)}</pre>
+										{/if}
 									{/if}
 								{/each}
 								{#if modal.note !== undefined}

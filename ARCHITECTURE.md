@@ -50,6 +50,7 @@ flowchart LR
 - **分支**：任何没有子节点的节点都是一个分支 tip；从该 tip 继续追加即开新分支。
 - **重建**：沿 `parentId` 回溯到根，按时间顺序应用状态补丁、收集消息；根自身不参与 delta 应用（初始状态即根基线）。
 - **checkout**：`rebuildState(targetId)` 的纯读别名，不产生任何写入。
+- **展示顺序**：分支列表按最后时间倒序（新的在上）；分支内快照链按「新的在上、旧的在下」排列。
 
 存储：IndexedDB `snapshots` 表，索引 `id, [parentId+timestamp], parentId, timestamp`。
 
@@ -116,6 +117,8 @@ Chat Completions API 的 `messages` 数组。
   帮助文本）：仍在会话与快照中完整保留、照常展示，但 `excludeFromContext` 会在
   历史组装与世界信息触发前过滤掉它们，发送给 AI 的提示词中不会出现。
 - 标记随消息快照持久化（`SnapshotDelta.message.skipContext`），checkout 重建后仍保留。
+- 兼容早期未打标记的快照：内容以「可用 RP 快捷命令」开头的 system 消息同样按仅展示处理。
+- 提示词弹窗只渲染一次系统消息（system 头部），消息数组里的重复 system 条目不再重复展示。
 
 ### 上下文用量与费用（侧栏）
 

@@ -46,7 +46,8 @@
 			const chain = chainToRoot(nodeMap, branch.tipId);
 			const unique = collectBranchPath(childrenMap, nodeMap, branch.tipId).reverse();
 			const forkId = unique[0]?.parentId;
-			const forkPoint = forkId === undefined || forkId === null ? null : (nodeMap.get(forkId) ?? null);
+			const forkPoint =
+				forkId === undefined || forkId === null ? null : (nodeMap.get(forkId) ?? null);
 			return {
 				branch,
 				chain,
@@ -113,7 +114,9 @@
 							{expanded.has(row.branch.tipId) ? '收起' : '展开'}
 						</button>
 						{#if row.branch.tipId !== headId}
-							<button class="btn btn-small" onclick={() => onCheckout(row.branch.tipId)}>切换</button>
+							<button class="btn btn-small" onclick={() => onCheckout(row.branch.tipId)}
+								>切换</button
+							>
 						{/if}
 						<button
 							class="btn btn-small btn-danger"
@@ -127,7 +130,7 @@
 					{/if}
 					{#if expanded.has(row.branch.tipId)}
 						<div class="branch-chain">
-							{#each row.chain as node (node.id)}
+							{#each [...row.chain].reverse() as node (node.id)}
 								<div class="version-row" class:shared={row.sharedIds.has(node.id)}>
 									<span class="badge {node.metadata.type}">{typeLabel[node.metadata.type]}</span>
 									<span class="version-desc" title={node.metadata.desc}>{node.metadata.desc}</span>
