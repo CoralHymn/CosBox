@@ -17,10 +17,12 @@
 	import { DemoLlmClient } from '../lib/llm/demo-provider';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
+	import { STATE_TOOLS } from '../lib/llm/state-tools';
 	import type { SearchResult } from '../lib/search/types';
 	import { WebSearchClient } from '../lib/search/search-client';
 	import type { AppProfile } from '../lib/stores/settings.svelte';
 	import { CharacterManager } from '../lib/manager/character-manager';
+	import { applySlashCommand, parseSlashCommand, type SlashCommand } from '../lib/utils/slash';
 	import { createCharacterSession } from '../lib/stores/character.svelte';
 	import { createSettingsStore } from '../lib/stores/settings.svelte';
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
@@ -90,6 +92,11 @@
 		busy = true;
 		let searchResults: SearchResult[] | undefined;
 		try {
+			const command = parseSlashCommand(content);
+			if (command !== null) {
+				await handleSlashCommand(command);
+				return;
+			}
 			if (options.search) {
 				searching = true;
 				try {
@@ -116,13 +123,43 @@
 			const service = new ChatService(
 				settings.config.provider === 'demo' ? demoClient : openAiClient
 			);
-			const { reply } = await service.generateReply(input, settings.config);
+			const { reply } = await service.generateReply(input, settings.config, {
+				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
+				toolContext: {
+					getState: () => session.state,
+					update: (patch, metadata) => session.update(patch, metadata),
+					advanceTime: (minutes) => session.advanceTime(minutes)
+				}
+			});
 			await session.addMessage('assistant', reply);
 		} catch (err) {
 			toasts.error(err);
 		} finally {
 			busy = false;
 			searching = false;
+		}
+	}
+
+	/** 斜杠命令：直接改状态并生成快照，再补一条系统提示让 AI 感知。 */
+	async function handleSlashCommand(command: SlashCommand): Promise<void> {
+		const result = applySlashCommand(session.state, command);
+		if (result.error !== undefined) {
+			toasts.error(result.error);
+			return;
+		}
+		if (result.patch !== undefined) {
+			await session.update(result.patch, { desc: `斜杠命令：${command.kind}` });
+		}
+		if (result.minutes !== undefined) {
+			await session.advanceTime(result.minutes);
+		}
+		if (result.checkpointDesc !== undefined) {
+			await session.addCheckpoint(result.checkpointDesc);
+		}
+		if (result.helpText !== undefined) {
+			await session.addMessage('system', result.helpText);
+		} else if (result.message !== '') {
+			await session.addMessage('system', `（命令）${result.message}`);
 		}
 	}
 

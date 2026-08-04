@@ -133,6 +133,42 @@ test('设置页选择主流服务商预设自动填充地址与模型', async ({
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
 });
 
+test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#ai-tools-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await expect(page.getByText('模型设置已保存')).toBeVisible();
+
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('我们去食堂吧');
+	await page.getByRole('button', { name: '发送' }).click();
+
+	await expect(page.getByText(/好，那我们过去吧/)).toBeVisible();
+	await expect(page.getByText('学校 > 食堂')).toBeVisible();
+});
+
+test('RP 斜杠命令：/goto /wear /time /help 直接修改状态', async ({ page }) => {
+	await page.goto('/');
+
+	await page.getByPlaceholder(/输入消息/).fill('/goto 食堂');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText('（命令）切换地点：学校 > 食堂')).toBeVisible();
+	await expect(page.getByText('学校 > 食堂', { exact: true })).toBeVisible();
+
+	await page.getByPlaceholder(/输入消息/).fill('/wear 上衣=黑色卫衣');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
+
+	await page.getByPlaceholder(/输入消息/).fill('/time +30');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByRole('banner').getByText('周一 08:30')).toBeVisible();
+
+	await page.getByPlaceholder(/输入消息/).fill('/help');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/可用 RP 快捷命令/)).toBeVisible();
+});
+
 test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 	await page.goto('/');
 

@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createInitialState } from '../core/state';
+import { addMinutes, applyStateDelta, createInitialState } from '../core/state';
+import type { StatePatch } from '../core/types';
 import type { ContextPipelineInput } from '../context/pipeline';
 import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
 import { ChatService } from './chat-service';
+import { STATE_TOOLS, type StateToolContext } from './state-tools';
 import type { ChatMessage, LlmClient, LlmConfig } from './types';
 
 const config: LlmConfig = {
@@ -50,4 +52,147 @@ describe('ChatService', () => {
 			)
 		).rejects.toThrow('模型挂了');
 	});
+
+	it('agent 循环：工具执行后携带结果继续请求，最终返回文本', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => '不应走到纯文本路径'),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: null,
+					toolCalls: [
+						{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }
+					]
+				})
+				.mockResolvedValueOnce({ content: '我们到食堂了', toolCalls: [] })
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const input: ContextPipelineInput = {
+			state: createInitialState(),
+			conversation: [{ id: '1', role: 'user', content: '我们去食堂吧', timestamp: 1 }],
+			worldInfo: []
+		};
+		const { reply, executedTools, bundle } = await service.generateReply(input, config, {
+			tools: [...STATE_TOOLS],
+			toolContext: ctx
+		});
+		expect(reply).toBe('我们到食堂了');
+		expect(executedTools).toHaveLength(1);
+		expect(executedTools[0]!.name).toBe('goto_location');
+		expect(executedTools[0]!.output).toContain('已切换地点');
+		expect(ctx.getState().location.name).toBe('食堂');
+		expect(bundle.stateSummary).toContain('食堂');
+
+		const calls = vi.mocked(client.chatWithTools!).mock.calls;
+		expect(calls).toHaveLength(2);
+		const secondMessages = calls[1]![0] as ChatMessage[];
+		expect(secondMessages[0]!.content).toContain('食堂');
+		expect(
+			secondMessages.some(
+				(message) => message.role === 'tool' && message.content.includes('已切换地点')
+			)
+		).toBe(true);
+	});
+
+	it('agent 循环：超过最大轮数后以提示文本收尾', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => 'x'),
+			chatWithTools: vi.fn(async () => ({
+				content: null,
+				toolCalls: [{ id: 'c', name: 'goto_location', arguments: { name: '图书馆' } }]
+			}))
+		};
+		const service = new ChatService(client);
+		const { reply, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), maxToolTurns: 2 }
+		);
+		expect(reply).toContain('已连续执行多次状态变更');
+		expect(executedTools).toHaveLength(2);
+		expect(vi.mocked(client.chatWithTools!).mock.calls).toHaveLength(2);
+	});
+
+	it('agent 循环：工具失败以错误文本回馈模型，循环继续', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => 'x'),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: null,
+					toolCalls: [{ id: 'c1', name: '不存在的工具', arguments: {} }]
+				})
+				.mockResolvedValueOnce({ content: '好的', toolCalls: [] })
+		};
+		const service = new ChatService(client);
+		const { reply, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('好的');
+		expect(executedTools[0]!.output).toContain('未知工具');
+	});
+
+	it('客户端不支持 chatWithTools 时即使传了工具也走纯文本', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => '纯文本回复')
+		};
+		const service = new ChatService(client);
+		const { reply, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('纯文本回复');
+		expect(executedTools).toEqual([]);
+	});
+
+	it('工具列表为空时走纯文本，不调用 chatWithTools', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => '普通对话'),
+			chatWithTools: vi.fn()
+		};
+		const service = new ChatService(client);
+		const { reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('普通对话');
+		expect(client.chatWithTools).not.toHaveBeenCalled();
+	});
+
+	it('agent 循环：模型返回空内容且无工具调用时以空串收尾', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => 'x'),
+			chatWithTools: vi.fn(async () => ({ content: null, toolCalls: [] }))
+		};
+		const service = new ChatService(client);
+		const { reply, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('');
+		expect(executedTools).toEqual([]);
+	});
 });
+
+/** 内存版工具上下文：状态在对象内直接演进。 */
+function makeToolContext(initial = createInitialState()): StateToolContext {
+	let state = initial;
+	return {
+		getState: () => state,
+		update: async (patch: StatePatch) => {
+			state = applyStateDelta(state, patch);
+		},
+		advanceTime: async (minutes: number) => {
+			state = {
+				...state,
+				schedule: { ...state.schedule, time: addMinutes(state.schedule.time, minutes) }
+			};
+		}
+	};
+}

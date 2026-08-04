@@ -1,5 +1,24 @@
 import { buildContext, type ContextBundle, type ContextPipelineInput } from '../context/pipeline';
+import {
+	executeStateTool,
+	type ExecutedToolCall,
+	type StateToolContext,
+	type StateToolDefinition
+} from './state-tools';
 import type { ChatMessage, LlmClient, LlmConfig } from './types';
+
+/** agent 循环的可选参数。 */
+export interface GenerateReplyOptions {
+	/** 要暴露给模型的状态工具；为空则退化为纯文本对话。 */
+	tools?: readonly StateToolDefinition[];
+	/** 工具执行上下文（由角色会话提供）。 */
+	toolContext?: StateToolContext;
+	/** 单轮对话内最多允许的工具调用轮数，防止死循环。 */
+	maxToolTurns?: number;
+}
+
+/** 默认最大工具轮数：超过后停止并以提示文本收尾。 */
+const DEFAULT_MAX_TOOL_TURNS = 4;
 
 /**
  * 对话服务：把「状态 + 历史 + 世界信息」组装为上下文，再调用 LLM。
@@ -12,14 +31,58 @@ export class ChatService {
 	async generateReply(
 		input: ContextPipelineInput,
 		config: LlmConfig,
+		options: GenerateReplyOptions = {},
 		signal?: AbortSignal
-	): Promise<{ reply: string; bundle: ContextBundle }> {
-		const bundle = buildContext(input);
-		const messages: ChatMessage[] = [
+	): Promise<{ reply: string; bundle: ContextBundle; executedTools: ExecutedToolCall[] }> {
+		let bundle = buildContext(input);
+		let messages: ChatMessage[] = [
 			{ role: 'system', content: bundle.systemMessage },
 			...bundle.messages
 		];
+		const executedTools: ExecutedToolCall[] = [];
+
+		if (options.tools !== undefined && options.tools.length > 0 && options.toolContext) {
+			if (this.client.chatWithTools) {
+				const maxTurns = options.maxToolTurns ?? DEFAULT_MAX_TOOL_TURNS;
+				for (let turn = 0; turn < maxTurns; turn += 1) {
+					const result = await this.client.chatWithTools(
+						messages,
+						options.tools,
+						config,
+						signal
+					);
+					if (result.toolCalls.length === 0) {
+						return { reply: result.content ?? '', bundle, executedTools };
+					}
+					const toolMessages: ChatMessage[] = [];
+					for (const call of result.toolCalls) {
+						const outcome = await executeStateTool(options.tools, call, options.toolContext);
+						executedTools.push(outcome);
+						toolMessages.push({
+							role: 'tool',
+							content: outcome.output,
+							toolCallId: call.id,
+							name: call.name
+						});
+					}
+					messages = [
+						...messages,
+						{ role: 'assistant', content: result.content ?? '', toolCalls: result.toolCalls },
+						...toolMessages
+					];
+					// 状态工具已产生新快照，重新生成状态摘要，让模型感知最新状态。
+					bundle = buildContext({ ...input, state: options.toolContext.getState() });
+					messages = [{ role: 'system', content: bundle.systemMessage }, ...messages.slice(1)];
+				}
+				return {
+					reply: '（AI 已连续执行多次状态变更，先暂停。请发送新消息继续。）',
+					bundle,
+					executedTools
+				};
+			}
+		}
+
 		const reply = await this.client.chat(messages, config, signal);
-		return { reply, bundle };
+		return { reply, bundle, executedTools };
 	}
 }

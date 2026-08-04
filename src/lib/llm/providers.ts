@@ -240,6 +240,7 @@ export interface LlmConfigPatch {
 	model?: string;
 	temperature?: number;
 	maxTokens?: number;
+	allowAiStateTools?: boolean;
 	webSearch?: Partial<WebSearchConfig>;
 }
 
@@ -264,6 +265,7 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		model: partial.model ?? defaults.model,
 		temperature: partial.temperature ?? defaults.temperature,
 		maxTokens: partial.maxTokens ?? defaults.maxTokens,
+		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
 		webSearch: search
 	};
 }
