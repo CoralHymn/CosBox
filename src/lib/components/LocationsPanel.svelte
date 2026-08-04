@@ -12,35 +12,51 @@
 
 	interface PlaceRow {
 		id: string;
+		category: string;
 		name: string;
 		description: string;
 	}
 
 	let rows = $state<PlaceRow[]>([]);
 	let currentId = $state('custom');
+	let customCategory = $state('');
 	let customName = $state('');
 	let customDescription = $state('');
+	let draftCategory = $state('');
 	let draftName = $state('');
 	let draftDescription = $state('');
 
 	$effect(() => {
 		rows = places.map((place) => ({
 			id: place.id,
+			category: place.category,
 			name: place.name,
 			description: place.description
 		}));
 		currentId = places.some((place) => place.id === location.id) ? location.id : 'custom';
+		customCategory = location.category;
 		customName = location.name;
 		customDescription = location.description;
 	});
+
+	function placeLabel(category: string, name: string): string {
+		return category === '' ? name : `${category} > ${name}`;
+	}
 
 	/** 从地点库中选择当前所在地。 */
 	function commitCurrent(placeId: string): void {
 		const place = places.find((item) => item.id === placeId);
 		if (place) {
 			onUpdate(
-				{ location: { id: place.id, name: place.name, description: place.description } },
-				`移动至：${place.name}`
+				{
+					location: {
+						id: place.id,
+						category: place.category,
+						name: place.name,
+						description: place.description
+					}
+				},
+				`移动至：${placeLabel(place.category, place.name)}`
 			);
 		}
 	}
@@ -52,6 +68,7 @@
 			{
 				location: {
 					id: name === '' ? 'custom-location' : name,
+					category: customCategory.trim(),
 					name: name === '' ? '未命名地点' : name,
 					description: customDescription.trim()
 				}
@@ -65,6 +82,7 @@
 			{
 				places: rows.map((row) => ({
 					id: row.id,
+					category: row.category,
 					name: row.name,
 					description: row.description
 				}))
@@ -78,8 +96,12 @@
 		if (name === '') {
 			return;
 		}
-		rows = [...rows, { id: newId(), name, description: draftDescription.trim() }];
+		rows = [
+			...rows,
+			{ id: newId(), category: draftCategory.trim(), name, description: draftDescription.trim() }
+		];
 		commitPlaces();
+		draftCategory = '';
 		draftName = '';
 		draftDescription = '';
 	}
@@ -92,7 +114,9 @@
 
 <div class="panel">
 	<h2 class="panel-title">地点</h2>
-	<p class="panel-sub">地点库是 AI 认知中的全部地点；当前所在地独立于日程，随时可以移动。</p>
+	<p class="panel-sub">
+		地点库是 AI 认知中的全部地点（可按大类组织，如「学校 > 食堂」）；当前所在地独立于日程。
+	</p>
 
 	<div class="card">
 		<h3 class="card-title">当前所在地</h3>
@@ -112,13 +136,22 @@
 				}}
 			>
 				{#each places as place (place.id)}
-					<option value={place.id}>{place.name}</option>
+					<option value={place.id}>{placeLabel(place.category, place.name)}</option>
 				{/each}
 				<option value="custom">自定义…</option>
 			</select>
 		</div>
 		{#if currentId === 'custom'}
 			<div class="grid-2">
+				<div class="field">
+					<label for="custom-loc-category">分类</label>
+					<input
+						id="custom-loc-category"
+						class="input"
+						bind:value={customCategory}
+						onchange={commitCustom}
+					/>
+				</div>
 				<div class="field">
 					<label for="custom-loc-name">名称</label>
 					<input
@@ -150,6 +183,13 @@
 				<div class="list-row">
 					<input
 						class="input"
+						style="width: 110px;"
+						bind:value={row.category}
+						onchange={commitPlaces}
+						placeholder="分类"
+					/>
+					<input
+						class="input"
 						style="width: 150px;"
 						bind:value={row.name}
 						onchange={commitPlaces}
@@ -172,6 +212,15 @@
 		{/if}
 		<hr class="section-divider" />
 		<div class="grid-2">
+			<div class="field">
+				<label for="new-place-category">分类（可选）</label>
+				<input
+					id="new-place-category"
+					class="input"
+					bind:value={draftCategory}
+					placeholder="如：学校"
+				/>
+			</div>
 			<div class="field">
 				<label for="new-place-name">地点名</label>
 				<input

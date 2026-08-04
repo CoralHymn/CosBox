@@ -106,19 +106,23 @@ test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 
 	// 地点 tab：新增地点并设为当前所在地
 	await page.getByRole('button', { name: /地点/ }).click();
+	await page.locator('#new-place-category').fill('校外');
 	await page.locator('#new-place-name').fill('海边');
 	await page.locator('#new-place-desc').fill('午后涨潮，可以听到海浪声');
 	await page.getByRole('button', { name: '添加地点' }).click();
 	await expect(page.locator('input[placeholder="地点名"]').last()).toHaveValue('海边');
+	await expect(page.locator('input[placeholder="分类"]').last()).toHaveValue('校外');
 	await expect(page.locator('#current-place option').filter({ hasText: '海边' })).toHaveCount(1);
-	await page.locator('#current-place').selectOption({ label: '海边' });
+	await page.locator('#current-place').selectOption({ label: '校外 > 海边' });
 
 	// 衣柜 tab：新增衣物并作为当前上衣
 	await page.getByRole('button', { name: /衣柜/ }).click();
+	await page.locator('#new-item-category').fill('常服');
 	await page.locator('#new-item-name').fill('白色连衣裙');
 	await page.locator('#new-item-desc').fill('白色碎花连衣裙，及膝，裙摆很轻');
 	await page.getByRole('button', { name: '添加衣物' }).click();
 	await expect(page.locator('input[placeholder="衣物名"]').last()).toHaveValue('白色连衣裙');
+	await expect(page.locator('input[placeholder="分类"]').last()).toHaveValue('常服');
 	await expect(page.locator('#wardrobe-names option[value="白色连衣裙"]')).toHaveCount(1);
 	await page.locator('#wardrobe-top').fill('白色连衣裙');
 	await page.locator('#wardrobe-top').blur();

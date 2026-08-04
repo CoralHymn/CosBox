@@ -41,6 +41,11 @@ describe('createInitialState', () => {
 		expect(state.outfit.wardrobe.length).toBeGreaterThan(0);
 		expect(state.places.some((place) => place.id === state.location.id)).toBe(true);
 		expect(state.outfit.wardrobe.some((item) => item.name === state.outfit.top)).toBe(true);
+		expect(state.location.category).toBe('学校');
+		expect(state.places.every((place) => place.category === '学校')).toBe(true);
+		expect(state.outfit.socks).toBe('白色过膝袜');
+		expect(state.outfit.underwear).toBe('白色棉质内衣');
+		expect(state.outfit.underpants).toBe('白色棉质内裤');
 	});
 });
 
@@ -58,9 +63,11 @@ describe('applyStateDelta', () => {
 	it('浅合并 outfit 槽位并整体替换 accessories', () => {
 		const state = createInitialState();
 		const next = applyStateDelta(state, {
-			outfit: { top: '黑色卫衣', accessories: ['围巾'] }
+			outfit: { headwear: '贝雷帽', top: '黑色卫衣', socks: '黑色短袜', accessories: ['围巾'] }
 		});
 		expect(next.outfit.top).toBe('黑色卫衣');
+		expect(next.outfit.headwear).toBe('贝雷帽');
+		expect(next.outfit.socks).toBe('黑色短袜');
 		expect(next.outfit.bottom).toBe(state.outfit.bottom);
 		expect(next.outfit.accessories).toEqual(['围巾']);
 	});
@@ -93,7 +100,7 @@ describe('applyStateDelta', () => {
 
 	it('整体替换地点库', () => {
 		const state = createInitialState();
-		const places = [{ id: 'p1', name: '便利店', description: '街角小店' }];
+		const places = [{ id: 'p1', category: '校外', name: '便利店', description: '街角小店' }];
 		const next = applyStateDelta(state, { places });
 		expect(next.places).toEqual(places);
 		expect(next.places).not.toBe(places);
@@ -102,7 +109,9 @@ describe('applyStateDelta', () => {
 
 	it('整体替换衣柜', () => {
 		const state = createInitialState();
-		const wardrobe = [{ id: 'w1', name: '连衣裙', description: '白色碎花连衣裙' }];
+		const wardrobe = [
+			{ id: 'w1', category: '常服', name: '连衣裙', description: '白色碎花连衣裙' }
+		];
 		const next = applyStateDelta(state, { outfit: { wardrobe } });
 		expect(next.outfit.wardrobe).toEqual(wardrobe);
 		expect(next.outfit.wardrobe).not.toBe(wardrobe);
@@ -145,6 +154,12 @@ describe('validateCharacterState', () => {
 			validateCharacterState({ ...base, outfit: { ...base.outfit, top: 42 } as never })
 		).toThrow(StateValidationError);
 		expect(() =>
+			validateCharacterState({ ...base, outfit: { ...base.outfit, headwear: 42 } as never })
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({ ...base, outfit: { ...base.outfit, socks: 42 } as never })
+		).toThrow(StateValidationError);
+		expect(() =>
 			validateCharacterState({ ...base, outfit: { ...base.outfit, accessories: '发带' } as never })
 		).toThrow(StateValidationError);
 		expect(() =>
@@ -168,6 +183,9 @@ describe('validateCharacterState', () => {
 		).toThrow(StateValidationError);
 		expect(() =>
 			validateCharacterState({ ...base, location: { ...base.location, name: '  ' } })
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({ ...base, location: { ...base.location, category: 1 as never } })
 		).toThrow(StateValidationError);
 	});
 
@@ -271,24 +289,42 @@ describe('validateCharacterState', () => {
 			StateValidationError
 		);
 		expect(() =>
-			validateCharacterState({ ...base, places: [{ id: '', name: 'x', description: '' }] })
+			validateCharacterState({
+				...base,
+				places: [{ id: '', category: '', name: 'x', description: '' }]
+			})
 		).toThrow(StateValidationError);
 		expect(() =>
-			validateCharacterState({ ...base, places: [{ id: 1 as never, name: 'x', description: '' }] })
+			validateCharacterState({
+				...base,
+				places: [{ id: 1 as never, category: '', name: 'x', description: '' }]
+			})
 		).toThrow(StateValidationError);
 		expect(() =>
-			validateCharacterState({ ...base, places: [{ id: 'p', name: '  ', description: '' }] })
+			validateCharacterState({
+				...base,
+				places: [{ id: 'p', category: '', name: '  ', description: '' }]
+			})
 		).toThrow(StateValidationError);
 		expect(() =>
-			validateCharacterState({ ...base, places: [{ id: 'p', name: 'x', description: 1 as never }] })
+			validateCharacterState({
+				...base,
+				places: [{ id: 'p', category: '', name: 'x', description: 1 as never }]
+			})
 		).toThrow(StateValidationError);
 		expect(() =>
 			validateCharacterState({
 				...base,
 				places: [
-					{ id: 'p', name: 'x', description: '' },
-					{ id: 'p', name: 'y', description: '' }
+					{ id: 'p', category: '', name: 'x', description: '' },
+					{ id: 'p', category: '', name: 'y', description: '' }
 				]
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				places: [{ id: 'p', category: 1 as never, name: 'x', description: '' }]
 			})
 		).toThrow(StateValidationError);
 	});
@@ -307,19 +343,31 @@ describe('validateCharacterState', () => {
 		expect(() =>
 			validateCharacterState({
 				...base,
-				outfit: { ...base.outfit, wardrobe: [{ id: '', name: 'x', description: '' }] }
+				outfit: { ...base.outfit, wardrobe: [{ id: '', category: '', name: 'x', description: '' }] }
 			})
 		).toThrow(StateValidationError);
 		expect(() =>
 			validateCharacterState({
 				...base,
-				outfit: { ...base.outfit, wardrobe: [{ id: 'w', name: '', description: '' }] }
+				outfit: { ...base.outfit, wardrobe: [{ id: 'w', category: '', name: '', description: '' }] }
 			})
 		).toThrow(StateValidationError);
 		expect(() =>
 			validateCharacterState({
 				...base,
-				outfit: { ...base.outfit, wardrobe: [{ id: 'w', name: 'x', description: 1 as never }] }
+				outfit: {
+					...base.outfit,
+					wardrobe: [{ id: 'w', category: '', name: 'x', description: 1 as never }]
+				}
+			})
+		).toThrow(StateValidationError);
+		expect(() =>
+			validateCharacterState({
+				...base,
+				outfit: {
+					...base.outfit,
+					wardrobe: [{ id: 'w', category: 1 as never, name: 'x', description: '' }]
+				}
 			})
 		).toThrow(StateValidationError);
 		expect(() =>
@@ -328,8 +376,8 @@ describe('validateCharacterState', () => {
 				outfit: {
 					...base.outfit,
 					wardrobe: [
-						{ id: 'w', name: 'x', description: '' },
-						{ id: 'w', name: 'y', description: '' }
+						{ id: 'w', category: '', name: 'x', description: '' },
+						{ id: 'w', category: '', name: 'y', description: '' }
 					]
 				}
 			})
