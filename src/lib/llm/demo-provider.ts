@@ -1,11 +1,13 @@
 import { truncate } from '../utils/format';
+import { estimateMessagesTokens, estimateTokens } from './model-info';
 import type {
 	ChatMessage,
 	LlmChatResult,
 	LlmClient,
 	LlmConfig,
 	StateToolSchema,
-	ToolCall
+	ToolCall,
+	TokenUsage
 } from './types';
 
 /**
@@ -13,10 +15,15 @@ import type {
  * 回应由系统消息中的状态摘要推导，保证确定性（e2e 可断言）。
  */
 export class DemoLlmClient implements LlmClient {
-	/** 模拟 250ms 延迟后返回演示回应；支持 AbortSignal 取消。 */
-	async chat(messages: ChatMessage[], _config: LlmConfig, signal?: AbortSignal): Promise<string> {
+	/** 模拟 250ms 延迟后返回演示回应（含估算用量）；支持 AbortSignal 取消。 */
+	async chat(
+		messages: ChatMessage[],
+		_config: LlmConfig,
+		signal?: AbortSignal
+	): Promise<LlmChatResult> {
 		await delay(250, signal);
-		return buildDemoReply(messages);
+		const content = buildDemoReply(messages);
+		return { content, toolCalls: [], usage: demoUsage(messages, content) };
 	}
 
 	/**
@@ -41,14 +48,25 @@ export function buildDemoToolResult(
 ): LlmChatResult {
 	const last = messages[messages.length - 1];
 	if (last?.role === 'tool') {
-		return { content: buildDemoToolReply(last.content), toolCalls: [] };
+		const content = buildDemoToolReply(last.content);
+		return { content, toolCalls: [], usage: demoUsage(messages, content) };
 	}
 	const text = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
 	const toolCalls = pickDemoToolCall(text, tools);
 	if (toolCalls.length > 0) {
-		return { content: null, toolCalls };
+		return { content: null, toolCalls, usage: demoUsage(messages, null) };
 	}
-	return { content: buildDemoReply(messages), toolCalls: [] };
+	const content = buildDemoReply(messages);
+	return { content, toolCalls: [], usage: demoUsage(messages, content) };
+}
+
+/** 生成确定性的演示用量：prompt 按消息估算，completion 按输出文本估算。 */
+function demoUsage(messages: ChatMessage[], content: string | null): TokenUsage {
+	return {
+		promptTokens: estimateMessagesTokens(messages),
+		completionTokens: content === null ? 0 : estimateTokens(content),
+		cachedTokens: 0
+	};
 }
 
 /** 根据用户文本选择确定性的演示工具调用（仅当该工具在列表中）。 */

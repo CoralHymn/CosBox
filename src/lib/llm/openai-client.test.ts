@@ -37,7 +37,11 @@ const TOOL_SCHEMAS: readonly StateToolSchema[] = [
 	{
 		name: 'goto_location',
 		description: '切换地点',
-		parameters: { type: 'object', properties: { name: { type: 'string', description: '地名' } }, required: [] }
+		parameters: {
+			type: 'object',
+			properties: { name: { type: 'string', description: '地名' } },
+			required: []
+		}
 	}
 ];
 
@@ -55,8 +59,9 @@ describe('OpenAiCompatibleClient', () => {
 		fetchSpy.mockResolvedValue(okResponse('你好呀'));
 		vi.stubGlobal('fetch', fetchSpy);
 		const client = new OpenAiCompatibleClient();
-		const reply = await client.chat([{ role: 'user', content: 'hi' }], config);
-		expect(reply).toBe('你好呀');
+		const result = await client.chat([{ role: 'user', content: 'hi' }], config);
+		expect(result.content).toBe('你好呀');
+		expect(result.toolCalls).toEqual([]);
 		const [url, init] = fetchSpy.mock.calls[0]!;
 		expect(url).toBe('http://localhost:4000/v1/chat/completions');
 		const headers = init?.headers as Record<string, string>;
@@ -296,9 +301,7 @@ describe('OpenAiCompatibleClient', () => {
 		const client = new OpenAiCompatibleClient();
 		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
 		expect(result.content).toBe('继续');
-		expect(result.toolCalls).toEqual([
-			{ id: 'c3', name: 'x', arguments: {} }
-		]);
+		expect(result.toolCalls).toEqual([{ id: 'c3', name: 'x', arguments: {} }]);
 	});
 
 	it('chatWithTools content 为 null 且无工具调用时抛 LlmError', async () => {
@@ -326,14 +329,10 @@ describe('OpenAiCompatibleClient', () => {
 		const client = new OpenAiCompatibleClient();
 		vi.stubGlobal(
 			'fetch',
-			fetchMock().mockResolvedValue(
-				okResponse(JSON.stringify({ tool: 'goto_location', args: '' }))
-			)
+			fetchMock().mockResolvedValue(okResponse(JSON.stringify({ tool: 'goto_location', args: '' })))
 		);
 		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
-		expect(result.toolCalls).toEqual([
-			{ id: 'call_inline', name: 'goto_location', arguments: {} }
-		]);
+		expect(result.toolCalls).toEqual([{ id: 'call_inline', name: 'goto_location', arguments: {} }]);
 	});
 
 	it('chatWithTools 标准 tool_calls 参数为空串时返回空对象', async () => {
@@ -361,5 +360,55 @@ describe('OpenAiCompatibleClient', () => {
 		);
 		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
 		expect(result.toolCalls).toEqual([{ id: 'c1', name: 'x', arguments: {} }]);
+	});
+
+	it('chat 解析 usage：prompt/completion/cached 用量', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: '你好' } }],
+				usage: {
+					prompt_tokens: 120,
+					completion_tokens: 30,
+					prompt_tokens_details: { cached_tokens: 40 }
+				}
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], config);
+		expect(result.usage).toEqual({ promptTokens: 120, completionTokens: 30, cachedTokens: 40 });
+	});
+
+	it('chat 解析 usage：缺省 cached 与小数向下取整', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: 'x' } }],
+				usage: { prompt_tokens: 10.9, completion_tokens: 0 }
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], config);
+		expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 0, cachedTokens: 0 });
+	});
+
+	it('usage 缺失或字段非法时不返回 usage', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(toolResponse({ choices: [{ message: { content: 'x' } }] }));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const missing = await client.chat([], config);
+		expect(missing.usage).toBeUndefined();
+
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: 'x' } }],
+				usage: { prompt_tokens: 'many', completion_tokens: -3 }
+			})
+		);
+		const invalid = await client.chat([], config);
+		expect(invalid.usage).toBeUndefined();
 	});
 });

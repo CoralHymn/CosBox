@@ -12,6 +12,8 @@ export interface LlmConfig {
 	model: string;
 	temperature: number;
 	maxTokens: number;
+	/** 模型上下文窗口（token）；来自「获取模型列表」或手动填写，未知时不填。 */
+	modelContextWindow?: number;
 	/** 是否允许 AI 在对话中调用状态工具（改地点/时间/穿着/属性）。缺省视为关闭。 */
 	allowAiStateTools?: boolean;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
@@ -41,16 +43,25 @@ export interface ChatMessage {
 	name?: string;
 }
 
+/** 一次请求的 token 用量（来自 API usage 或本地估算）。 */
+export interface TokenUsage {
+	promptTokens: number;
+	completionTokens: number;
+	cachedTokens: number;
+}
+
 /** 一次带工具能力的对话结果。 */
 export interface LlmChatResult {
 	/** 最终文本；若本轮全部是工具调用则为 null。 */
 	content: string | null;
 	toolCalls: ToolCall[];
+	/** API 返回或本地估算的 token 用量；部分端点不提供时为 undefined。 */
+	usage?: TokenUsage;
 }
 
 /** 统一的 LLM 客户端接口。chatWithTools 可选：客户端不支持工具时退化为纯文本对话。 */
 export interface LlmClient {
-	chat(messages: ChatMessage[], config: LlmConfig, signal?: AbortSignal): Promise<string>;
+	chat(messages: ChatMessage[], config: LlmConfig, signal?: AbortSignal): Promise<LlmChatResult>;
 	chatWithTools?(
 		messages: ChatMessage[],
 		tools: readonly StateToolSchema[],

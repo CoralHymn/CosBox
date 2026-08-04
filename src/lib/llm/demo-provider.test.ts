@@ -105,8 +105,11 @@ describe('buildDemoReply', () => {
 describe('DemoLlmClient', () => {
 	it('chat 返回演示回应', async () => {
 		const client = new DemoLlmClient();
-		const reply = await client.chat(messages('你好'), DEFAULT_LLM_CONFIG);
-		expect(reply).toContain('演示模式回应');
+		const result = await client.chat(messages('你好'), DEFAULT_LLM_CONFIG);
+		expect(result.content).toContain('演示模式回应');
+		expect(result.toolCalls).toEqual([]);
+		expect(result.usage).toBeDefined();
+		expect(result.usage!.promptTokens).toBeGreaterThan(0);
 	});
 
 	it('已中止的 signal 拒绝请求', async () => {
@@ -129,13 +132,17 @@ describe('DemoLlmClient', () => {
 	it('未中止的 signal 正常完成并清理监听', async () => {
 		const client = new DemoLlmClient();
 		const controller = new AbortController();
-		const reply = await client.chat(messages('hi'), DEFAULT_LLM_CONFIG, controller.signal);
-		expect(reply).toContain('演示模式回应');
+		const result = await client.chat(messages('hi'), DEFAULT_LLM_CONFIG, controller.signal);
+		expect(result.content).toContain('演示模式回应');
 	});
 
 	it('chatWithTools：用户想去食堂时返回 goto_location 工具调用', async () => {
 		const client = new DemoLlmClient();
-		const result = await client.chatWithTools(messages('我们去食堂吧'), STATE_TOOLS, DEFAULT_LLM_CONFIG);
+		const result = await client.chatWithTools(
+			messages('我们去食堂吧'),
+			STATE_TOOLS,
+			DEFAULT_LLM_CONFIG
+		);
 		expect(result.content).toBeNull();
 		expect(result.toolCalls).toEqual([
 			{ id: 'call_demo_goto', name: 'goto_location', arguments: { name: '食堂' } }
@@ -174,7 +181,12 @@ describe('DemoLlmClient', () => {
 					content: '',
 					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
 				},
-				{ role: 'tool', content: '已切换地点到「学校 > 食堂」', toolCallId: 'c1', name: 'goto_location' }
+				{
+					role: 'tool',
+					content: '已切换地点到「学校 > 食堂」',
+					toolCallId: 'c1',
+					name: 'goto_location'
+				}
 			],
 			STATE_TOOLS
 		);
@@ -199,7 +211,9 @@ describe('DemoLlmClient', () => {
 	});
 
 	it('chatWithTools：未命中的工具列表与普通关键词返回纯文本', async () => {
-		const tools: StateToolSchema[] = [{ name: 'x', description: 'x', parameters: { type: 'object', properties: {}, required: [] } }];
+		const tools: StateToolSchema[] = [
+			{ name: 'x', description: 'x', parameters: { type: 'object', properties: {}, required: [] } }
+		];
 		const result = await buildDemoToolResult(messages('随便聊聊'), tools);
 		expect(result.toolCalls).toEqual([]);
 		expect(result.content).toContain('演示模式回应');

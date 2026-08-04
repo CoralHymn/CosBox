@@ -30,6 +30,8 @@ flowchart TD
     Chat -->|addMessage assistant| Mgr
     Chat -->|执行状态工具（改状态）| Mgr
     Mgr -->|新状态摘要| Chat
+    Chat -->|usage / token 用量| Ctx[ContextPanel]
+    Ctx -->|费用估算 + 压缩开关| UI
 ```
 
 ## 快照版本图
@@ -78,17 +80,17 @@ flowchart LR
 
 ## 模块边界
 
-| 模块             | 职责                                             | 依赖方向        |
-| ---------------- | ------------------------------------------------ | --------------- |
-| `core/`          | 类型、状态校验/合并、版本图纯函数、错误体系      | 无（纯函数）    |
-| `db/`            | Dexie schema、快照/世界书/kv 仓储                | core            |
-| `manager/`       | 状态变更编排（校验→快照→应用→刷新）              | core, db        |
-| `context/`       | World Info 触发、状态摘要、历史压缩、Prompt 组装 | core, llm/types |
-| `llm/`           | OpenAI-compatible 客户端、离线 demo、状态工具、agent 循环 | core, context   |
-| `import-export/` | chara_card_v3 解析与序列化                       | core            |
-| `stores/`        | Svelte 5 runes 响应式封装（薄层，不含业务逻辑）  | manager, db     |
-| `utils/`         | 纯工具（格式化、分组、斜杠命令解析/执行）       | core            |
-| `components/`    | 展示与表单（显式 props，无 rest 透传）           | stores, core    |
+| 模块             | 职责                                                                                         | 依赖方向        |
+| ---------------- | -------------------------------------------------------------------------------------------- | --------------- |
+| `core/`          | 类型、状态校验/合并、版本图纯函数、错误体系                                                  | 无（纯函数）    |
+| `db/`            | Dexie schema、快照/世界书/kv 仓储                                                            | core            |
+| `manager/`       | 状态变更编排（校验→快照→应用→刷新）                                                          | core, db        |
+| `context/`       | World Info 触发、状态摘要、历史压缩、Prompt 组装                                             | core, llm/types |
+| `llm/`           | OpenAI-compatible 客户端、离线 demo、状态工具、agent 循环、token/费用估算、模型列表/连接测试 | core, context   |
+| `import-export/` | chara_card_v3 解析与序列化                                                                   | core            |
+| `stores/`        | Svelte 5 runes 响应式封装（薄层，不含业务逻辑）                                              | manager, db     |
+| `utils/`         | 纯工具（格式化、分组、斜杠命令解析/执行）                                                    | core            |
+| `components/`    | 展示与表单（显式 props，无 rest 透传）                                                       | stores, core    |
 
 ## Context Pipeline
 
@@ -105,6 +107,27 @@ flowchart LR
 
 输出 `ContextBundle`：`systemMessage`（基础提示 + 状态摘要 + 世界设定）与可直接提交给
 Chat Completions API 的 `messages` 数组。
+
+### 上下文用量与费用（侧栏）
+
+- 对话页侧栏「实时状态预览」下方是「上下文用量（估算）」容器：
+  - 上下文长度：本次请求总 token（输入 + 输出）占模型上下文窗口的百分比（进度条，≥70% 黄、≥90% 红）。
+  - Token 用量：输入 / 已缓存输入 / 输出三档。优先使用 API 返回的 `usage`，
+    端点不提供时用 `estimateTokens` 启发式估算（CJK 1 字符 ≈ 1 token，其余 4 字符 ≈ 1 token）。
+  - 费用：本地定价表（USD / 1M tokens，input / cachedInput / output 三档）× 用量；
+    未知模型显示「—」；所有数值均标注「估算」。
+- 上下文窗口来源优先级：设置页「获取模型列表」拉到的 `modelContextWindow` → 本地模型目录 → 未知。
+- 上下文压缩：侧栏可选择「发送给模型的历史消息数」（5/10/20），只影响后续请求
+  发给 LLM 的消息数组（`prepareHistory` 裁剪），聊天记录与快照链保持完整。
+
+### 模型列表获取与连接测试
+
+- 设置 →「模型服务」非 demo 模式下提供两个按钮：
+  - 「获取模型列表」：`GET {baseUrl}/models`（带 Bearer），解析 `data[].id` 与常见
+    上下文窗口字段（context_window / context_length / max_context_length /
+    max_context_window / meta.context_length），结果替代写死的 datalist 候选，
+    选中/输入已知模型时自动填充 `modelContextWindow`。
+  - 「连接测试」：同端点成功即通过，失败展示可读错误。
 
 ## Agent 工具循环
 
@@ -142,7 +165,8 @@ flowchart LR
 ## 开发者模式
 
 - 设置 →「开发者功能」开启后，对话页显示一个可展开的「最近一次发送给 AI 的完整提示词」
-  区块（系统消息 + 实际发送的消息数组，含工具调用）。
+  区块（系统消息 + 实际发送的消息数组，含工具调用）；区块可滚动（max-height + overflow），
+  长提示词不会截断。
 - `ChatService.generateReply` 额外返回 `debug` 视图，由页面在每次发送后更新。
 
 ## 错误处理约定

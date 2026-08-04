@@ -316,3 +316,57 @@ Svelte 5 的 `$state` 会对 store 数据做响应式代理。日程面板把 `s
 
 - 单元测试：全量 300 个；覆盖率 100% 语句/行/函数（分支 94.71%）；15 条 e2e 全过；
   build/check/lint 全绿。
+
+## 2026-08-05（续）：提示词可滚动 + 上下文用量面板 + 模型列表获取/连接测试
+
+### 需求
+
+1. 开发者功能的系统消息显示不全：需要滚动查看完整提示词。
+2. 借鉴 opencode：实时状态预览下方加容器，显示上下文长度（占用百分比）、token 估算
+   （输入 / 已缓存输入 / 输出）、按模型定价估算费用，并提供上下文压缩
+   （不影响用户查看的历史对话）。
+3. 设置「模型服务」增加「获取模型列表」（自动获取模型及其上下文长度，替代写死的
+   模型列表）与「连接测试」（验证模型或 API 是否有效）。
+
+### 调研：opencode 的上下文预览做法
+
+- opencode context preview（PR #5619 / opencode-token-tracker）：上下文预览 +
+  token 估算 + 本地定价表（input / output / cacheRead 三档 USD/1M）× 用量估费。
+- 2026-07 主流模型定价整理进本地定价表：GPT-5.6（Terra 2.5/15，Luna 1/6，Sol 5/30）、
+  GPT-5.3-codex（3.5/28）、Claude Haiku 4.5（1/5）/ Sonnet 4.6（3/15）/ Opus 4.7（5/25）、
+  Gemini 2.5/3.x（0.25–4 输入）、DeepSeek V4（Flash 0.14/0.28、Pro 0.435/0.87，含缓存价）、
+  Kimi K3（3/15）、GLM-5（1/3.2）、Grok 4.3（1.25/2.5）、Llama-3.3-70B（0.59/0.79）、
+  Mistral（0.5–1.5 输入）、混元（0.14/0.56）、Qwen（0.3–1.6 输入）。
+
+### 实现
+
+**提示词滚动**
+
+- `.debug-prompt` 增加 `max-height: 300px + overflow-y: auto`，`pre` 改 `white-space: pre-wrap`
+  换行显示；e2e 断言滚动样式。
+
+**上下文用量面板**
+
+- `llm/model-info.ts`（纯函数）：`estimateTokens`（CJK 启发式）、`estimateMessageTokens /
+estimateMessagesTokens`、`sumUsage`、`findModelInfo`（上下文窗口 + 三档定价目录）、
+  `estimateCost`（缓存 token 截断、缓存价未知按输入价）、`resolveContextWindow`。
+- `TokenUsage` 接入 `LlmChatResult`；OpenAI 客户端解析 `usage`（含
+  `prompt_tokens_details.cached_tokens`）；demo provider 返回确定性估算；
+  `ChatService` 在 agent 循环内累加多轮用量（`LlmClient.chat` 改返回 `LlmChatResult`）。
+- 新组件 `ContextPanel`：上下文长度百分比进度条（≥70% 黄、≥90% 红）、
+  输入 / 已缓存 / 输出 token、费用（USD，标注估算）、模型与窗口、
+  「发送给模型的历史消息数」选择（5/10/20）——只影响发往 LLM 的消息数组，
+  聊天记录与快照不变。
+
+**模型列表与连接测试**
+
+- `llm/model-service.ts`：`parseModelListResponse`（兼容 context_window / context_length /
+  max_context_length / max_context_window / meta.context_length）、`fetchModelList`、
+  `testConnection`（均带 Bearer，失败抛 LlmError）。
+- 设置页非 demo 模式新增两个按钮：拉取结果替代写死 datalist；选中/输入已知模型
+  自动填充上下文窗口，随保存写入 `LlmConfig.modelContextWindow`。
+
+### 门禁
+
+- 单元测试：全量 348 个；覆盖率 100% 语句/行/函数（分支 95.05%）；17 条 e2e 全过；
+  build/check/lint 全绿。

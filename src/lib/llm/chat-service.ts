@@ -5,7 +5,8 @@ import {
 	type StateToolContext,
 	type StateToolDefinition
 } from './state-tools';
-import type { ChatMessage, LlmClient, LlmConfig } from './types';
+import { sumUsage } from './model-info';
+import type { ChatMessage, LlmClient, LlmConfig, TokenUsage } from './types';
 
 /** 开发者模式下展示的最近一次请求：完整系统消息 + 实际发送的消息数组。 */
 export interface DebugPromptView {
@@ -44,6 +45,7 @@ export class ChatService {
 		bundle: ContextBundle;
 		executedTools: ExecutedToolCall[];
 		debug: DebugPromptView;
+		usage: TokenUsage | undefined;
 	}> {
 		let bundle = buildContext(input);
 		let messages: ChatMessage[] = [
@@ -52,20 +54,17 @@ export class ChatService {
 		];
 		let debug: DebugPromptView = { systemMessage: bundle.systemMessage, messages };
 		const executedTools: ExecutedToolCall[] = [];
+		let usage: TokenUsage | undefined;
 
 		if (options.tools !== undefined && options.tools.length > 0 && options.toolContext) {
 			if (this.client.chatWithTools) {
 				const maxTurns = options.maxToolTurns ?? DEFAULT_MAX_TOOL_TURNS;
 				for (let turn = 0; turn < maxTurns; turn += 1) {
 					debug = { systemMessage: messages[0]!.content, messages };
-					const result = await this.client.chatWithTools(
-						messages,
-						options.tools,
-						config,
-						signal
-					);
+					const result = await this.client.chatWithTools(messages, options.tools, config, signal);
+					usage = mergeUsage(usage, result.usage);
 					if (result.toolCalls.length === 0) {
-						return { reply: result.content ?? '', bundle, executedTools, debug };
+						return { reply: result.content ?? '', bundle, executedTools, debug, usage };
 					}
 					const toolMessages: ChatMessage[] = [];
 					for (const call of result.toolCalls) {
@@ -91,12 +90,33 @@ export class ChatService {
 					reply: '（AI 已连续执行多次状态变更，先暂停。请发送新消息继续。）',
 					bundle,
 					executedTools,
-					debug
+					debug,
+					usage
 				};
 			}
 		}
 
-		const reply = await this.client.chat(messages, config, signal);
-		return { reply, bundle, executedTools, debug };
+		const result = await this.client.chat(messages, config, signal);
+		return {
+			reply: result.content ?? '',
+			bundle,
+			executedTools,
+			debug,
+			usage: mergeUsage(usage, result.usage)
+		};
 	}
+}
+
+/** 合并累计用量：任一为空时原样透传。 */
+function mergeUsage(
+	accumulated: TokenUsage | undefined,
+	next: TokenUsage | undefined
+): TokenUsage | undefined {
+	if (next === undefined) {
+		return accumulated;
+	}
+	if (accumulated === undefined) {
+		return next;
+	}
+	return sumUsage(accumulated, next);
 }
