@@ -153,3 +153,55 @@ UI 增加「地点」与「衣柜」：地点用于让 AI 知道有哪些地点�
 ### 门禁
 
 - 211 个单元测试；覆盖率 100% 语句/行/函数（分支 95.89%）；8 条 e2e 全过；build/check/lint 全绿。
+
+## 2026-08-04（续）：版本删除 + AI 状态工具 + RP 斜杠命令
+
+### 需求
+
+1. 「版本」页增加删除选项。
+2. 调研现有 agent 框架的运转方式，让 AI 在合适时机调用工具自行修改参数
+   （离开学校就改地点、按剧情推进时间、自行换装）。
+3. 输入框加入 RP 快捷操作：`/wear`、`/goto` 等斜杠命令直接改状态，而不是全靠打字描述。
+
+### 调研：agent 框架如何运转
+
+- OpenAI Agents SDK / Anthropic tool use / ReAct 是一致的核心模式：**agent loop**——
+  工具以 JSON Schema 注册 → LLM 输出结构化 `tool_calls` → 宿主执行并追加 `tool` 结果 → 再次请求
+  LLM → 直到模型直接输出文本；用最大轮数防死循环。
+- OpenAI-compatible 端点存在两种工具返回形态：标准 `choices[0].message.tool_calls`
+  与纯文本 JSON（`{"tool":"...","args":{...}}`），客户端两者都兼容。
+
+### 实现
+
+**版本删除**
+
+- `SnapshotRepository.removeMany`（批量删除）；`CharacterManager.deleteBranch(tipId)`：
+  删除 tip 到分支点（不含分支点/根）的整段链；head 在链上时先切回链父节点；
+  根与非末端节点拒绝删除（防孤儿链）；全部在串行队列内执行。
+- 版本页「分支」列表与快照树末端行加「删除」按钮（带 confirm）；e2e 覆盖删除分支后
+  快照数减少、分支消失。
+
+**AI 状态工具**
+
+- `llm/state-tools.ts`：四个状态工具（goto_location / advance_time / set_outfit / set_attribute），
+  执行走 CharacterManager 生成快照；set_outfit 必须匹配衣柜，防止脑补衣物。
+- `ChatService.generateReply` 增加 agent loop（默认最多 4 轮）：每轮执行工具后
+  重新 `buildContext` 刷新状态摘要；工具调用与 tool 结果不落成用户可见消息。
+- `OpenAiCompatibleClient.chatWithTools`：请求体携带 tools 声明，解析标准 tool_calls 与
+  纯文本 JSON 两种形态；demo provider 提供确定性工具调用路径。
+- 设置页新增「允许 AI 自主修改状态」开关（默认关闭，存 `LlmConfig.allowAiStateTools`）。
+- e2e：开启开关后演示模式按剧情自动切到「学校 > 食堂」。
+
+**RP 斜杠命令**
+
+- `utils/slash.ts`：`/goto`（名称/分类>名称/唯一分类匹配地点库）、`/wear`（槽位=衣物或
+  自动推断；`=无` 脱掉；按 kind 校验类型，禁止内裤套头上）、`/time`、`/checkpoint`、`/help`；
+  解析与执行均为纯函数，返回 StatePatch / minutes，落地仍走 CharacterManager。
+- 输入框增加 `/goto /wear /time /help` 快捷 chips；命令执行后追加一条 system 提示
+  （如「（命令）切换地点：学校 > 食堂」）让 AI 感知转场。
+- e2e：/goto /wear /time /help 全链路。
+
+### 门禁
+
+- 单元测试：全量 274 个；覆盖率 100% 语句/行/函数（分支 94.66%）；11 条 e2e 全过；
+  build/check/lint 全绿。

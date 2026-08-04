@@ -23,8 +23,10 @@ flowchart TD
     UI -->|发送消息| Chat[ChatService]
     Chat -->|buildContext| Pipe[ContextPipeline]
     Pipe -->|世界信息命中 + 状态摘要 + 历史压缩| LLM[(LLM Provider)]
-    LLM -->|回复文本| Chat
+    LLM -->|最终文本| Chat
     Chat -->|addMessage assistant| Mgr
+    Chat -->|执行状态工具（改状态）| Mgr
+    Mgr -->|新状态摘要| Chat
 ```
 
 ## 快照版本图
@@ -46,6 +48,12 @@ flowchart LR
 
 存储：IndexedDB `snapshots` 表，索引 `id, [parentId+timestamp], parentId, timestamp`。
 
+### 分支删除
+
+- 只能删除「分支末端链」：从某个 tip 沿 parentId 回溯到分支点（不含分支点与根）的一整段链。
+- 若当前 head 位于被删链上，先 `checkout` 到链的父节点（分支点或根），保证 head 永远有效。
+- 根快照与任何非末端节点不可删除（防止孤儿链）；删除在 `CharacterManager` 的串行队列内执行。
+
 ## 状态模型
 
 - `outfit`：当前穿着（headwear / top / underwear / underpants / bottom / socks / shoes / accessories）
@@ -63,9 +71,10 @@ flowchart LR
 | `db/`            | Dexie schema、快照/世界书/kv 仓储                | core            |
 | `manager/`       | 状态变更编排（校验→快照→应用→刷新）              | core, db        |
 | `context/`       | World Info 触发、状态摘要、历史压缩、Prompt 组装 | core, llm/types |
-| `llm/`           | OpenAI-compatible 客户端、离线 demo、ChatService | core, context   |
+| `llm/`           | OpenAI-compatible 客户端、离线 demo、状态工具、agent 循环 | core, context   |
 | `import-export/` | chara_card_v3 解析与序列化                       | core            |
 | `stores/`        | Svelte 5 runes 响应式封装（薄层，不含业务逻辑）  | manager, db     |
+| `utils/`         | 纯工具（格式化、分组、斜杠命令解析/执行）       | core            |
 | `components/`    | 展示与表单（显式 props，无 rest 透传）           | stores, core    |
 
 ## Context Pipeline
@@ -84,6 +93,39 @@ flowchart LR
 输出 `ContextBundle`：`systemMessage`（基础提示 + 状态摘要 + 世界设定）与可直接提交给
 Chat Completions API 的 `messages` 数组。
 
+## Agent 工具循环
+
+调研结论（OpenAI Agents SDK / Anthropic tool use / ReAct 一致）：工具以 JSON Schema 注册，
+LLM 输出结构化 `tool_calls`，宿主执行并把 `tool` 结果放回对话，循环直到模型直接输出文本。
+
+```mermaid
+flowchart LR
+    S[系统提示 + 历史] --> LLM[(LLM)]
+    LLM -->|tool_calls| Exec[执行状态工具]
+    Exec -->|tool 结果| LLM
+    Exec -->|update / advanceTime| Mgr[CharacterManager → 新快照]
+    LLM -->|最终文本| Done[assistant 消息]
+```
+
+- 工具：`goto_location`（按 id/名称匹配地点库）、`advance_time`、`set_outfit`
+  （必须从衣柜中选衣，防止脑补）、`set_attribute`。
+- 每轮工具执行都会生成一个 `state` 快照；每轮结束重新生成状态摘要，让模型感知最新状态。
+- 最大轮数（默认 4）防死循环；工具失败以错误文本回馈模型继续尝试，而不是中断。
+- 设置项「允许 AI 自主修改状态」默认关闭；关闭时退化为纯文本对话。
+- 工具调用与 `tool` 结果只是循环内的临时消息，绝不落成用户可见快照。
+
+## RP 斜杠命令
+
+输入框以 `/` 开头时不再发普通消息，而是直接操作状态（同样生成快照）：
+
+- `/goto 地点`：按名称 / `分类>名称` / 唯一分类匹配地点库，切换当前地点。
+- `/wear 槽位=衣物` 或 `/wear 衣物名`：从衣柜中选衣换装；`=无` 表示脱掉；
+  自动按 `kind` 推断槽位并校验类型，禁止「内裤套头上」。
+- `/time +30`：推进/回拨世界时间；`/checkpoint 描述`：保存检查点；`/help`：命令帮助。
+
+命令执行后追加一条 `system` 提示（如「（命令）切换地点：学校 > 食堂」），
+让 AI 感知这次转场/换装；命令解析与执行是 `utils/slash.ts` 的纯函数，落地仍走 CharacterManager。
+
 ## 错误处理约定
 
 - 所有异步操作带 `try/catch`，统一翻译为 `CosBoxError` 子类。
@@ -92,5 +134,5 @@ Chat Completions API 的 `messages` 数组。
 
 ## 测试策略
 
-- 核心层（`core/context/db/manager/llm/import-export/utils`）：Vitest，语句/行/函数覆盖 100%，分支 94%。
-- UI 流程：Playwright e2e（对话、状态编辑、版本切换、时间推进、V3 导入）。
+- 核心层（`core/context/db/manager/llm/import-export/utils`）：Vitest，语句/行/函数覆盖 100%，分支 ≥90%。
+- UI 流程：Playwright e2e（对话、状态编辑、版本切换/删除、时间推进、V3 导入、斜杠命令、AI 状态工具）。
