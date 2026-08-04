@@ -323,6 +323,44 @@ test('/help 帮助文本只在聊天里展示，不进入发送给 AI 的提示�
 	await expect(promptBody.getByText('早上好')).toBeVisible();
 });
 
+test('AI 思考内容可在对话中展开查看', async ({ page }) => {
+	await page.goto('/');
+	await page.getByPlaceholder(/输入消息/).fill('你现在在想什么？');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	// 演示思考默认收起，点击「思考过程」展开
+	const thinking = page.locator('.thinking').last();
+	await expect(thinking.getByText('思考过程')).toBeVisible();
+	await expect(thinking.locator('pre')).not.toBeVisible();
+	await thinking.getByText('思考过程').click();
+	await expect(thinking.locator('pre')).toContainText('让我先想想');
+});
+
+test('开发者预览：展示输入框内容点击发送将发送给 AI 的完整提示词', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#dev-mode-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await page.getByRole('button', { name: /对话/ }).click();
+
+	// 输入但未发送：预览应包含待发送的用户消息与完整系统提示，且不产生聊天记录
+	await page.getByPlaceholder(/输入消息/).fill('早上好，我们什么时候去食堂？');
+	await page.getByRole('button', { name: '开发者：预览输入框提示词' }).click();
+	const previewModal = page.locator('.prompt-modal');
+	await expect(previewModal).toBeVisible();
+	await expect(previewModal.getByText('【当前状态】').first()).toBeVisible();
+	await expect(previewModal.getByText('[user]')).toBeVisible();
+	await expect(previewModal.getByText('早上好，我们什么时候去食堂？')).toBeVisible();
+	await expect(page.locator('.message.user')).toHaveCount(0);
+	await previewModal.getByRole('button', { name: '关闭' }).click();
+
+	// 斜杠命令预览：提示不会调用 LLM
+	await page.getByPlaceholder(/输入消息/).fill('/help');
+	await page.getByRole('button', { name: '开发者：预览输入框提示词' }).click();
+	await expect(page.locator('.prompt-modal').getByText(/将以斜杠命令执行/)).toBeVisible();
+});
+
 test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 	await page.goto('/');
 

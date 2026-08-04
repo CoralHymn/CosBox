@@ -20,5 +20,11 @@
 		<span>{roleLabel[message.role]}</span>
 		<span>{formatTimestamp(message.timestamp)}</span>
 	</div>
+	{#if message.role === 'assistant' && message.thinking !== undefined && message.thinking.trim() !== ''}
+		<details class="thinking">
+			<summary>思考过程</summary>
+			<pre>{message.thinking}</pre>
+		</details>
+	{/if}
 	{message.content}
 </div>

@@ -426,4 +426,50 @@ describe('OpenAiCompatibleClient', () => {
 		expect(result.summary).toBe('生成的延续摘要');
 		expect(result.usage).toEqual({ promptTokens: 30, completionTokens: 8, cachedTokens: 0 });
 	});
+
+	it('chat 解析 reasoning_content 为 thinking', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [
+					{
+						message: {
+							content: '最终回答',
+							reasoning_content: '  让我先想想：状态是学校食堂。  '
+						}
+					}
+				]
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], config);
+		expect(result.content).toBe('最终回答');
+		expect(result.thinking).toBe('让我先想想：状态是学校食堂。');
+	});
+
+	it('chat 兼容 reasoning 字段，缺失或空串时无 thinking', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: '回答', reasoning: '思考内容' } }]
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const withReasoning = await client.chat([], config);
+		expect(withReasoning.thinking).toBe('思考内容');
+
+		fetchSpy.mockResolvedValue(toolResponse({ choices: [{ message: { content: '回答' } }] }));
+		const without = await client.chat([], config);
+		expect(without.thinking).toBeUndefined();
+
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: '回答', reasoning_content: '   ' } }]
+			})
+		);
+		const blank = await client.chat([], config);
+		expect(blank.thinking).toBeUndefined();
+	});
 });

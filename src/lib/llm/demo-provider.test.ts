@@ -251,4 +251,15 @@ describe('buildDemoSummary / summarize', () => {
 		expect(result.usage).toBeDefined();
 		expect(result.usage!.promptTokens).toBeGreaterThan(0);
 	});
+
+	it('询问「在想什么」时返回演示思考内容', async () => {
+		const result = await buildDemoToolResult(messages('你现在在想什么？'), []);
+		expect(result.thinking).toContain('（演示）让我先想想');
+		expect(result.thinking).toContain('你现在在想什么');
+	});
+
+	it('普通消息不返回思考内容', async () => {
+		const result = await buildDemoToolResult(messages('早上好'), []);
+		expect(result.thinking).toBeUndefined();
+	});
 });

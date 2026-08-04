@@ -88,18 +88,39 @@ export class OpenAiCompatibleClient implements LlmClient {
 		const content = extractContent(data);
 		const toolCalls = extractToolCalls(data);
 		const usage = extractUsage(data);
+		const thinking = extractThinking(data);
 		if (toolCalls.length > 0) {
-			return { content, toolCalls, usage };
+			return { content, toolCalls, usage, thinking };
 		}
 		if (content !== null) {
 			const inline = extractInlineToolCall(content);
 			if (inline.length > 0) {
-				return { content: null, toolCalls: inline, usage };
+				return { content: null, toolCalls: inline, usage, thinking };
 			}
-			return { content, toolCalls: [], usage };
+			return { content, toolCalls: [], usage, thinking };
 		}
 		throw new LlmError('模型响应缺少 choices[0].message.content');
 	}
+}
+
+/**
+ * 从响应中提取思考过程：兼容 reasoning_content（DeepSeek 等）与 reasoning 字段。
+ * 空串或缺失返回 undefined；思考内容只用于展示，不会回传给 API。
+ */
+function extractThinking(data: unknown): string | undefined {
+	if (!isRecord(data) || !Array.isArray(data.choices) || data.choices.length === 0) {
+		return undefined;
+	}
+	const choice = data.choices[0];
+	const message = isRecord(choice) ? choice.message : undefined;
+	const candidate =
+		isRecord(message) && typeof message.reasoning_content === 'string'
+			? message.reasoning_content
+			: isRecord(message) && typeof message.reasoning === 'string'
+				? message.reasoning
+				: undefined;
+	const trimmed = candidate?.trim() ?? '';
+	return trimmed === '' ? undefined : trimmed;
 }
 
 /** 组装请求体：基础字段 + 可选 tools 声明。 */

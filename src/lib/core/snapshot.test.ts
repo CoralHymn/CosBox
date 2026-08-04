@@ -127,6 +127,21 @@ describe('rebuildFromNodes', () => {
 		]);
 	});
 
+	it('消息 delta 携带 thinking 时重建保留思考内容', () => {
+		const nodes = toMap([
+			makeNode('root', null, null, 0),
+			makeNode(
+				'a',
+				'root',
+				{ kind: 'message', role: 'assistant', content: '回答', thinking: '思考内容' },
+				1
+			)
+		]);
+		const result = rebuildFromNodes(nodes, 'a', createInitialState());
+		expect(result.messages[0]!.thinking).toBe('思考内容');
+		expect(result.messages[0]!.content).toBe('回答');
+	});
+
 	it('120+ 次 delta 应用后重建正确（状态+消息+空补丁混合）', () => {
 		const nodes: SnapshotNode[] = [makeNode('root', null, null, 0)];
 		let parent = 'root';

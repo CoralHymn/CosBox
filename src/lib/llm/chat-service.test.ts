@@ -449,6 +449,23 @@ describe('ChatService', () => {
 		expect(debug.messages).toHaveLength(7);
 		expect(debug.messages.some((m) => m.content.includes('可用 RP 快捷命令'))).toBe(false);
 	});
+
+	it('透传客户端的思考内容', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({
+				content: '最终回答',
+				toolCalls: [],
+				thinking: '让我先想想'
+			}))
+		};
+		const service = new ChatService(client);
+		const { reply, thinking } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config
+		);
+		expect(reply).toBe('最终回答');
+		expect(thinking).toBe('让我先想想');
+	});
 });
 
 describe('serializeDebugPrompt', () => {
