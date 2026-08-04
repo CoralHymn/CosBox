@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { CharacterState, ChatMessageView } from '../core/types';
+	import type { DebugPromptView } from '../llm/chat-service';
 	import ChatInput from './ChatInput.svelte';
 	import MessageBubble from './MessageBubble.svelte';
 	import StatePreview from './StatePreview.svelte';
@@ -10,10 +11,13 @@
 		busy: boolean;
 		searchSupported: boolean;
 		searching: boolean;
+		developerMode: boolean;
+		debugPrompt: DebugPromptView | null;
 		onSend: (content: string, options: { search: boolean }) => void;
 	}
 
-	let { conversation, characterState, busy, searchSupported, searching, onSend }: Props = $props();
+	let { conversation, characterState, busy, searchSupported, searching, developerMode, debugPrompt, onSend }: Props =
+		$props();
 	let listEl = $state<HTMLDivElement | null>(null);
 
 	$effect(() => {
@@ -39,6 +43,20 @@
 					<MessageBubble {message} />
 				{/each}
 			</div>
+		{/if}
+		{#if developerMode && debugPrompt !== null}
+			<details class="debug-prompt">
+				<summary>开发者：最近一次发送给 AI 的完整提示词</summary>
+				<p class="muted" style="margin: 6px 0 2px;">system</p>
+				<pre>{debugPrompt.systemMessage}</pre>
+				{#each debugPrompt.messages as message, i (i)}
+					<p class="muted" style="margin: 8px 0 2px;">[{message.role}]</p>
+					<pre>{message.content}</pre>
+					{#if message.toolCalls !== undefined && message.toolCalls.length > 0}
+						<pre>{JSON.stringify(message.toolCalls, null, 2)}</pre>
+					{/if}
+				{/each}
+			</details>
 		{/if}
 		<ChatInput
 			disabled={busy}

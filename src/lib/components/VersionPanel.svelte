@@ -16,8 +16,8 @@
 	let { snapshots, headId, branches, onCheckout, onAddCheckpoint, onDeleteBranch }: Props =
 		$props();
 	let checkpointDesc = $state('');
-	/** 默认全部展开；显式收起的分支记录在这里。 */
-	let collapsed = new SvelteSet<string>();
+	/** 默认全部收起；用户显式展开的分支记录在这里。 */
+	let expanded = new SvelteSet<string>();
 
 	const typeLabel: Record<SnapshotNode['metadata']['type'], string> = {
 		root: '初始',
@@ -67,14 +67,18 @@
 					row.chain.filter((node) => (counts[node.id] ?? 0) > 1).map((node) => node.id)
 				)
 			}))
-			.sort((a, b) => b.branch.lastTimestamp - a.branch.lastTimestamp);
+			.sort(
+				(a, b) =>
+					b.branch.lastTimestamp - a.branch.lastTimestamp ||
+					b.branch.tipId.localeCompare(a.branch.tipId)
+			);
 	});
 
-	function toggleCollapsed(tipId: string): void {
-		if (collapsed.has(tipId)) {
-			collapsed.delete(tipId);
+	function toggleExpanded(tipId: string): void {
+		if (expanded.has(tipId)) {
+			expanded.delete(tipId);
 		} else {
-			collapsed.add(tipId);
+			expanded.add(tipId);
 		}
 	}
 
@@ -105,8 +109,8 @@
 						{#if row.branch.tipId === headId}
 							<span class="badge current">当前</span>
 						{/if}
-						<button class="btn btn-small" onclick={() => toggleCollapsed(row.branch.tipId)}>
-							{collapsed.has(row.branch.tipId) ? '展开' : '收起'}
+						<button class="btn btn-small" onclick={() => toggleExpanded(row.branch.tipId)}>
+							{expanded.has(row.branch.tipId) ? '收起' : '展开'}
 						</button>
 						{#if row.branch.tipId !== headId}
 							<button class="btn btn-small" onclick={() => onCheckout(row.branch.tipId)}>切换</button>
@@ -121,7 +125,7 @@
 					{#if row.forkDesc !== null}
 						<p class="muted" style="margin: 0 0 4px;">分叉自：「{row.forkDesc}」</p>
 					{/if}
-					{#if !collapsed.has(row.branch.tipId)}
+					{#if expanded.has(row.branch.tipId)}
 						<div class="branch-chain">
 							{#each row.chain as node (node.id)}
 								<div class="version-row" class:shared={row.sharedIds.has(node.id)}>

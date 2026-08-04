@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { StatePatch, WorldInfoEntry } from '../lib/core/types';
+	import type { ConfigPatch, StatePatch, WorldInfoEntry } from '../lib/core/types';
 	import { formatWorldTime } from '../lib/core/state';
 	import type { ContextPipelineInput } from '../lib/context/pipeline';
 	import { KvRepository } from '../lib/db/kv-repo';
@@ -13,7 +13,7 @@
 		parseCharaCard,
 		serializeCharaCard
 	} from '../lib/import-export/chara-card-v3';
-	import { ChatService } from '../lib/llm/chat-service';
+	import { ChatService, type DebugPromptView } from '../lib/llm/chat-service';
 	import { DemoLlmClient } from '../lib/llm/demo-provider';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
@@ -57,6 +57,8 @@
 	let busy = $state(false);
 	let searching = $state(false);
 	let ready = $state(false);
+	/** 开发者模式下展示的最近一次发送给 AI 的完整提示词。 */
+	let debugPrompt = $state<DebugPromptView | null>(null);
 
 	const providerLabel = $derived.by(() => {
 		if (settings.config.provider === 'demo') {
@@ -123,7 +125,7 @@
 			const service = new ChatService(
 				settings.config.provider === 'demo' ? demoClient : openAiClient
 			);
-			const { reply } = await service.generateReply(input, settings.config, {
+			const { reply, debug } = await service.generateReply(input, settings.config, {
 				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 				toolContext: {
 					getState: () => session.state,
@@ -131,6 +133,7 @@
 					advanceTime: (minutes) => session.advanceTime(minutes)
 				}
 			});
+			debugPrompt = debug;
 			await session.addMessage('assistant', reply);
 		} catch (err) {
 			toasts.error(err);
@@ -166,6 +169,15 @@
 	async function handleStateUpdate(patch: StatePatch, desc: string): Promise<void> {
 		try {
 			await session.update(patch, { desc });
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 世界配置覆盖（地点库/衣柜/日程条目）：不生成快照。 */
+	async function handleConfigUpdate(patch: ConfigPatch): Promise<void> {
+		try {
+			await session.applyConfig(patch);
 		} catch (err) {
 			toasts.error(err);
 		}
@@ -240,6 +252,24 @@
 		try {
 			await settings.saveProfile(profile);
 			toasts.success('角色档案已保存');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	async function handleResetProfile(): Promise<void> {
+		try {
+			await settings.resetProfile();
+			toasts.success('角色档案已恢复默认');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	async function handleSaveDeveloperMode(enabled: boolean): Promise<void> {
+		try {
+			await settings.saveDeveloperMode(enabled);
+			toasts.success(enabled ? '开发者功能已开启' : '开发者功能已关闭');
 		} catch (err) {
 			toasts.error(err);
 		}
@@ -328,6 +358,8 @@
 					{busy}
 					{searchSupported}
 					{searching}
+					developerMode={settings.developerMode}
+					debugPrompt={debugPrompt}
 					onSend={handleSend}
 				/>
 			{:else if tab === 'state'}
@@ -337,14 +369,19 @@
 					places={session.state.places}
 					location={session.state.location}
 					onUpdate={handleStateUpdate}
+					onConfig={handleConfigUpdate}
 				/>
 			{:else if tab === 'wardrobe'}
-				<WardrobePanel outfit={session.state.outfit} onUpdate={handleStateUpdate} />
+				<WardrobePanel
+					outfit={session.state.outfit}
+					onUpdate={handleStateUpdate}
+					onConfig={handleConfigUpdate}
+				/>
 			{:else if tab === 'schedule'}
 				<SchedulePanel
 					schedule={session.state.schedule}
-					onUpdate={handleStateUpdate}
 					onAdvance={handleAdvance}
+					onConfig={handleConfigUpdate}
 				/>
 			{:else if tab === 'versions'}
 				<VersionPanel
@@ -367,8 +404,11 @@
 				<SettingsPanel
 					config={settings.config}
 					profile={settings.profile}
+					developerMode={settings.developerMode}
 					onSaveConfig={handleSaveConfig}
 					onSaveProfile={handleSaveProfile}
+					onResetProfile={handleResetProfile}
+					onSaveDeveloperMode={handleSaveDeveloperMode}
 				/>
 			{/if}
 		</main>

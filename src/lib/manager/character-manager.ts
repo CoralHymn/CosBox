@@ -1,12 +1,14 @@
 import { SnapshotError, StateValidationError } from '../core/errors';
 import { clonePlain } from '../core/clone';
-import { applyStateDelta, addMinutes, createInitialState } from '../core/state';
+import { addMinutes, applyConfigOverrides, applyStateDelta, createInitialState } from '../core/state';
 import { collectBranchPath, getBranchTips, getChildrenMap, sortNodes } from '../core/snapshot';
 import type {
 	BranchSummary,
 	CharacterSessionView,
 	CharacterState,
 	ChatMessageView,
+	ConfigOverrides,
+	ConfigPatch,
 	MessageRole,
 	SnapshotNode,
 	StatePatch
@@ -16,6 +18,8 @@ import type { SnapshotRepository } from '../db/snapshot-repo';
 
 /** kv 中保存的「上次 checkout 的 head 快照 id」。 */
 const LAST_HEAD_KEY = 'lastHeadId';
+/** kv 中保存的世界配置覆盖（地点库 / 衣柜 / 日程条目，不进版本历史）。 */
+const CONFIG_OVERRIDES_KEY = 'config.overrides';
 
 /** CharacterManager 依赖注入（便于测试替换时钟与 id 生成）。 */
 export interface CharacterManagerDeps {
@@ -36,10 +40,14 @@ export class CharacterManager {
 	private conversation: ChatMessageView[] = [];
 	private snapshots: SnapshotNode[] = [];
 	private branches: BranchSummary[] = [];
+	/** 世界配置覆盖：维护性编辑（地点库/衣柜/日程条目）不记入版本历史。 */
+	private configOverrides: ConfigOverrides = {};
 	private initialized = false;
 	private readonly listeners = new Set<() => void>();
 	/** 变更任务队列：保证并发 update/addMessage/checkout 按调用顺序串行落地。 */
 	private queue: Promise<unknown> = Promise.resolve();
+	/** 已发出的最大快照时间戳，保证同一毫秒内仍单调递增（分支排序稳定）。 */
+	private lastTimestamp = 0;
 	/** 共享的初始化 promise，防止并发 init 重复建库。 */
 	private initPromise: Promise<void> | null = null;
 
@@ -115,10 +123,15 @@ export class CharacterManager {
 		this.branches = await this.deps.snapshots.getBranches();
 		if (this.headId !== null) {
 			const rebuilt = await this.deps.snapshots.rebuildState(this.headId);
-			this.state = rebuilt.state;
+			this.state = applyConfigOverrides(rebuilt.state, this.configOverrides);
 			this.conversation = rebuilt.messages;
 		}
 		this.emit();
+	}
+
+	/** 加载持久化的世界配置覆盖。 */
+	private async loadConfigOverrides(): Promise<void> {
+		this.configOverrides = (await this.deps.kv.get<ConfigOverrides>(CONFIG_OVERRIDES_KEY)) ?? {};
 	}
 
 	/**
@@ -140,6 +153,7 @@ export class CharacterManager {
 	}
 
 	private async doInit(): Promise<void> {
+		await this.loadConfigOverrides();
 		const count = await this.deps.snapshots.count();
 		if (count === 0) {
 			const root = await this.deps.snapshots.addSnapshot({
@@ -237,6 +251,33 @@ export class CharacterManager {
 		return this.enqueue(() => this.doAdvanceTime(minutes));
 	}
 
+	/**
+	 * 应用世界配置覆盖（地点库 / 衣柜 / 日程条目）。
+	 * 只更新内存态并持久化到 kv，不生成快照、不推进 head——维护性编辑不进版本历史。
+	 */
+	applyConfig(patch: ConfigPatch): Promise<void> {
+		return this.enqueue(() => this.doApplyConfig(patch));
+	}
+
+	private async doApplyConfig(patch: ConfigPatch): Promise<void> {
+		await this.ensureInit();
+		const merged: ConfigOverrides = { ...this.configOverrides };
+		if (patch.places !== undefined) {
+			merged.places = clonePlain(patch.places);
+		}
+		if (patch.wardrobe !== undefined) {
+			merged.wardrobe = clonePlain(patch.wardrobe);
+		}
+		if (patch.scheduleEntries !== undefined) {
+			merged.scheduleEntries = clonePlain(patch.scheduleEntries);
+		}
+		// 通过 applyConfigOverrides 校验并叠加（非法配置抛错，不落 kv）。
+		this.state = applyConfigOverrides(this.state, merged);
+		this.configOverrides = merged;
+		await this.deps.kv.set(CONFIG_OVERRIDES_KEY, merged);
+		this.emit();
+	}
+
 	private async doAdvanceTime(minutes: number): Promise<SnapshotNode> {
 		await this.ensureInit();
 		if (!Number.isFinite(minutes)) {
@@ -308,7 +349,10 @@ export class CharacterManager {
 	}
 
 	private now(): number {
-		return this.deps.now?.() ?? Date.now();
+		const candidate = this.deps.now?.() ?? Date.now();
+		const next = candidate > this.lastTimestamp ? candidate : this.lastTimestamp + 1;
+		this.lastTimestamp = next;
+		return next;
 	}
 
 	private async ensureInit(): Promise<void> {

@@ -8,6 +8,9 @@
    避免并发写导致的分支错乱与状态覆盖。
 4. **无副作用 checkout**：切换分支只做纯重建（读 IndexedDB + 应用 delta），绝不写快照表。
 5. **浏览器内自带版本控制**：以「增量快照链」实现类 Git 语义，不依赖外部 Git 运行时。
+6. **世界配置与剧情状态分离**：地点库 / 衣柜 / 日程条目是「世界配置」，维护性编辑
+   单独持久化（kv），不生成快照、不进版本历史；剧情状态（当前地点、当前穿着、时间、
+   属性、对话）仍走快照链。
 
 ## 数据流
 
@@ -53,6 +56,16 @@ flowchart LR
 - 只能删除「分支末端链」：从某个 tip 沿 parentId 回溯到分支点（不含分支点与根）的一整段链。
 - 若当前 head 位于被删链上，先 `checkout` 到链的父节点（分支点或根），保证 head 永远有效。
 - 根快照与任何非末端节点不可删除（防止孤儿链）；删除在 `CharacterManager` 的串行队列内执行。
+
+### 世界配置覆盖
+
+- 「地点库」「衣柜管理」「日程表」面板的维护性编辑（增删改条目）调用
+  `CharacterManager.applyConfig()`：只更新内存态并写入 kv（`config.overrides`），
+  不生成快照、不推进 head，因此不会出现在版本/分支中。
+- 每次从快照链重建状态（init / checkout / 删除分支）后，把配置覆盖叠加回状态
+  （`applyConfigOverrides`，整体替换 places / outfit.wardrobe / schedule.entries）。
+- 剧情状态不受影响：在面板里「设为当前地点」「更换当前穿着」「推进时间」仍走 `update()`
+  生成快照。
 
 ## 状态模型
 
@@ -126,6 +139,12 @@ flowchart LR
 命令执行后追加一条 `system` 提示（如「（命令）切换地点：学校 > 食堂」），
 让 AI 感知这次转场/换装；命令解析与执行是 `utils/slash.ts` 的纯函数，落地仍走 CharacterManager。
 
+## 开发者模式
+
+- 设置 →「开发者功能」开启后，对话页显示一个可展开的「最近一次发送给 AI 的完整提示词」
+  区块（系统消息 + 实际发送的消息数组，含工具调用）。
+- `ChatService.generateReply` 额外返回 `debug` 视图，由页面在每次发送后更新。
+
 ## 错误处理约定
 
 - 所有异步操作带 `try/catch`，统一翻译为 `CosBoxError` 子类。
@@ -135,4 +154,5 @@ flowchart LR
 ## 测试策略
 
 - 核心层（`core/context/db/manager/llm/import-export/utils`）：Vitest，语句/行/函数覆盖 100%，分支 ≥90%。
-- UI 流程：Playwright e2e（对话、状态编辑、版本切换/删除、时间推进、V3 导入、斜杠命令、AI 状态工具）。
+- UI 流程：Playwright e2e（对话、状态编辑、版本切换/删除、时间推进、V3 导入、斜杠命令、
+  AI 状态工具、配置编辑不生成快照、设置与开发者模式）。

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { findWardrobeItem } from '../context/state-summary';
 	import { CLOTHING_KINDS } from '../core/state';
-	import type { ClothingKind, OutfitSlot, OutfitState, StatePatch } from '../core/types';
+	import type { ClothingKind, ConfigPatch, OutfitSlot, OutfitState, StatePatch } from '../core/types';
 	import { groupByCategory } from '../utils/grouping';
 	import { newId } from '../utils/id';
 	import OutfitSlotPicker from './OutfitSlotPicker.svelte';
@@ -9,9 +9,11 @@
 	interface Props {
 		outfit: OutfitState;
 		onUpdate: (patch: StatePatch, desc: string) => void;
+		/** 衣柜条目属于世界配置：编辑不生成快照、不进版本历史。 */
+		onConfig: (patch: ConfigPatch) => void;
 	}
 
-	let { outfit, onUpdate }: Props = $props();
+	let { outfit, onUpdate, onConfig }: Props = $props();
 
 	interface WardrobeRow {
 		id: string;
@@ -94,20 +96,15 @@
 	}
 
 	function commitWardrobe(): void {
-		onUpdate(
-			{
-				outfit: {
-					wardrobe: rows.map((row) => ({
-						id: row.id,
-						category: row.category,
-						kind: row.kind,
-						name: row.name,
-						description: row.description
-					}))
-				}
-			},
-			'更新衣柜'
-		);
+		onConfig({
+			wardrobe: rows.map((row) => ({
+				id: row.id,
+				category: row.category,
+				kind: row.kind,
+				name: row.name,
+				description: row.description
+			}))
+		});
 	}
 
 	function addItem(): void {

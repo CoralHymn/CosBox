@@ -7,11 +7,15 @@
 	interface Props {
 		config: LlmConfig;
 		profile: AppProfile;
+		developerMode: boolean;
 		onSaveConfig: (config: LlmConfig) => Promise<void>;
 		onSaveProfile: (profile: AppProfile) => Promise<void>;
+		onResetProfile: () => Promise<void>;
+		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
 	}
 
-	let { config, profile, onSaveConfig, onSaveProfile }: Props = $props();
+	let { config, profile, developerMode, onSaveConfig, onSaveProfile, onResetProfile, onSaveDeveloperMode }: Props =
+		$props();
 
 	/** 服务商选择：'demo' | 预设 id | CUSTOM_PROVIDER_ID。 */
 	let presetSelection = $state<string>('demo');
@@ -21,6 +25,7 @@
 	let temperature = $state(0.8);
 	let maxTokens = $state(1024);
 	let allowAiStateTools = $state(false);
+	let devMode = $state(false);
 	let profileName = $state('');
 	let systemPrompt = $state('');
 	let saving = $state(false);
@@ -52,6 +57,7 @@
 		searchMaxResults = config.webSearch.maxResults;
 		profileName = profile.name;
 		systemPrompt = profile.systemPrompt ?? '';
+		devMode = developerMode;
 	});
 
 	/** 切换服务商：选中预设时自动填充地址与默认模型。 */
@@ -72,6 +78,10 @@
 	async function save(): Promise<void> {
 		saving = true;
 		try {
+			// 先捕获输入值：await 期间 $effect 会用旧 profile 覆盖本地字段，避免保存空值。
+			const name = profileName.trim();
+			const prompt = systemPrompt.trim() || null;
+			const dev = devMode;
 			await onSaveConfig({
 				provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
 				providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
@@ -88,10 +98,16 @@
 					maxResults: Math.min(10, Math.max(1, Math.floor(searchMaxResults)))
 				}
 			});
-			await onSaveProfile({ name: profileName.trim(), systemPrompt: systemPrompt.trim() || null });
+			await onSaveProfile({ name, systemPrompt: prompt });
+			await onSaveDeveloperMode(dev);
 		} finally {
 			saving = false;
 		}
+	}
+
+	/** 「回到默认」仅重置角色档案，不动其他设置。 */
+	async function resetProfile(): Promise<void> {
+		await onResetProfile();
 	}
 </script>
 
@@ -238,6 +254,7 @@
 
 	<div class="card">
 		<h3 class="card-title">角色档案</h3>
+		<p class="muted" style="margin: 0 0 10px;">默认与内置角色「绫音」一致；可自由修改。</p>
 		<div class="field">
 			<label for="profile-name">角色名</label>
 			<input id="profile-name" class="input" bind:value={profileName} />
@@ -246,6 +263,18 @@
 			<label for="profile-prompt">系统提示（可选，覆盖默认模板）</label>
 			<textarea id="profile-prompt" class="textarea" bind:value={systemPrompt}></textarea>
 		</div>
+		<button class="btn" onclick={resetProfile}>回到默认</button>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">开发者功能</h3>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input id="dev-mode-enabled" class="checkbox" type="checkbox" bind:checked={devMode} />
+			<label for="dev-mode-enabled" class="muted">开发者模式</label>
+		</div>
+		<p class="muted" style="margin: 0;">
+			开启后，在对话页可展开查看最近一次实际发送给 AI 的完整提示词（系统消息 + 全部消息）。
+		</p>
 	</div>
 
 	<button class="btn btn-primary" onclick={save} disabled={saving}>保存设置</button>

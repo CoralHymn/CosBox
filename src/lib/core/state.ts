@@ -5,6 +5,7 @@ import type {
 	CharacterState,
 	ClothingItem,
 	ClothingKind,
+	ConfigOverrides,
 	LocationDef,
 	LocationState,
 	OutfitState,
@@ -249,6 +250,28 @@ export function applyStateDelta(state: CharacterState, patch: StatePatch): Chara
 
 	validateCharacterState(merged);
 	return merged;
+}
+
+/**
+ * 把世界配置覆盖叠加到重建后的状态上（整体替换三个配置段）。
+ * 配置（地点库/衣柜/日程条目）不进入版本历史，因此重建后需要从这里恢复；
+ * 校验失败会抛 StateValidationError，原状态不变。
+ */
+export function applyConfigOverrides(
+	state: CharacterState,
+	overrides: ConfigOverrides
+): CharacterState {
+	const patch: StatePatch = {};
+	if (overrides.places !== undefined) {
+		patch.places = overrides.places;
+	}
+	if (overrides.wardrobe !== undefined) {
+		patch.outfit = { wardrobe: overrides.wardrobe };
+	}
+	if (overrides.scheduleEntries !== undefined) {
+		patch.schedule = { entries: overrides.scheduleEntries };
+	}
+	return applyStateDelta(state, patch);
 }
 
 /** 合并属性表：显式 undefined 的键视为「不修改」。 */

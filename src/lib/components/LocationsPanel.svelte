@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LocationDef, LocationState, StatePatch } from '../core/types';
+	import type { ConfigPatch, LocationDef, LocationState, StatePatch } from '../core/types';
 	import { groupByCategory } from '../utils/grouping';
 	import { newId } from '../utils/id';
 
@@ -7,9 +7,11 @@
 		places: LocationDef[];
 		location: LocationState;
 		onUpdate: (patch: StatePatch, desc: string) => void;
+		/** 地点库条目属于世界配置：编辑不生成快照、不进版本历史。 */
+		onConfig: (patch: ConfigPatch) => void;
 	}
 
-	let { places, location, onUpdate }: Props = $props();
+	let { places, location, onUpdate, onConfig }: Props = $props();
 
 	interface PlaceRow {
 		id: string;
@@ -86,17 +88,14 @@
 	}
 
 	function commitPlaces(): void {
-		onUpdate(
-			{
-				places: rows.map((row) => ({
-					id: row.id,
-					category: row.category,
-					name: row.name,
-					description: row.description
-				}))
-			},
-			'更新地点库'
-		);
+		onConfig({
+			places: rows.map((row) => ({
+				id: row.id,
+				category: row.category,
+				name: row.name,
+				description: row.description
+			}))
+		});
 	}
 
 	function addPlace(): void {
