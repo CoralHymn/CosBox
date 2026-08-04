@@ -135,6 +135,6 @@ test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 
 	// 对话 tab 的实时预览反映新地点与衣柜
 	await page.getByRole('button', { name: /对话/ }).click();
-	await expect(page.getByText('海边').first()).toBeVisible();
+	await expect(page.getByText('校外 > 海边')).toBeVisible();
 	await expect(page.getByText('白色连衣裙').first()).toBeVisible();
 });
