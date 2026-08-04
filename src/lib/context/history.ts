@@ -1,13 +1,21 @@
 import type { ChatMessageView } from '../core/types';
 
+/** /help 帮助文本的稳定前缀（内容级兜底，兼容早期未打 skipContext 标记的快照）。 */
+export const HELP_TEXT_PREFIX = '可用 RP 快捷命令';
+
 /**
  * 过滤掉仅用于展示、不进入 LLM 上下文的消息（如 /help 帮助文本）。
  * 这类消息仍在会话/快照中完整保留，只是不发给模型。
+ * 除了显式标记外，还按内容识别帮助文本，保证旧会话数据同样被排除。
  */
 export function excludeFromContext(
 	conversation: ReadonlyArray<ChatMessageView>
 ): ChatMessageView[] {
-	return conversation.filter((message) => message.skipContext !== true);
+	return conversation.filter(
+		(message) =>
+			message.skipContext !== true &&
+			!(message.role === 'system' && message.content.startsWith(HELP_TEXT_PREFIX))
+	);
 }
 
 /** 历史压缩选项。 */
