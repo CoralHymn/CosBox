@@ -1,4 +1,5 @@
 import { SnapshotError } from './errors';
+import { clonePlain } from './clone';
 import { applyStateDelta, createInitialState, validateCharacterState } from './state';
 import type {
 	BranchSummary,
@@ -96,7 +97,7 @@ export function rebuildFromNodes(
 	initialState: CharacterState = createInitialState()
 ): RebuildResult {
 	const chain = chainToRoot(nodes, targetId);
-	let state = structuredClone(initialState);
+	let state = clonePlain(initialState);
 	const messages: ChatMessageView[] = [];
 	let appliedDeltas = 0;
 

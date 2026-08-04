@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { StateValidationError } from '../core/errors';
 import { createInitialState } from '../core/state';
+import type { ScheduleEntry, StatePatch } from '../core/types';
 import { KvRepository } from '../db/kv-repo';
 import { CosBoxDatabase } from '../db/schema';
 import { SnapshotRepository } from '../db/snapshot-repo';
@@ -98,6 +99,27 @@ describe('CharacterManager', () => {
 			manager.update({ schedule: { time: { day: 9, hour: 0, minute: 0 } } }, { desc: '非法' })
 		).rejects.toThrow(StateValidationError);
 		expect(await snapshots.count()).toBe(1);
+	});
+
+	it('update 兼容含不可克隆属性的补丁（structuredClone 失败时退回 JSON 深拷贝）', async () => {
+		const manager = createManager();
+		await manager.init();
+		const entry = {
+			id: 'x',
+			day: 0,
+			start: 600,
+			end: 660,
+			title: '自习',
+			evil: () => 1
+		} as ScheduleEntry & { evil: () => number };
+		const node = await manager.update({ schedule: { entries: [entry] } }, { desc: '新增条目' });
+		expect(manager.getState().schedule.entries).toEqual([
+			{ id: 'x', day: 0, start: 600, end: 660, title: '自习' }
+		]);
+		const delta = node.delta as { kind: 'state'; patch: StatePatch };
+		expect(delta.patch.schedule?.entries).toEqual([
+			{ id: 'x', day: 0, start: 600, end: 660, title: '自习' }
+		]);
 	});
 
 	it('addMessage 追加消息快照并重建会话', async () => {

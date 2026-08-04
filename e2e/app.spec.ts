@@ -142,6 +142,24 @@ test('日程：时间推进自动生成快照', async ({ page }) => {
 	await expect(page.getByRole('banner').getByText('周一 08:15')).toBeVisible();
 });
 
+test('日程：修改条目星期与新增条目不报 structuredClone 错误', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /日程/ }).click();
+
+	// 修改第一条的星期：状态更新并生成快照
+	await page.locator('.list-row select').first().selectOption('1');
+	await expect(page.locator('.list-row select').first()).toHaveValue('1');
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/2 快照/);
+
+	// 新增条目
+	await page.locator('#entry-title').fill('晚自习');
+	await page.locator('#entry-start').fill('19:00');
+	await page.locator('#entry-end').fill('20:30');
+	await page.getByRole('button', { name: '添加条目' }).click();
+	await expect(page.locator('.list-row')).toHaveCount(4);
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/3 快照/);
+});
+
 test('导入 SillyTavern V3 角色卡并写入世界书', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /导入导出/ }).click();
