@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SnapshotError } from './errors';
 import {
 	chainToRoot,
+	collectLinearChain,
 	createRootSnapshot,
 	getBranchTips,
 	getChildrenMap,
@@ -224,5 +225,33 @@ describe('getChildrenMap / getDepth / isBranchPoint / getBranchTips', () => {
 		];
 		expect(isBranchPoint(nodes, 'root')).toBe(true);
 		expect(isBranchPoint(nodes, 'a')).toBe(false);
+	});
+});
+
+describe('collectLinearChain', () => {
+	it('单链返回全部节点（含起点）', () => {
+		const nodes = toMap([
+			makeNode('root', null, null, 1),
+			makeNode('a', 'root', null, 2),
+			makeNode('b', 'a', null, 3)
+		]);
+		const chain = collectLinearChain(getChildrenMap(nodes.values()), nodes.get('root')!);
+		expect(chain.map((n) => n.id)).toEqual(['root', 'a', 'b']);
+	});
+
+	it('分支点处停止（不含分支孩子）', () => {
+		const nodes = toMap([
+			makeNode('root', null, null, 1),
+			makeNode('a', 'root', null, 2),
+			makeNode('b', 'root', null, 3)
+		]);
+		const chain = collectLinearChain(getChildrenMap(nodes.values()), nodes.get('root')!);
+		expect(chain.map((n) => n.id)).toEqual(['root']);
+	});
+
+	it('叶子返回自身', () => {
+		const nodes = toMap([makeNode('leaf', null, null, 1)]);
+		const chain = collectLinearChain(getChildrenMap(nodes.values()), nodes.get('leaf')!);
+		expect(chain.map((n) => n.id)).toEqual(['leaf']);
 	});
 });

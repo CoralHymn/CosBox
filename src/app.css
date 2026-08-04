@@ -459,12 +459,15 @@ button:disabled {
 
 .version-node {
 	position: relative;
+}
+
+.version-node.indented {
 	margin-left: 16px;
 	padding-left: 16px;
 	border-left: 1px solid var(--border);
 }
 
-.version-node::before {
+.version-node.indented::before {
 	content: '';
 	position: absolute;
 	left: -4px;
@@ -475,21 +478,23 @@ button:disabled {
 	background: var(--border-strong);
 }
 
-.version-node.head::before {
-	background: var(--accent);
-	box-shadow: 0 0 0 3px var(--accent-dim);
-}
-
-.version-node.branch-point::before {
-	background: var(--accent-2);
-}
-
 .version-row {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	padding: 5px 0;
 	font-size: 12.5px;
+}
+
+.version-row.head {
+	background: var(--accent-dim);
+	border-radius: var(--radius-sm);
+	padding-left: 8px;
+	padding-right: 8px;
+}
+
+.branch-children {
+	margin-top: 2px;
 }
 
 .version-desc {

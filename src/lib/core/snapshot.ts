@@ -166,3 +166,25 @@ export function isBranchPoint(nodes: Iterable<SnapshotNode>, id: string): boolea
 	const children = getChildrenMap(nodes).get(id);
 	return children !== undefined && children.length > 1;
 }
+
+/**
+ * 收集从 start 开始沿单链向下的节点序列（含起点）。
+ * 遇到叶子（无孩子）或分支点（多个孩子）时停止。
+ * 用于版本树 UI：链式节点平级渲染，避免快照树随对话增长无限向右缩进。
+ */
+export function collectLinearChain(
+	childrenMap: ReadonlyMap<string, SnapshotNode[]>,
+	start: SnapshotNode
+): SnapshotNode[] {
+	const chain: SnapshotNode[] = [];
+	let cursor: SnapshotNode | undefined = start;
+	while (cursor !== undefined) {
+		chain.push(cursor);
+		const children: SnapshotNode[] = childrenMap.get(cursor.id) ?? [];
+		if (children.length !== 1) {
+			break;
+		}
+		cursor = children[0];
+	}
+	return chain;
+}
