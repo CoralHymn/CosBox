@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { DemoLlmClient, buildDemoReply, extractLine, extractSearchTitle } from './demo-provider';
-import { DEFAULT_LLM_CONFIG, type ChatMessage } from './types';
+import {
+	DemoLlmClient,
+	buildDemoReply,
+	buildDemoToolResult,
+	extractLine,
+	extractSearchTitle
+} from './demo-provider';
+import { STATE_TOOLS } from './state-tools';
+import { DEFAULT_LLM_CONFIG, type ChatMessage, type StateToolSchema } from './types';
 
 const systemMessage =
 	'【当前状态】\n时间：周一 08:00（正在「晨会」）\n地点：学院正门（樱花道尽头）\n穿着：白色衬衫、深蓝百褶裙\n属性：name:绫音';
@@ -124,5 +131,77 @@ describe('DemoLlmClient', () => {
 		const controller = new AbortController();
 		const reply = await client.chat(messages('hi'), DEFAULT_LLM_CONFIG, controller.signal);
 		expect(reply).toContain('演示模式回应');
+	});
+
+	it('chatWithTools：用户想去食堂时返回 goto_location 工具调用', async () => {
+		const client = new DemoLlmClient();
+		const result = await client.chatWithTools(messages('我们去食堂吧'), STATE_TOOLS, DEFAULT_LLM_CONFIG);
+		expect(result.content).toBeNull();
+		expect(result.toolCalls).toEqual([
+			{ id: 'call_demo_goto', name: 'goto_location', arguments: { name: '食堂' } }
+		]);
+	});
+
+	it('chatWithTools：换装/时间关键词返回对应工具', async () => {
+		const client = new DemoLlmClient();
+		const outfit = await client.chatWithTools(
+			messages('换上运动服'),
+			STATE_TOOLS,
+			DEFAULT_LLM_CONFIG
+		);
+		expect(outfit.toolCalls[0]!.name).toBe('set_outfit');
+		const time = await client.chatWithTools(
+			messages('半小时后见'),
+			STATE_TOOLS,
+			DEFAULT_LLM_CONFIG
+		);
+		expect(time.toolCalls[0]!.name).toBe('advance_time');
+	});
+
+	it('chatWithTools：工具不在列表中时不触发，回退为普通演示回复', async () => {
+		const result = await buildDemoToolResult(messages('我们去食堂吧'), []);
+		expect(result.toolCalls).toEqual([]);
+		expect(result.content).toContain('演示模式回应');
+	});
+
+	it('chatWithTools：收到工具结果后返回确定性的收尾文本', async () => {
+		const result = await buildDemoToolResult(
+			[
+				{ role: 'system', content: systemMessage },
+				{ role: 'user', content: '我们去食堂吧' },
+				{
+					role: 'assistant',
+					content: '',
+					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+				},
+				{ role: 'tool', content: '已切换地点到「学校 > 食堂」', toolCallId: 'c1', name: 'goto_location' }
+			],
+			STATE_TOOLS
+		);
+		expect(result.toolCalls).toEqual([]);
+		expect(result.content).toContain('过去吧');
+	});
+
+	it('chatWithTools：不同工具结果对应不同收尾文本', async () => {
+		const cases: Array<[string, string]> = [
+			['时间推进到 周一 09:00', '时间过得真快'],
+			['已把上衣更换为「黑色卫衣」', '这套很适合'],
+			['未知工具：fly', '我知道了']
+		];
+		for (const [output, expected] of cases) {
+			const result = await buildDemoToolResult(
+				[{ role: 'tool', content: output, toolCallId: 'c', name: 't' }],
+				STATE_TOOLS
+			);
+			expect(result.content).toContain(expected);
+			expect(result.toolCalls).toEqual([]);
+		}
+	});
+
+	it('chatWithTools：未命中的工具列表与普通关键词返回纯文本', async () => {
+		const tools: StateToolSchema[] = [{ name: 'x', description: 'x', parameters: { type: 'object', properties: {}, required: [] } }];
+		const result = await buildDemoToolResult(messages('随便聊聊'), tools);
+		expect(result.toolCalls).toEqual([]);
+		expect(result.content).toContain('演示模式回应');
 	});
 });

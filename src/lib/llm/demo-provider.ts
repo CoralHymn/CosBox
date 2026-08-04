@@ -1,5 +1,12 @@
 import { truncate } from '../utils/format';
-import type { ChatMessage, LlmClient, LlmConfig } from './types';
+import type {
+	ChatMessage,
+	LlmChatResult,
+	LlmClient,
+	LlmConfig,
+	StateToolSchema,
+	ToolCall
+} from './types';
 
 /**
  * 内置离线演示 LLM：无需网络即可体验完整链路。
@@ -11,6 +18,67 @@ export class DemoLlmClient implements LlmClient {
 		await delay(250, signal);
 		return buildDemoReply(messages);
 	}
+
+	/**
+	 * 演示工具模式：根据用户输入关键词返回确定性的工具调用，
+	 * 收到工具结果后返回一句确定性的收尾文本。工具必须在传入列表中，否则忽略。
+	 */
+	async chatWithTools(
+		messages: ChatMessage[],
+		tools: readonly StateToolSchema[],
+		_config: LlmConfig,
+		signal?: AbortSignal
+	): Promise<LlmChatResult> {
+		await delay(250, signal);
+		return buildDemoToolResult(messages, tools);
+	}
+}
+
+/** 生成演示工具模式的结果：先看工具结果，再看用户输入的触发词。 */
+export function buildDemoToolResult(
+	messages: ChatMessage[],
+	tools: readonly StateToolSchema[]
+): LlmChatResult {
+	const last = messages[messages.length - 1];
+	if (last?.role === 'tool') {
+		return { content: buildDemoToolReply(last.content), toolCalls: [] };
+	}
+	const text = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+	const toolCalls = pickDemoToolCall(text, tools);
+	if (toolCalls.length > 0) {
+		return { content: null, toolCalls };
+	}
+	return { content: buildDemoReply(messages), toolCalls: [] };
+}
+
+/** 根据用户文本选择确定性的演示工具调用（仅当该工具在列表中）。 */
+function pickDemoToolCall(text: string, tools: readonly StateToolSchema[]): ToolCall[] {
+	if (/去食堂|食堂/.test(text) && tools.some((tool) => tool.name === 'goto_location')) {
+		return [{ id: 'call_demo_goto', name: 'goto_location', arguments: { name: '食堂' } }];
+	}
+	if (/运动服|换装/.test(text) && tools.some((tool) => tool.name === 'set_outfit')) {
+		return [
+			{ id: 'call_demo_outfit', name: 'set_outfit', arguments: { slot: 'top', item: '黑色卫衣' } }
+		];
+	}
+	if (/半小时后|时间推进/.test(text) && tools.some((tool) => tool.name === 'advance_time')) {
+		return [{ id: 'call_demo_time', name: 'advance_time', arguments: { minutes: 30 } }];
+	}
+	return [];
+}
+
+/** 根据工具结果生成确定性的演示收尾文本。 */
+function buildDemoToolReply(output: string): string {
+	if (output.includes('已切换地点')) {
+		return '（演示模式回应）好，那我们过去吧。';
+	}
+	if (output.includes('时间推进')) {
+		return '（演示模式回应）时间过得真快。';
+	}
+	if (output.includes('更换为')) {
+		return '（演示模式回应）嗯，这套很适合现在。';
+	}
+	return '（演示模式回应）好的，我知道了。';
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {

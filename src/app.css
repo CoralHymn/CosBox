@@ -321,6 +321,28 @@ button:disabled {
 	font-size: 12px;
 }
 
+.cmd-chip {
+	border: 1px solid var(--border-strong);
+	background: transparent;
+	color: var(--accent);
+	border-radius: var(--radius-sm);
+	padding: 2px 8px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.cmd-chip:hover:not(:disabled) {
+	background: #262c3d;
+}
+
+.command-hints {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+
 .row-actions {
 	display: flex;
 	gap: 8px;

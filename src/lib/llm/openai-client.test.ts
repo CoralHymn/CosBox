@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LlmError } from '../core/errors';
 import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
 import { OpenAiCompatibleClient } from './openai-client';
-import type { LlmConfig } from './types';
+import type { ChatMessage, LlmConfig, StateToolSchema } from './types';
 
 const config: LlmConfig = {
 	provider: 'openai-compatible',
@@ -23,6 +23,23 @@ function okResponse(content: string): Response {
 		text: async () => ''
 	} as unknown as Response;
 }
+
+function toolResponse(body: unknown): Response {
+	return {
+		ok: true,
+		status: 200,
+		json: async () => body,
+		text: async () => ''
+	} as unknown as Response;
+}
+
+const TOOL_SCHEMAS: readonly StateToolSchema[] = [
+	{
+		name: 'goto_location',
+		description: '切换地点',
+		parameters: { type: 'object', properties: { name: { type: 'string', description: '地名' } }, required: [] }
+	}
+];
 
 function fetchMock() {
 	return vi.fn<typeof fetch>();
@@ -173,5 +190,176 @@ describe('OpenAiCompatibleClient', () => {
 			)
 		);
 		await expect(client.chat([], config)).rejects.toThrow('缺少 choices');
+	});
+
+	it('chatWithTools 请求体包含 tools 声明与序列化消息', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const messages: ChatMessage[] = [
+			{ role: 'user', content: 'hi' },
+			{
+				role: 'assistant',
+				content: '',
+				toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+			},
+			{ role: 'tool', content: '已切换', toolCallId: 'c1', name: 'goto_location' }
+		];
+		const result = await client.chatWithTools(messages, TOOL_SCHEMAS, config);
+		expect(result.content).toBe('好的');
+		expect(result.toolCalls).toEqual([]);
+		const body = JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string);
+		expect(body.tools).toEqual([
+			{
+				type: 'function',
+				function: {
+					name: 'goto_location',
+					description: '切换地点',
+					parameters: TOOL_SCHEMAS[0]!.parameters
+				}
+			}
+		]);
+		expect(body.messages[1]!.tool_calls).toEqual([
+			{
+				id: 'c1',
+				type: 'function',
+				function: { name: 'goto_location', arguments: '{"name":"食堂"}' }
+			}
+		]);
+		expect(body.messages[2]!.tool_call_id).toBe('c1');
+	});
+
+	it('chatWithTools 解析标准 tool_calls，content 可为 null', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [
+					{
+						message: {
+							content: null,
+							tool_calls: [
+								{
+									id: 'call_abc',
+									type: 'function',
+									function: { name: 'advance_time', arguments: '{"minutes":30}' }
+								}
+							]
+						}
+					}
+				]
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(result.content).toBeNull();
+		expect(result.toolCalls).toEqual([
+			{ id: 'call_abc', name: 'advance_time', arguments: { minutes: 30 } }
+		]);
+	});
+
+	it('chatWithTools 兼容纯文本 JSON 工具调用', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			okResponse(JSON.stringify({ tool: 'goto_location', args: { name: '图书馆' } }))
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(result.content).toBeNull();
+		expect(result.toolCalls).toEqual([
+			{ id: 'call_inline', name: 'goto_location', arguments: { name: '图书馆' } }
+		]);
+	});
+
+	it('chatWithTools 忽略残缺 tool_calls 条目并跳过非法 JSON 参数', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [
+					{
+						message: {
+							content: '继续',
+							tool_calls: [
+								42,
+								{ id: 'c1' },
+								{ id: 'c2', function: { name: '', arguments: '{}' } },
+								{ id: 'c3', function: { name: 'x', arguments: 'not-json' } }
+							]
+						}
+					}
+				]
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(result.content).toBe('继续');
+		expect(result.toolCalls).toEqual([
+			{ id: 'c3', name: 'x', arguments: {} }
+		]);
+	});
+
+	it('chatWithTools content 为 null 且无工具调用时抛 LlmError', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(toolResponse({ choices: [{ message: { content: null } }] }));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await expect(client.chatWithTools([], TOOL_SCHEMAS, config)).rejects.toThrow('缺少 choices');
+	});
+
+	it('chatWithTools 忽略非对象或缺失 tool 的内联 JSON', async () => {
+		const client = new OpenAiCompatibleClient();
+		vi.stubGlobal('fetch', fetchMock().mockResolvedValue(okResponse('[1,2]')));
+		const arrayResult = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(arrayResult.content).toBe('[1,2]');
+		expect(arrayResult.toolCalls).toEqual([]);
+
+		vi.stubGlobal('fetch', fetchMock().mockResolvedValue(okResponse('{"args":{"name":"x"}}')));
+		const noToolResult = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(noToolResult.content).toBe('{"args":{"name":"x"}}');
+		expect(noToolResult.toolCalls).toEqual([]);
+	});
+
+	it('chatWithTools 内联工具参数为空串时返回空对象', async () => {
+		const client = new OpenAiCompatibleClient();
+		vi.stubGlobal(
+			'fetch',
+			fetchMock().mockResolvedValue(
+				okResponse(JSON.stringify({ tool: 'goto_location', args: '' }))
+			)
+		);
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(result.toolCalls).toEqual([
+			{ id: 'call_inline', name: 'goto_location', arguments: {} }
+		]);
+	});
+
+	it('chatWithTools 标准 tool_calls 参数为空串时返回空对象', async () => {
+		const client = new OpenAiCompatibleClient();
+		vi.stubGlobal(
+			'fetch',
+			fetchMock().mockResolvedValue(
+				toolResponse({
+					choices: [
+						{
+							message: {
+								content: null,
+								tool_calls: [
+									{
+										id: 'c1',
+										type: 'function',
+										function: { name: 'x', arguments: '' }
+									}
+								]
+							}
+						}
+					]
+				})
+			)
+		);
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(result.toolCalls).toEqual([{ id: 'c1', name: 'x', arguments: {} }]);
 	});
 });

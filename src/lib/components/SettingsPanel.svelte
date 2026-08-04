@@ -20,6 +20,7 @@
 	let model = $state('');
 	let temperature = $state(0.8);
 	let maxTokens = $state(1024);
+	let allowAiStateTools = $state(false);
 	let profileName = $state('');
 	let systemPrompt = $state('');
 	let saving = $state(false);
@@ -44,6 +45,7 @@
 		model = config.model;
 		temperature = config.temperature;
 		maxTokens = config.maxTokens;
+		allowAiStateTools = config.allowAiStateTools === true;
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
 		searchApiKey = config.webSearch.apiKey;
@@ -78,6 +80,7 @@
 				model: model.trim() || DEFAULT_LLM_CONFIG.model,
 				temperature: Math.min(2, Math.max(0, temperature)),
 				maxTokens: Math.max(1, Math.floor(maxTokens)),
+				allowAiStateTools,
 				webSearch: {
 					enabled: searchEnabled,
 					provider: searchProvider,
@@ -220,6 +223,17 @@
 				/>
 			</div>
 		{/if}
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">AI 行为</h3>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input id="ai-tools-enabled" class="checkbox" type="checkbox" bind:checked={allowAiStateTools} />
+			<label for="ai-tools-enabled" class="muted">允许 AI 自主修改状态（地点 / 时间 / 穿着 / 属性）</label>
+		</div>
+		<p class="muted" style="margin: 0;">
+			开启后，AI 可在剧情中自行调用工具更新状态并生成快照，你可以在版本页回溯；关闭则保持纯文本回复。
+		</p>
 	</div>
 
 	<div class="card">

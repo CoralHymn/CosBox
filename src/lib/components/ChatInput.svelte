@@ -10,6 +10,14 @@
 	let text = $state('');
 	let search = $state(false);
 
+	/** RP 快捷命令列表：点击把命令前缀填入输入框。 */
+	const quickCommands = [
+		{ label: '/goto', value: '/goto ' },
+		{ label: '/wear', value: '/wear ' },
+		{ label: '/time', value: '/time ' },
+		{ label: '/help', value: '/help' }
+	] as const;
+
 	function submit(): void {
 		const value = text.trim();
 		if (value === '' || disabled) {
@@ -28,9 +36,22 @@
 </script>
 
 <div class="composer">
+	<div class="command-hints">
+		<span class="muted" style="font-size: 12px;">快捷操作：</span>
+		{#each quickCommands as command (command.label)}
+			<button
+				class="cmd-chip"
+				type="button"
+				disabled={disabled}
+				onclick={() => {
+					text = command.value;
+				}}>{command.label}</button
+			>
+		{/each}
+	</div>
 	<textarea
 		class="textarea"
-		placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+		placeholder="输入消息；或用 /goto /wear /time 直接操作状态，Enter 发送，Shift+Enter 换行"
 		bind:value={text}
 		onkeydown={(event) => {
 			if (event.key === 'Enter' && !event.shiftKey) {
