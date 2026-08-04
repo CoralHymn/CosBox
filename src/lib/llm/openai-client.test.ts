@@ -264,6 +264,37 @@ describe('OpenAiCompatibleClient', () => {
 		]);
 	});
 
+	it('chatWithTools 兼容 arguments 已是对象的响应', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [
+					{
+						message: {
+							content: null,
+							tool_calls: [
+								{
+									id: 'c1',
+									type: 'function',
+									function: {
+										name: 'set_outfit',
+										arguments: { slot: 'top', item: '白色衬衫' }
+									}
+								}
+							]
+						}
+					}
+				]
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(result.toolCalls).toEqual([
+			{ id: 'c1', name: 'set_outfit', arguments: { slot: 'top', item: '白色衬衫' } }
+		]);
+	});
+
 	it('chatWithTools 兼容纯文本 JSON 工具调用', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(

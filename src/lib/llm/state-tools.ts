@@ -1,5 +1,11 @@
 import { addMinutes, formatWorldTime } from '../core/state';
-import type { CharacterState, OutfitSlot, OutfitState, StatePatch } from '../core/types';
+import type {
+	CharacterState,
+	ClothingKind,
+	OutfitSlot,
+	OutfitState,
+	StatePatch
+} from '../core/types';
 import type { StateToolSchema, ToolCall } from './types';
 
 /** 工具执行时访问的角色状态上下文（由 CharacterManager 会话提供）。 */
@@ -44,6 +50,25 @@ const SLOT_LABELS: Record<OutfitSlot, string> = {
 	socks: '袜子',
 	shoes: '鞋子'
 };
+
+/** 中文槽位别名 -> 标准槽位键（模型经常直接传中文）。 */
+const SLOT_ALIASES: Record<string, OutfitSlot> = {
+	帽子: 'headwear',
+	头饰: 'headwear',
+	'帽子/头饰': 'headwear',
+	上衣: 'top',
+	上装: 'top',
+	内衣: 'underwear',
+	内裤: 'underpants',
+	下装: 'bottom',
+	裙子: 'bottom',
+	袜子: 'socks',
+	鞋: 'shoes',
+	鞋子: 'shoes'
+};
+
+/** 视为「脱掉」的 item 值（模型常用文本表达代替 null）。 */
+const REMOVE_TOKENS = new Set(['无', '脱', 'null', 'none']);
 
 /** 切换当前地点：locationId 优先匹配地点库，否则用 name 创建（可附 category/description）。 */
 export const gotoLocationTool: StateToolDefinition = {
@@ -133,13 +158,13 @@ export const advanceTimeTool: StateToolDefinition = {
 };
 
 /**
- * 更换穿着：slot 指定槽位，item 为衣柜中的衣物名称或 null（脱掉）。
- * 衣物名称必须匹配衣柜预设，避免 AI 脑补不存在的衣服。
+ * 更换穿着：slot 指定槽位（接受中文别名，如「上衣」），item 为衣柜中的衣物名称、
+ * null、或「无/脱」表示脱掉。衣物名称按衣柜精确匹配，其次唯一子串匹配，避免脑补。
  */
 export const setOutfitTool: StateToolDefinition = {
 	name: 'set_outfit',
 	description:
-		'更换角色穿着。slot 为槽位（headwear/top/underwear/underpants/bottom/socks/shoes），item 必须是衣柜中已存在的衣物名称，或用 null 表示脱掉。',
+		'更换角色穿着。slot 为槽位（headwear/top/underwear/underpants/bottom/socks/shoes，也可用中文：帽子/上衣/内衣/内裤/下装/袜子/鞋），item 必须是衣柜中已存在的衣物名称（精确名称，如「白色衬衫」），或用 null / 「无」表示脱掉。',
 	parameters: {
 		type: 'object',
 		properties: {
@@ -153,22 +178,47 @@ export const setOutfitTool: StateToolDefinition = {
 		required: ['slot', 'item']
 	},
 	async execute(args, ctx) {
-		const slot = args.slot;
-		if (typeof slot !== 'string' || !OUTFIT_SLOTS.includes(slot as OutfitSlot)) {
-			throw new Error(`未知槽位：${String(slot)}`);
+		const rawSlot = typeof args.slot === 'string' ? args.slot.trim().toLowerCase() : '';
+		const slot =
+			SLOT_ALIASES[rawSlot] ??
+			(OUTFIT_SLOTS.includes(rawSlot as OutfitSlot) ? (rawSlot as OutfitSlot) : undefined);
+		if (slot === undefined) {
+			throw new Error(`未知槽位：${String(args.slot)}，可用：帽子/上衣/内衣/内裤/下装/袜子/鞋`);
 		}
 		const item = args.item;
 		if (item !== null && typeof item !== 'string') {
 			throw new Error('set_outfit 的 item 必须是衣物名称或 null');
 		}
-		const slotKey = slot as OutfitSlot;
-		const value = item === null ? null : item.trim();
+		const slotKey = slot;
+		const rawValue = item === null ? '' : item.trim();
+		const value = rawValue === '' || REMOVE_TOKENS.has(rawValue.toLowerCase()) ? null : rawValue;
 		if (value !== null) {
 			const wardrobe = ctx.getState().outfit.wardrobe;
-			const found = wardrobe.some((entry) => entry.name === value);
-			if (!found) {
-				throw new Error(`衣柜中没有「${value}」，请从衣柜中选择`);
+			const exact = wardrobe.find((entry) => entry.name === value);
+			if (exact) {
+				await ctx.update(
+					{ outfit: { [slotKey]: exact.name } as Partial<OutfitState> },
+					{ desc: `AI 更换穿着：${SLOT_LABELS[slotKey]} → ${exact.name}` }
+				);
+				return `已把${SLOT_LABELS[slotKey]}更换为「${exact.name}」`;
 			}
+			const lower = value.toLowerCase();
+			const fuzzy = wardrobe.filter((entry) => entry.name.toLowerCase().includes(lower));
+			if (fuzzy.length === 1) {
+				await ctx.update(
+					{ outfit: { [slotKey]: fuzzy[0]!.name } as Partial<OutfitState> },
+					{ desc: `AI 更换穿着：${SLOT_LABELS[slotKey]} → ${fuzzy[0]!.name}` }
+				);
+				return `已把${SLOT_LABELS[slotKey]}更换为「${fuzzy[0]!.name}」`;
+			}
+			throw new Error(
+				`衣柜中没有「${value}」${fuzzy.length > 1 ? '（名称有歧义）' : ''}，可选的${SLOT_LABELS[slotKey]}：${
+					wardrobe
+						.filter((entry) => matchesSlotKind(entry.kind, slotKey))
+						.map((entry) => entry.name)
+						.join('、') || '（暂无）'
+				}`
+			);
 		}
 		await ctx.update(
 			{ outfit: { [slotKey]: value } as Partial<OutfitState> },
@@ -177,6 +227,11 @@ export const setOutfitTool: StateToolDefinition = {
 		return `已把${SLOT_LABELS[slotKey]}更换为「${value ?? '无'}」`;
 	}
 };
+
+/** 衣物 kind 是否适用于该槽位（any/未标注视为通用）。 */
+function matchesSlotKind(kind: ClothingKind | undefined, slot: OutfitSlot): boolean {
+	return kind === undefined || kind === 'any' || kind === slot;
+}
 
 /** 设置角色属性（如心情、金钱、好感度），数字/布尔字符串会自动转换。 */
 export const setAttributeTool: StateToolDefinition = {

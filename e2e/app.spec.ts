@@ -282,6 +282,27 @@ test('开启 AI 状态工具后，演示模式按剧情自主切换地点', asyn
 	await expect(page.getByText('学校 > 食堂')).toBeVisible();
 });
 
+test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并反映到状态', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#ai-tools-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await expect(page.getByText('模型设置已保存')).toBeVisible();
+
+	await page.getByRole('button', { name: /对话/ }).click();
+	const snapshotsBefore = await page.locator('.chip').filter({ hasText: '快照' }).textContent();
+
+	await page.getByPlaceholder(/输入消息/).fill('换上运动服');
+	await page.getByRole('button', { name: '发送' }).click();
+
+	// 工具调用 → 状态快照 → 最终回复
+	await expect(page.getByText(/这套很适合现在/)).toBeVisible();
+	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
+	await expect
+		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
+		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 3));
+});
+
 test('RP 斜杠命令：/goto /wear /time /help 直接修改状态', async ({ page }) => {
 	await page.goto('/');
 
