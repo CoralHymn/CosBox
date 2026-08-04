@@ -65,6 +65,34 @@ describe('SnapshotRepository', () => {
 		expect(children.map((n) => n.id)).toEqual([early.id, late.id]);
 	});
 
+	it('removeMany 批量删除指定节点，不存在的 id 被跳过', async () => {
+		const root = await repo.addSnapshot({
+			parentId: null,
+			metadata: { type: 'root', desc: 'r' },
+			delta: null
+		});
+		const a = await repo.addSnapshot({
+			parentId: root.id,
+			metadata: { type: 'state', desc: 'a' },
+			delta: { kind: 'state', patch: {} }
+		});
+		const b = await repo.addSnapshot({
+			parentId: a.id,
+			metadata: { type: 'message', desc: 'b' },
+			delta: { kind: 'message', role: 'user', content: 'hi' }
+		});
+		await repo.removeMany([a.id, 'ghost', b.id]);
+		expect(await repo.count()).toBe(1);
+		expect(await repo.getNode(a.id)).toBeUndefined();
+		expect(await repo.getNode(b.id)).toBeUndefined();
+		expect(await repo.getNode(root.id)).toBeDefined();
+	});
+
+	it('removeMany 数据库关闭后抛 StorageError', async () => {
+		await db.close();
+		await expect(repo.removeMany(['x'])).rejects.toThrow(StorageError);
+	});
+
 	it('rebuildState 在 100+ 次 delta 后重建正确', async () => {
 		const root = await repo.addSnapshot({
 			parentId: null,

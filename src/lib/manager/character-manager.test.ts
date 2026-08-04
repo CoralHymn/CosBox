@@ -268,4 +268,121 @@ describe('CharacterManager', () => {
 		expect(manager.getState().outfit.top).toBe('新外套');
 		expect(manager.getBranches()).toHaveLength(1);
 	});
+
+	it('deleteBranch 删除 tip 链并保留分支点，head 不受影响', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		await manager.addMessage('user', '分支A消息');
+		const branchAHead = manager.getHeadId()!;
+
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支B上衣' } }, { desc: '分支B' });
+		const branchBHead = manager.getHeadId()!;
+
+		expect(manager.getBranches()).toHaveLength(2);
+		const deleted = await manager.deleteBranch(branchAHead);
+		expect(deleted).toBe(2);
+		expect(manager.getHeadId()).toBe(branchBHead);
+		expect(manager.getState().outfit.top).toBe('分支B上衣');
+		expect(manager.getBranches()).toHaveLength(1);
+		expect(manager.getBranches()[0]!.tipId).toBe(branchBHead);
+		const remaining = manager.getSnapshots().map((node) => node.id);
+		expect(remaining).toContain(root);
+		expect(remaining).toContain(fork);
+		expect(remaining).toContain(branchBHead);
+		expect(remaining).not.toContain(branchAHead);
+		expect(await snapshots.count()).toBe(3);
+	});
+
+	it('deleteBranch 当 head 位于删除链时先切回分支点再删除', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		await manager.addMessage('user', '分支A消息');
+		const branchAHead = manager.getHeadId()!;
+
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支B上衣' } }, { desc: '分支B' });
+		await manager.checkout(branchAHead);
+
+		const deleted = await manager.deleteBranch(branchAHead);
+		expect(deleted).toBe(2);
+		expect(manager.getHeadId()).toBe(fork);
+		expect(manager.getState().outfit.top).toBe(createInitialState().outfit.top);
+		expect(manager.getConversation()).toEqual([]);
+		expect(await snapshots.count()).toBe(3);
+	});
+
+	it('deleteBranch 拒绝非末端节点，避免孤儿链', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		const mid = manager.getHeadId()!;
+		await manager.addMessage('user', '分支A消息');
+
+		await expect(manager.deleteBranch(mid)).rejects.toThrow('只能删除分支末端的快照');
+		expect(await snapshots.count()).toBe(4);
+	});
+
+	it('deleteBranch 单链历史全部删除后只剩根，head 回退到根', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await manager.update({ outfit: { top: '普通上衣' } }, { desc: '换装' });
+		await manager.addMessage('user', '只有一条分支');
+		const tip = manager.getHeadId()!;
+
+		const deleted = await manager.deleteBranch(tip);
+		expect(deleted).toBe(2);
+		expect(manager.getHeadId()).toBe(root);
+		expect(manager.getConversation()).toEqual([]);
+		expect(await snapshots.count()).toBe(1);
+	});
+
+	it('deleteBranch 根快照或不存在节点抛 SnapshotError', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await expect(manager.deleteBranch(root)).rejects.toThrow('无法删除根快照');
+		await expect(manager.deleteBranch('missing')).rejects.toThrow('无法删除根快照');
+		expect(await snapshots.count()).toBe(1);
+	});
+
+	it('deleteBranch 与其他变更并发时按入队顺序串行落地', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		const branchAHead = manager.getHeadId()!;
+
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支B上衣' } }, { desc: '分支B' });
+
+		await Promise.all([
+			manager.addMessage('user', '分支B新消息'),
+			manager.deleteBranch(branchAHead)
+		]);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['分支B新消息']);
+		expect(manager.getHeadId()).not.toBe(branchAHead);
+		expect(manager.getBranches()).toHaveLength(1);
+		expect(manager.getBranches()[0]!.tipId).not.toBe(branchAHead);
+		expect(await snapshots.count()).toBe(4);
+	});
 });

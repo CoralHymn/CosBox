@@ -9,9 +9,11 @@
 		branches: BranchSummary[];
 		onCheckout: (id: string) => void;
 		onAddCheckpoint: (desc: string) => void;
+		onDeleteBranch: (tipId: string) => void;
 	}
 
-	let { snapshots, headId, branches, onCheckout, onAddCheckpoint }: Props = $props();
+	let { snapshots, headId, branches, onCheckout, onAddCheckpoint, onDeleteBranch }: Props =
+		$props();
 	let checkpointDesc = $state('');
 
 	const childrenMap = $derived(getChildrenMap(snapshots));
@@ -42,6 +44,11 @@
 					{#if branch.tipId !== headId}
 						<button class="btn btn-small" onclick={() => onCheckout(branch.tipId)}>切换</button>
 					{/if}
+					<button
+						class="btn btn-small btn-danger"
+						onclick={() => onDeleteBranch(branch.tipId)}
+						>删除</button
+					>
 				</div>
 			{/each}
 		{/if}
@@ -50,7 +57,7 @@
 	<div class="card">
 		<h3 class="card-title">快照树</h3>
 		{#each roots as root (root.id)}
-			<VersionNode node={root} {childrenMap} {headId} {onCheckout} />
+			<VersionNode node={root} {childrenMap} {headId} {onCheckout} {onDeleteBranch} />
 		{/each}
 	</div>
 

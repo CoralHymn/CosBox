@@ -1,6 +1,6 @@
-import { StateValidationError } from '../core/errors';
+import { SnapshotError, StateValidationError } from '../core/errors';
 import { applyStateDelta, addMinutes, createInitialState } from '../core/state';
-import { sortNodes } from '../core/snapshot';
+import { collectBranchPath, getChildrenMap, sortNodes } from '../core/snapshot';
 import type {
 	BranchSummary,
 	CharacterSessionView,
@@ -264,6 +264,42 @@ export class CharacterManager {
 		await this.persistHead();
 		await this.refresh();
 		return node;
+	}
+
+	/**
+	 * 删除分支：删除从 tip 沿 parentId 到分支点（不含分支点与根）的一整段链。
+	 * 若当前 head 位于删除链上，会先切换到链的父节点（分支点或根），再删除，
+	 * 保证删除后 head 一定指向仍存在的快照。根快照不可删除。
+	 * @returns 实际删除的快照数量
+	 */
+	deleteBranch(tipId: string): Promise<number> {
+		return this.enqueue(() => this.doDeleteBranch(tipId));
+	}
+
+	private async doDeleteBranch(tipId: string): Promise<number> {
+		await this.ensureInit();
+		const all = await this.deps.snapshots.getAll();
+		const map = new Map(all.map((node) => [node.id, node]));
+		const childrenMap = getChildrenMap(all);
+		if ((childrenMap.get(tipId) ?? []).length > 0) {
+			throw new SnapshotError('只能删除分支末端的快照');
+		}
+		const path = collectBranchPath(childrenMap, map, tipId);
+		if (path.length === 0) {
+			throw new SnapshotError('无法删除根快照或节点不存在');
+		}
+		const pathIds = new Set(path.map((node) => node.id));
+		if (this.headId !== null && pathIds.has(this.headId)) {
+			const fallbackParent = path[path.length - 1]!.parentId!;
+			const rebuilt = await this.deps.snapshots.checkout(fallbackParent);
+			this.headId = fallbackParent;
+			this.state = rebuilt.state;
+			this.conversation = rebuilt.messages;
+			await this.persistHead();
+		}
+		await this.deps.snapshots.removeMany([...pathIds]);
+		await this.refresh();
+		return path.length;
 	}
 
 	private now(): number {

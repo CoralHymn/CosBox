@@ -188,3 +188,29 @@ export function collectLinearChain(
 	}
 	return chain;
 }
+
+/**
+ * 收集分支链：从 tip 沿 parentId 向上，直到分支点（多子节点）或根为止（不含分支点与根）。
+ * 用于「删除分支」：删除该链上的节点后，分支点保留。
+ */
+export function collectBranchPath(
+	childrenMap: ReadonlyMap<string, SnapshotNode[]>,
+	nodes: ReadonlyMap<string, SnapshotNode>,
+	tipId: string
+): SnapshotNode[] {
+	const path: SnapshotNode[] = [];
+	let cursor: string | null = tipId;
+	while (cursor !== null) {
+		const node = nodes.get(cursor);
+		if (node === undefined || node.parentId === null) {
+			break;
+		}
+		path.push(node);
+		const siblings = childrenMap.get(node.parentId) ?? [];
+		if (siblings.length > 1) {
+			break;
+		}
+		cursor = node.parentId;
+	}
+	return path;
+}

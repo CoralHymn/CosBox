@@ -20,6 +20,7 @@ export interface CharacterSessionStore {
 	checkout: (targetId: string) => Promise<void>;
 	advanceTime: (minutes: number) => Promise<SnapshotNode>;
 	addCheckpoint: (desc: string) => Promise<SnapshotNode>;
+	deleteBranch: (tipId: string) => Promise<number>;
 }
 
 /**
@@ -61,6 +62,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 		addMessage: (role, content) => manager.addMessage(role, content),
 		checkout: (targetId) => manager.checkout(targetId),
 		advanceTime: (minutes) => manager.advanceTime(minutes),
-		addCheckpoint: (desc) => manager.addCheckpoint(desc)
+		addCheckpoint: (desc) => manager.addCheckpoint(desc),
+		deleteBranch: (tipId) => manager.deleteBranch(tipId)
 	};
 }
