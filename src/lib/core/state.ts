@@ -3,6 +3,7 @@ import type {
 	CharacterAttributes,
 	CharacterState,
 	ClothingItem,
+	ClothingKind,
 	LocationDef,
 	LocationState,
 	OutfitState,
@@ -31,6 +32,24 @@ const OUTFIT_SLOT_KEYS = [
 
 /** 地点字段键，用于校验。 */
 const LOCATION_KEYS = ['id', 'category', 'name', 'description'] as const;
+
+/** 合法衣物类型列表（含 any）。 */
+export const CLOTHING_KINDS: readonly ClothingKind[] = [
+	'headwear',
+	'top',
+	'underwear',
+	'underpants',
+	'bottom',
+	'socks',
+	'shoes',
+	'accessory',
+	'any'
+];
+
+/** 判断值是否为合法衣物类型。 */
+export function isValidClothingKind(value: unknown): value is ClothingKind {
+	return typeof value === 'string' && (CLOTHING_KINDS as readonly string[]).includes(value);
+}
 
 /** 日程条目字段键，用于校验。 */
 const SCHEDULE_ENTRY_KEYS = ['id', 'day', 'start', 'end', 'title', 'locationId'] as const;
@@ -81,55 +100,70 @@ export function createInitialWardrobe(): ClothingItem[] {
 		{
 			id: 'cloth-01',
 			category: '常服',
+			kind: 'top',
 			name: '白色衬衫',
 			description: '白色棉质衬衫，领口带细蕾丝，袖口挽起两折'
 		},
 		{
 			id: 'cloth-02',
 			category: '常服',
+			kind: 'bottom',
 			name: '深蓝百褶裙',
 			description: '深蓝色及膝百褶裙，走动时裙摆轻轻摆动'
 		},
 		{
 			id: 'cloth-03',
 			category: '常服',
+			kind: 'shoes',
 			name: '黑色皮鞋',
 			description: '黑色低跟皮鞋，鞋面擦得发亮'
 		},
 		{
 			id: 'cloth-04',
 			category: '常服',
+			kind: 'accessory',
 			name: '蝴蝶结发带',
 			description: '红色蝴蝶结发带，别在右侧发间'
 		},
 		{
 			id: 'cloth-05',
 			category: '常服',
+			kind: 'socks',
 			name: '白色过膝袜',
 			description: '白色过膝袜，袜口带一圈蕾丝边'
 		},
 		{
 			id: 'cloth-06',
 			category: '常服',
+			kind: 'underwear',
 			name: '白色棉质内衣',
 			description: '白色纯棉内衣，无花纹，剪裁合体'
 		},
-		{ id: 'cloth-07', category: '常服', name: '白色棉质内裤', description: '白色纯棉内裤，松紧腰' },
+		{
+			id: 'cloth-07',
+			category: '常服',
+			kind: 'underpants',
+			name: '白色棉质内裤',
+			description: '白色纯棉内裤，松紧腰'
+		},
 		{
 			id: 'cloth-08',
 			category: '运动服',
+			kind: 'top',
 			name: '黑色卫衣',
 			description: '宽松黑色连帽卫衣，胸前有白色字母印花'
 		},
 		{
 			id: 'cloth-09',
 			category: '运动服',
+			kind: 'shoes',
 			name: '白色运动鞋',
 			description: '白色运动鞋，鞋带系成蝴蝶结，鞋边干净'
 		},
 		{
 			id: 'cloth-10',
 			category: '常服',
+			kind: 'headwear',
 			name: '贝雷帽',
 			description: '藏青色贝雷帽，斜戴在头顶右侧'
 		}
@@ -274,6 +308,9 @@ function validateOutfit(outfit: OutfitState): void {
 		}
 		if (typeof item.name !== 'string' || item.name.trim() === '') {
 			throw new StateValidationError('衣柜条目名称必须是非空字符串');
+		}
+		if (item.kind !== undefined && !isValidClothingKind(item.kind)) {
+			throw new StateValidationError('衣柜条目类型非法');
 		}
 		if (typeof item.category !== 'string') {
 			throw new StateValidationError('衣柜条目分类必须是字符串');

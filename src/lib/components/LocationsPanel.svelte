@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { LocationDef, LocationState, StatePatch } from '../core/types';
+	import { groupByCategory } from '../utils/grouping';
 	import { newId } from '../utils/id';
 
 	interface Props {
@@ -18,6 +19,7 @@
 	}
 
 	let rows = $state<PlaceRow[]>([]);
+	let collapsed = $state<Record<string, boolean>>({});
 	let currentId = $state('custom');
 	let customCategory = $state('');
 	let customName = $state('');
@@ -25,6 +27,8 @@
 	let draftCategory = $state('');
 	let draftName = $state('');
 	let draftDescription = $state('');
+
+	const groups = $derived(groupByCategory(rows));
 
 	$effect(() => {
 		rows = places.map((place) => ({
@@ -38,6 +42,10 @@
 		customName = location.name;
 		customDescription = location.description;
 	});
+
+	function toggle(category: string): void {
+		collapsed[category] = !collapsed[category];
+	}
 
 	function placeLabel(category: string, name: string): string {
 		return category === '' ? name : `${category} > ${name}`;
@@ -115,7 +123,7 @@
 <div class="panel">
 	<h2 class="panel-title">地点</h2>
 	<p class="panel-sub">
-		地点库是 AI 认知中的全部地点（可按大类组织，如「学校 > 食堂」）；当前所在地独立于日程。
+		地点库是 AI 认知中的全部地点（可按大类收纳，如「学校 > 食堂」）；当前所在地独立于日程。
 	</p>
 
 	<div class="card">
@@ -176,37 +184,48 @@
 
 	<div class="card">
 		<h3 class="card-title">地点库</h3>
-		{#if rows.length === 0}
+		{#if groups.length === 0}
 			<p class="empty-hint">还没有地点，先添加一个吧</p>
 		{:else}
-			{#each rows as row (row.id)}
-				<div class="list-row">
-					<input
-						class="input"
-						style="width: 110px;"
-						bind:value={row.category}
-						onchange={commitPlaces}
-						placeholder="分类"
-					/>
-					<input
-						class="input"
-						style="width: 150px;"
-						bind:value={row.name}
-						onchange={commitPlaces}
-						placeholder="地点名"
-					/>
-					<input
-						class="input"
-						style="flex: 1;"
-						bind:value={row.description}
-						onchange={commitPlaces}
-						placeholder="描述"
-					/>
-					<button
-						class="btn btn-danger btn-small"
-						onclick={() => removePlace(row.id)}
-						aria-label="删除地点">✕</button
-					>
+			{#each groups as group (group.category)}
+				<div class="group">
+					<button class="group-header" onclick={() => toggle(group.category)}>
+						<span class="chevron" class:collapsed={collapsed[group.category]}>▸</span>
+						<span class="group-name">{group.category === '' ? '未分类' : group.category}</span>
+						<span class="muted">{group.items.length} 处</span>
+					</button>
+					{#if !collapsed[group.category]}
+						{#each group.items as row (row.id)}
+							<div class="list-row">
+								<input
+									class="input"
+									style="width: 110px;"
+									bind:value={row.category}
+									onchange={commitPlaces}
+									placeholder="分类"
+								/>
+								<input
+									class="input"
+									style="width: 150px;"
+									bind:value={row.name}
+									onchange={commitPlaces}
+									placeholder="地点名"
+								/>
+								<input
+									class="input"
+									style="flex: 1;"
+									bind:value={row.description}
+									onchange={commitPlaces}
+									placeholder="描述"
+								/>
+								<button
+									class="btn btn-danger btn-small"
+									onclick={() => removePlace(row.id)}
+									aria-label="删除地点">✕</button
+								>
+							</div>
+						{/each}
+					{/if}
 				</div>
 			{/each}
 		{/if}
@@ -218,8 +237,16 @@
 					id="new-place-category"
 					class="input"
 					bind:value={draftCategory}
+					list="place-categories"
 					placeholder="如：学校"
 				/>
+				<datalist id="place-categories">
+					{#each groups as group (group.category)}
+						{#if group.category !== ''}
+							<option value={group.category}></option>
+						{/if}
+					{/each}
+				</datalist>
 			</div>
 			<div class="field">
 				<label for="new-place-name">地点名</label>

@@ -611,6 +611,47 @@ button:disabled {
 	border-bottom: none;
 }
 
+/* ---------- 分类收纳 ---------- */
+
+.group {
+	margin-bottom: 8px;
+}
+
+.group-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 7px 10px;
+	margin-bottom: 4px;
+	background: var(--panel-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+	font-size: 13px;
+	text-align: left;
+	transition: border-color 120ms;
+}
+
+.group-header:hover {
+	border-color: var(--border-strong);
+}
+
+.group-name {
+	font-weight: 700;
+}
+
+.chevron {
+	display: inline-block;
+	font-size: 11px;
+	color: var(--text-dim);
+	transition: transform 120ms;
+}
+
+.chevron.collapsed {
+	transform: rotate(90deg);
+}
+
 .key-value-row {
 	display: grid;
 	grid-template-columns: 110px 1fr 34px;
