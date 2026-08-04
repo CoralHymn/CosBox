@@ -46,7 +46,13 @@
 
 	function updateEntry(id: string, patch: Partial<ScheduleEntry>): void {
 		onUpdate(
-			{ schedule: { entries: schedule.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)) } },
+			{
+				schedule: {
+					entries: schedule.entries.map((entry) =>
+						entry.id === id ? { ...entry, ...patch } : entry
+					)
+				}
+			},
 			'更新日程条目'
 		);
 	}
@@ -65,7 +71,9 @@
 
 	<div class="card">
 		<h3 class="card-title">当前世界时间</h3>
-		<p style="font-size: 20px; font-weight: 700; margin: 0 0 12px;">{formatWorldTime(schedule.time)}</p>
+		<p style="font-size: 20px; font-weight: 700; margin: 0 0 12px;">
+			{formatWorldTime(schedule.time)}
+		</p>
 		<div class="row-actions">
 			<button class="btn" onclick={() => onAdvance(-60)}>⏪ -1h</button>
 			<button class="btn" onclick={() => onAdvance(15)}>+15m</button>
@@ -85,7 +93,10 @@
 						class="select"
 						style="width: 86px;"
 						value={entry.day}
-						onchange={(event) => updateEntry(entry.id, { day: Number((event.currentTarget as HTMLSelectElement).value) })}
+						onchange={(event) =>
+							updateEntry(entry.id, {
+								day: Number((event.currentTarget as HTMLSelectElement).value)
+							})}
 					>
 						{#each DAY_NAMES as dayName, index (index)}
 							<option value={index}>{dayName}</option>
@@ -96,7 +107,10 @@
 						style="width: 92px;"
 						type="time"
 						value={formatMinutesOfDay(entry.start)}
-						onchange={(event) => updateEntry(entry.id, { start: timeToMinutes((event.currentTarget as HTMLInputElement).value) })}
+						onchange={(event) =>
+							updateEntry(entry.id, {
+								start: timeToMinutes((event.currentTarget as HTMLInputElement).value)
+							})}
 					/>
 					<span class="muted">—</span>
 					<input
@@ -104,15 +118,25 @@
 						style="width: 92px;"
 						type="time"
 						value={formatMinutesOfDay(entry.end)}
-						onchange={(event) => updateEntry(entry.id, { end: timeToMinutes((event.currentTarget as HTMLInputElement).value) })}
+						onchange={(event) =>
+							updateEntry(entry.id, {
+								end: timeToMinutes((event.currentTarget as HTMLInputElement).value)
+							})}
 					/>
 					<input
 						class="input"
 						style="flex: 1;"
 						value={entry.title}
-						onchange={(event) => updateEntry(entry.id, { title: (event.currentTarget as HTMLInputElement).value.trim() })}
+						onchange={(event) =>
+							updateEntry(entry.id, {
+								title: (event.currentTarget as HTMLInputElement).value.trim()
+							})}
 					/>
-					<button class="btn btn-danger btn-small" onclick={() => removeEntry(entry.id)} aria-label="删除条目">✕</button>
+					<button
+						class="btn btn-danger btn-small"
+						onclick={() => removeEntry(entry.id)}
+						aria-label="删除条目">✕</button
+					>
 				</div>
 			{/each}
 		{/if}
@@ -141,7 +165,12 @@
 		</div>
 		<div class="field">
 			<label for="entry-location">地点 id（可选）</label>
-			<input id="entry-location" class="input" bind:value={draftLocation} placeholder="如：classroom" />
+			<input
+				id="entry-location"
+				class="input"
+				bind:value={draftLocation}
+				placeholder="如：classroom"
+			/>
 		</div>
 		<button class="btn btn-primary" onclick={addEntry}>添加条目</button>
 	</div>

@@ -1,3 +1,4 @@
+import { normalizeLlmConfig } from '../llm/providers';
 import { DEFAULT_LLM_CONFIG, type LlmConfig } from '../llm/types';
 import type { KvRepository } from '../db/kv-repo';
 
@@ -23,7 +24,7 @@ export function createSettingsStore(kv: KvRepository) {
 			kv.get<AppProfile>(PROFILE_KEY)
 		]);
 		if (savedConfig) {
-			config = { ...DEFAULT_LLM_CONFIG, ...savedConfig };
+			config = normalizeLlmConfig(savedConfig);
 		}
 		if (savedProfile) {
 			profile = savedProfile;
@@ -33,8 +34,9 @@ export function createSettingsStore(kv: KvRepository) {
 
 	/** 保存 LLM 配置并立即生效。 */
 	async function saveConfig(next: LlmConfig): Promise<void> {
-		config = next;
-		await kv.set(LLM_KEY, next);
+		const normalized = normalizeLlmConfig(next);
+		config = normalized;
+		await kv.set(LLM_KEY, normalized);
 	}
 
 	/** 保存角色档案。 */

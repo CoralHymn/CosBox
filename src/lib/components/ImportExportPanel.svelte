@@ -21,15 +21,26 @@
 
 <div class="panel">
 	<h2 class="panel-title">SillyTavern V3 角色卡</h2>
-	<p class="panel-sub">导入会把文本型设定映射为世界书条目，名称写入属性；导出会把当前内容序列化为 chara_card_v3 JSON。</p>
+	<p class="panel-sub">
+		导入会把文本型设定映射为世界书条目，名称写入属性；导出会把当前内容序列化为 chara_card_v3 JSON。
+	</p>
 
 	<div class="card">
 		<h3 class="card-title">导入</h3>
 		<div class="field">
 			<label for="import-text">粘贴角色卡 JSON</label>
-			<textarea id="import-text" class="textarea" style="min-height: 180px;" bind:value={importText} placeholder="粘贴 chara_card_v3 规范的 JSON"></textarea>
+			<textarea
+				id="import-text"
+				class="textarea"
+				style="min-height: 180px;"
+				bind:value={importText}
+				placeholder="粘贴 chara_card_v3 规范的 JSON"></textarea>
 		</div>
-		<button class="btn btn-primary" onclick={importCard} disabled={importing || importText.trim() === ''}>
+		<button
+			class="btn btn-primary"
+			onclick={importCard}
+			disabled={importing || importText.trim() === ''}
+		>
 			{importing ? '导入中…' : '导入角色卡'}
 		</button>
 	</div>

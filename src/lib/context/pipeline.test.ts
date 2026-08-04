@@ -95,4 +95,27 @@ describe('buildContext', () => {
 		expect(bundle.messages[0]!.role).toBe('system');
 		expect(bundle.messages[0]!.content).toContain('已压缩');
 	});
+
+	it('有搜索结果时注入【网络搜索结果】块', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: [],
+			searchResults: [{ title: '樱花学园官网', url: 'https://example.com', snippet: '学园简介' }]
+		});
+		expect(bundle.systemMessage).toContain('【网络搜索结果】');
+		expect(bundle.systemMessage).toContain('樱花学园官网');
+		expect(bundle.systemMessage).toContain('https://example.com');
+		expect(bundle.searchResults).toHaveLength(1);
+	});
+
+	it('无搜索结果时不注入搜索块', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: []
+		});
+		expect(bundle.systemMessage).not.toContain('【网络搜索结果】');
+		expect(bundle.searchResults).toEqual([]);
+	});
 });

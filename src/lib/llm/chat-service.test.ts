@@ -1,16 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createInitialState } from '../core/state';
 import type { ContextPipelineInput } from '../context/pipeline';
+import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
 import { ChatService } from './chat-service';
 import type { ChatMessage, LlmClient, LlmConfig } from './types';
 
 const config: LlmConfig = {
 	provider: 'demo',
+	providerId: 'custom',
 	baseUrl: '',
 	apiKey: '',
 	model: 'demo',
 	temperature: 1,
-	maxTokens: 100
+	maxTokens: 100,
+	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
 
 describe('ChatService', () => {

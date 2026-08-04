@@ -8,10 +8,12 @@
 		conversation: ChatMessageView[];
 		characterState: CharacterState;
 		busy: boolean;
-		onSend: (content: string) => void;
+		searchSupported: boolean;
+		searching: boolean;
+		onSend: (content: string, options: { search: boolean }) => void;
 	}
 
-	let { conversation, characterState, busy, onSend }: Props = $props();
+	let { conversation, characterState, busy, searchSupported, searching, onSend }: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
 
 	$effect(() => {
@@ -38,7 +40,7 @@
 				{/each}
 			</div>
 		{/if}
-		<ChatInput disabled={busy} onSend={onSend} />
+		<ChatInput disabled={busy} {searchSupported} {searching} {onSend} />
 	</div>
 	<StatePreview {characterState} />
 </div>

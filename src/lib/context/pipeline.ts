@@ -1,5 +1,6 @@
 import type { CharacterState, ChatMessageView, WorldInfoEntry } from '../core/types';
 import type { ChatMessage } from '../llm/types';
+import type { SearchResult } from '../search/types';
 import { prepareHistory, type HistoryOptions, type HistoryResult } from './history';
 import { summarizeState } from './state-summary';
 import { findWorldInfoHits, type WorldInfoHit } from './world-info';
@@ -15,6 +16,8 @@ export interface ContextPipelineInput {
 	systemPrompt?: string;
 	/** 历史压缩参数。 */
 	historyOptions?: HistoryOptions;
+	/** 可选的网络搜索结果，命中时注入系统提示。 */
+	searchResults?: ReadonlyArray<SearchResult>;
 }
 
 /** 上下文管道的结构化输出。 */
@@ -28,6 +31,7 @@ export interface ContextBundle {
 	/** 处理后的历史（可能含压缩占位）。 */
 	history: ChatMessageView[];
 	compressedCount: number;
+	searchResults: SearchResult[];
 }
 
 /** 默认角色扮演系统提示模板。 */
@@ -59,13 +63,20 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		input.conversation.map((message) => message.content),
 		input.worldInfo
 	);
+	const searchResults = [...(input.searchResults ?? [])];
 
 	const worldInfoBlock =
 		worldInfoHits.length > 0
 			? `\n【世界设定】\n${worldInfoHits.map((hit) => `- ${hit.content}`).join('\n')}`
 			: '';
 	const basePrompt = input.systemPrompt?.trim() || defaultSystemPrompt(name);
-	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}`;
+	const searchBlock =
+		searchResults.length > 0
+			? `\n【网络搜索结果】\n${searchResults
+					.map((result) => `- ${result.title}：${result.snippet}（${result.url}）`)
+					.join('\n')}`
+			: '';
+	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}`;
 	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
 		role: message.role,
 		content: message.content
@@ -77,6 +88,7 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		stateSummary,
 		worldInfoHits,
 		history: historyResult.messages,
-		compressedCount: historyResult.compressedCount
+		compressedCount: historyResult.compressedCount,
+		searchResults
 	};
 }

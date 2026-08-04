@@ -25,7 +25,9 @@
 
 <div class="panel">
 	<h2 class="panel-title">版本时间线</h2>
-	<p class="panel-sub">所有状态变更与对话都以增量快照存储；切换节点会重建该时刻的状态与对话，不会影响其他分支。</p>
+	<p class="panel-sub">
+		所有状态变更与对话都以增量快照存储；切换节点会重建该时刻的状态与对话，不会影响其他分支。
+	</p>
 
 	<div class="card">
 		<h3 class="card-title">分支</h3>

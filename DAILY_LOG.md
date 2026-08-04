@@ -27,3 +27,27 @@
 
 - 未覆盖分支（不可达防御路径）：`headId === null` 持久化、空 tips 选择——保持防御并在测试锁定主路径。
 - 可迭代项：历史 LLM 摘要压缩、世界书词边界匹配、角色卡数值属性映射、PWA 离线打包。
+
+## 2026-08-04（续）：模型服务商预设 + 网络搜索接线
+
+### 背景
+
+工作区里已有一份未提交的实现（`src/lib/llm/providers.ts` 预设目录 + `src/lib/search/` 搜索模块 +
+`LlmConfig.providerId/webSearch` 字段扩展），但设置页 UI 与 `+page.svelte` 尚未接线，仓库处于
+编译失败状态。本阶段完成接线并补齐质量门槛。
+
+### 完成内容
+
+- 设置页「模型服务」改为服务商选择：20 个主流预设 + 自定义；选中预设自动填充 Base URL 与默认模型，
+  模型输入框带 datalist 候选；预设备注与 API Key 提示随选择更新。
+- 补全预设目录：新增百度千帆、腾讯混元、零一万物、vLLM、Azure OpenAI，修正 Google 端点尾部斜杠。
+- 设置页新增「网络搜索」配置（Tavily / Serper / Brave）；`+page.svelte` 接线搜索客户端，
+  消息可附带搜索结果注入上下文；顶栏 provider 标签显示预设名 + 模型。
+- 兼容旧存档：`normalizeLlmConfig` 对缺失的 `providerId` / `webSearch` 字段回退默认值。
+- 测试：新增 `providers.test.ts`、`search-client.test.ts`；补充 pipeline / demo-provider / errors 用例；
+  覆盖率保持 100% 语句/行/函数（分支 95.4%）；e2e 增至 7 条（含服务商预设自动填充）。
+
+### 记录
+
+- `ChatPanel` 中 `{disabled: busy}` 是非法的 Svelte 5 属性 shorthand（解析报错），已改为 `disabled={busy}`。
+- `normalizeLlmConfig` 原签名 `Partial<LlmConfig>` 无法表达「webSearch 可部分缺省」，引入 `LlmConfigPatch`。

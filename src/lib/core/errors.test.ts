@@ -3,6 +3,7 @@ import {
 	CosBoxError,
 	ImportError,
 	LlmError,
+	SearchError,
 	SnapshotError,
 	StateValidationError,
 	StorageError,
@@ -23,6 +24,7 @@ describe('错误体系', () => {
 		expect(new LlmError('x', 500).code).toBe('LLM');
 		expect(new LlmError('x', 500).status).toBe(500);
 		expect(new LlmError('x').status).toBeUndefined();
+		expect(new SearchError('x').code).toBe('SEARCH');
 		expect(new ImportError('x').code).toBe('IMPORT');
 		expect(new CosBoxError('x').code).toBe('COSBOX_ERROR');
 	});

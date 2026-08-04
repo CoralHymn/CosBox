@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LlmError } from '../core/errors';
+import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
 import { OpenAiCompatibleClient } from './openai-client';
 import type { LlmConfig } from './types';
 
 const config: LlmConfig = {
 	provider: 'openai-compatible',
+	providerId: 'custom',
 	baseUrl: 'http://localhost:4000/v1/',
 	apiKey: 'secret',
 	model: 'test-model',
 	temperature: 0.7,
-	maxTokens: 512
+	maxTokens: 512,
+	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
 
 function okResponse(content: string): Response {

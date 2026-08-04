@@ -21,10 +21,7 @@ test('应用加载并展示初始角色状态', async ({ page }) => {
 
 test('发送消息：演示模式回复并追加快照', async ({ page }) => {
 	await page.goto('/');
-	const snapshotsBefore = await page
-		.locator('.chip')
-		.filter({ hasText: '快照' })
-		.textContent();
+	const snapshotsBefore = await page.locator('.chip').filter({ hasText: '快照' }).textContent();
 
 	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
 	await page.getByRole('button', { name: '发送' }).click();
@@ -34,12 +31,7 @@ test('发送消息：演示模式回复并追加快照', async ({ page }) => {
 	await expect(page.locator('.message.assistant')).toHaveCount(1);
 
 	await expect
-		.poll(async () =>
-			page
-				.locator('.chip')
-				.filter({ hasText: '快照' })
-				.textContent()
-		)
+		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 2));
 });
 
@@ -92,4 +84,19 @@ test('导入 SillyTavern V3 角色卡并写入世界书', async ({ page }) => {
 	await expect(page.getByText(/导入成功/)).toBeVisible();
 	await page.getByRole('button', { name: /世界书/ }).click();
 	await expect(page.locator('.card textarea').first()).toHaveValue('来自测试卡的角色背景');
+});
+
+test('设置页选择主流服务商预设自动填充地址与模型', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#llm-provider').selectOption('deepseek');
+	await expect(page.locator('#llm-base-url')).toHaveValue('https://api.deepseek.com/v1');
+	await expect(page.locator('#llm-model')).toHaveValue('deepseek-v4-flash');
+
+	await page.locator('#llm-provider').selectOption('ollama');
+	await expect(page.locator('#llm-base-url')).toHaveValue('http://localhost:11434/v1');
+	await expect(page.locator('#llm-model')).toHaveValue('qwen3:8b');
+
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await expect(page.getByText('模型设置已保存')).toBeVisible();
 });

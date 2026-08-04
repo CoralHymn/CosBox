@@ -46,16 +46,16 @@ flowchart LR
 
 ## 模块边界
 
-| 模块 | 职责 | 依赖方向 |
-| --- | --- | --- |
-| `core/` | 类型、状态校验/合并、版本图纯函数、错误体系 | 无（纯函数） |
-| `db/` | Dexie schema、快照/世界书/kv 仓储 | core |
-| `manager/` | 状态变更编排（校验→快照→应用→刷新） | core, db |
-| `context/` | World Info 触发、状态摘要、历史压缩、Prompt 组装 | core, llm/types |
-| `llm/` | OpenAI-compatible 客户端、离线 demo、ChatService | core, context |
-| `import-export/` | chara_card_v3 解析与序列化 | core |
-| `stores/` | Svelte 5 runes 响应式封装（薄层，不含业务逻辑） | manager, db |
-| `components/` | 展示与表单（显式 props，无 rest 透传） | stores, core |
+| 模块             | 职责                                             | 依赖方向        |
+| ---------------- | ------------------------------------------------ | --------------- |
+| `core/`          | 类型、状态校验/合并、版本图纯函数、错误体系      | 无（纯函数）    |
+| `db/`            | Dexie schema、快照/世界书/kv 仓储                | core            |
+| `manager/`       | 状态变更编排（校验→快照→应用→刷新）              | core, db        |
+| `context/`       | World Info 触发、状态摘要、历史压缩、Prompt 组装 | core, llm/types |
+| `llm/`           | OpenAI-compatible 客户端、离线 demo、ChatService | core, context   |
+| `import-export/` | chara_card_v3 解析与序列化                       | core            |
+| `stores/`        | Svelte 5 runes 响应式封装（薄层，不含业务逻辑）  | manager, db     |
+| `components/`    | 展示与表单（显式 props，无 rest 透传）           | stores, core    |
 
 ## Context Pipeline
 

@@ -52,6 +52,10 @@ export function buildDemoReply(messages: ChatMessage[]): string {
 	const lastUser = [...messages].reverse().find((message) => message.role === 'user');
 	const text = lastUser?.content ?? '';
 
+	if (system.includes('【网络搜索结果】')) {
+		const title = extractSearchTitle(system);
+		return `（演示模式回应）我查了一下网上的资料：${title ?? '相关内容'}。要我展开讲讲吗？`;
+	}
 	if (/时间|几点|什么时候|几点了/.test(text)) {
 		const time = extractLine(system, '时间：') ?? '现在';
 		return `（演示模式回应）现在${time}。你要来找我吗？`;
@@ -65,4 +69,21 @@ export function buildDemoReply(messages: ChatMessage[]): string {
 		return `（演示模式回应）我今天穿着${outfit}。好看吗？`;
 	}
 	return `（演示模式回应）嗯，我在听。你说「${truncate(text, 24)}」——接着说吧。`;
+}
+
+/** 从系统消息中提取第一条网络搜索结果的标题。 */
+export function extractSearchTitle(systemMessage: string): string | null {
+	const lines = systemMessage.split('\n');
+	const markerIndex = lines.findIndex((line) => line === '【网络搜索结果】');
+	if (markerIndex === -1) {
+		return null;
+	}
+	for (let i = markerIndex + 1; i < lines.length; i += 1) {
+		const line = lines[i]!;
+		if (line.startsWith('- ')) {
+			const title = line.slice(2).split('：')[0]!.trim();
+			return title === '' ? null : title;
+		}
+	}
+	return null;
 }
