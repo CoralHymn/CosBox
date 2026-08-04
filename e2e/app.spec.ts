@@ -64,7 +64,7 @@ test('版本页切换回退状态与对话', async ({ page }) => {
 	// 切换回根快照（第一个「切换」按钮即根节点）
 	await page.getByRole('button', { name: '切换' }).first().click();
 	await page.getByRole('button', { name: /对话/ }).click();
-	await expect(page.getByText('白色衬衫')).toBeVisible();
+	await expect(page.getByText('白色衬衫').first()).toBeVisible();
 	await expect(page.getByText(/早上好/)).not.toBeVisible();
 });
 
@@ -99,4 +99,33 @@ test('设置页选择主流服务商预设自动填充地址与模型', async ({
 
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
+});
+
+test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
+	await page.goto('/');
+
+	// 地点 tab：新增地点并设为当前所在地
+	await page.getByRole('button', { name: /地点/ }).click();
+	await page.locator('#new-place-name').fill('海边');
+	await page.locator('#new-place-desc').fill('午后涨潮，可以听到海浪声');
+	await page.getByRole('button', { name: '添加地点' }).click();
+	await expect(page.locator('input[placeholder="地点名"]').last()).toHaveValue('海边');
+	await expect(page.locator('#current-place option').filter({ hasText: '海边' })).toHaveCount(1);
+	await page.locator('#current-place').selectOption({ label: '海边' });
+
+	// 衣柜 tab：新增衣物并作为当前上衣
+	await page.getByRole('button', { name: /衣柜/ }).click();
+	await page.locator('#new-item-name').fill('白色连衣裙');
+	await page.locator('#new-item-desc').fill('白色碎花连衣裙，及膝，裙摆很轻');
+	await page.getByRole('button', { name: '添加衣物' }).click();
+	await expect(page.locator('input[placeholder="衣物名"]').last()).toHaveValue('白色连衣裙');
+	await expect(page.locator('#wardrobe-names option[value="白色连衣裙"]')).toHaveCount(1);
+	await page.locator('#wardrobe-top').fill('白色连衣裙');
+	await page.locator('#wardrobe-top').blur();
+	await expect(page.getByText('白色连衣裙：白色碎花连衣裙，及膝，裙摆很轻')).toBeVisible();
+
+	// 对话 tab 的实时预览反映新地点与衣柜
+	await page.getByRole('button', { name: /对话/ }).click();
+	await expect(page.getByText('海边').first()).toBeVisible();
+	await expect(page.getByText('白色连衣裙').first()).toBeVisible();
 });

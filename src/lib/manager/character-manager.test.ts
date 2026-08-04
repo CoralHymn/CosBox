@@ -224,4 +224,48 @@ describe('CharacterManager', () => {
 		expect(manager.getConversation().map((m) => m.content)).toEqual(['自动初始化']);
 		expect(await snapshots.count()).toBe(2);
 	});
+
+	it('并发 init 共享初始化流程，只创建一次根', async () => {
+		const manager = createManager();
+		await Promise.all([manager.init(), manager.init(), manager.init()]);
+		expect(await snapshots.count()).toBe(1);
+	});
+
+	it('并发 update 串行落地：单链无分支且全部生效', async () => {
+		const manager = createManager();
+		await manager.init();
+		const results = await Promise.all([
+			manager.update({ attributes: { step: 1 } }, { desc: 's1' }),
+			manager.update({ attributes: { step: 2 } }, { desc: 's2' }),
+			manager.update({ attributes: { step: 3 } }, { desc: 's3' }),
+			manager.update({ attributes: { step: 4 } }, { desc: 's4' }),
+			manager.update({ attributes: { step: 5 } }, { desc: 's5' })
+		]);
+		expect(results.map((node) => node.metadata.desc)).toEqual(['s1', 's2', 's3', 's4', 's5']);
+		expect(manager.getState().attributes.step).toBe(5);
+		expect(await snapshots.count()).toBe(6);
+		expect(manager.getBranches()).toHaveLength(1);
+		const chain = await snapshots.chainOf(manager.getHeadId()!);
+		expect(chain.map((node) => node.metadata.desc)).toEqual([
+			'初始状态',
+			's1',
+			's2',
+			's3',
+			's4',
+			's5'
+		]);
+	});
+
+	it('并发混合消息与状态变更保持顺序', async () => {
+		const manager = createManager();
+		await manager.init();
+		await Promise.all([
+			manager.addMessage('user', '第一条'),
+			manager.update({ outfit: { top: '新外套' } }, { desc: '换装' }),
+			manager.addMessage('assistant', '第二条')
+		]);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['第一条', '第二条']);
+		expect(manager.getState().outfit.top).toBe('新外套');
+		expect(manager.getBranches()).toHaveLength(1);
+	});
 });

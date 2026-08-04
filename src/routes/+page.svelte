@@ -28,12 +28,14 @@
 	import { downloadTextFile } from '../lib/utils/download';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
+	import LocationsPanel from '../lib/components/LocationsPanel.svelte';
 	import NavRail from '../lib/components/NavRail.svelte';
 	import SchedulePanel from '../lib/components/SchedulePanel.svelte';
 	import SettingsPanel from '../lib/components/SettingsPanel.svelte';
 	import StatePanel from '../lib/components/StatePanel.svelte';
 	import Toasts from '../lib/components/Toasts.svelte';
 	import VersionPanel from '../lib/components/VersionPanel.svelte';
+	import WardrobePanel from '../lib/components/WardrobePanel.svelte';
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
 
 	const db = getDb();
@@ -281,6 +283,14 @@
 				/>
 			{:else if tab === 'state'}
 				<StatePanel characterState={session.state} onUpdate={handleStateUpdate} />
+			{:else if tab === 'locations'}
+				<LocationsPanel
+					places={session.state.places}
+					location={session.state.location}
+					onUpdate={handleStateUpdate}
+				/>
+			{:else if tab === 'wardrobe'}
+				<WardrobePanel outfit={session.state.outfit} onUpdate={handleStateUpdate} />
 			{:else if tab === 'schedule'}
 				<SchedulePanel
 					schedule={session.state.schedule}

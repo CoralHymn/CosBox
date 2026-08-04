@@ -51,3 +51,29 @@
 
 - `ChatPanel` 中 `{disabled: busy}` 是非法的 Svelte 5 属性 shorthand（解析报错），已改为 `disabled={busy}`。
 - `normalizeLlmConfig` 原签名 `Partial<LlmConfig>` 无法表达「webSearch 可部分缺省」，引入 `LlmConfigPatch`。
+
+## 2026-08-04（续）：地点库与衣柜
+
+### 需求
+
+UI 增加「地点」与「衣柜」：地点用于让 AI 知道有哪些地点、自己现在在哪（独立于日程）；
+衣柜是衣物预设（含穿后描述），AI 换装时从衣柜挑选而不是自行脑补。
+
+### 实现
+
+- 数据模型：`CharacterState` 新增顶层 `places: LocationDef[]`（地点库）；
+  `OutfitState` 新增 `wardrobe: ClothingItem[]`（名称 + 穿后描述）；`StatePatch` 同步扩展。
+- 校验：地点库/衣柜条目（id 非空且唯一、名称非空、描述为字符串）纳入 `validateCharacterState`。
+- 摘要：状态注入【已知地点】与【衣柜】清单；新增 `formatPlaces / formatWardrobe / findWardrobeItem`。
+- UI：新增「地点」与「衣柜」标签页（维护清单、设置当前所在地/穿着、穿着细节预览）；
+  状态页穿着输入带衣柜 datalist；实时预览增加地点库与衣柜行。
+- 默认数据：初始地点库（校门/教室/食堂/图书馆/天台）与初始衣柜（6 件含描述）。
+
+### 设计缺陷修复
+
+- e2e 暴露 `CharacterManager` 并发更新竞争（错误分支 + 状态覆盖）→ 实现串行化变更队列（见 DECISIONS D15），
+  新增并发更新/混合操作测试；并发 init 共享 promise 防重复建根。
+
+### 门禁
+
+- 200 个单元测试；覆盖率 100% 语句/行/函数（分支 95.85%）；8 条 e2e 全过；build/check/lint 全绿。

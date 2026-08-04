@@ -11,6 +11,8 @@
 	const tabs: { id: TabId; label: string; icon: string }[] = [
 		{ id: 'chat', label: '对话', icon: '💬' },
 		{ id: 'state', label: '状态', icon: '🧍' },
+		{ id: 'locations', label: '地点', icon: '📍' },
+		{ id: 'wardrobe', label: '衣柜', icon: '👗' },
 		{ id: 'schedule', label: '日程', icon: '🗓️' },
 		{ id: 'versions', label: '版本', icon: '🌳' },
 		{ id: 'world', label: '世界书', icon: '📖' },

@@ -37,6 +37,10 @@ export class CharacterManager {
 	private branches: BranchSummary[] = [];
 	private initialized = false;
 	private readonly listeners = new Set<() => void>();
+	/** 变更任务队列：保证并发 update/addMessage/checkout 按调用顺序串行落地。 */
+	private queue: Promise<unknown> = Promise.resolve();
+	/** 共享的初始化 promise，防止并发 init 重复建库。 */
+	private initPromise: Promise<void> | null = null;
 
 	constructor(private readonly deps: CharacterManagerDeps) {}
 
@@ -52,6 +56,16 @@ export class CharacterManager {
 		for (const listener of [...this.listeners]) {
 			listener();
 		}
+	}
+
+	/** 把变更任务串行入队；失败不影响后续任务执行。 */
+	private enqueue<T>(task: () => Promise<T>): Promise<T> {
+		const run = this.queue.then(task);
+		this.queue = run.then(
+			() => undefined,
+			() => undefined
+		);
+		return run;
 	}
 
 	/** 当前状态（只读引用，禁止直接修改）。 */
@@ -110,10 +124,21 @@ export class CharacterManager {
 	 * 初始化：空库时创建根快照；否则恢复上次 head（或最新分支 tip）。
 	 * 幂等，可安全重复调用。
 	 */
-	async init(): Promise<void> {
+	/** 初始化（并发安全）：共享同一个初始化 promise。 */
+	init(): Promise<void> {
 		if (this.initialized) {
-			return;
+			return Promise.resolve();
 		}
+		if (this.initPromise !== null) {
+			return this.initPromise;
+		}
+		this.initPromise = this.doInit().finally(() => {
+			this.initPromise = null;
+		});
+		return this.initPromise;
+	}
+
+	private async doInit(): Promise<void> {
 		const count = await this.deps.snapshots.count();
 		if (count === 0) {
 			const root = await this.deps.snapshots.addSnapshot({
@@ -144,7 +169,11 @@ export class CharacterManager {
 	 * 应用状态变更：先校验合并结果，再追加状态快照。
 	 * 这是唯一允许修改角色状态（outfit/location/schedule/attributes）的入口。
 	 */
-	async update(patch: StatePatch, metadata: { desc: string }): Promise<SnapshotNode> {
+	update(patch: StatePatch, metadata: { desc: string }): Promise<SnapshotNode> {
+		return this.enqueue(() => this.doUpdate(patch, metadata));
+	}
+
+	private async doUpdate(patch: StatePatch, metadata: { desc: string }): Promise<SnapshotNode> {
 		await this.ensureInit();
 		const merged = applyStateDelta(this.state, patch);
 		const node = await this.deps.snapshots.addSnapshot({
@@ -161,7 +190,11 @@ export class CharacterManager {
 	}
 
 	/** 追加一条对话消息（user/assistant/system），内容不得为空。 */
-	async addMessage(role: MessageRole, content: string): Promise<SnapshotNode> {
+	addMessage(role: MessageRole, content: string): Promise<SnapshotNode> {
+		return this.enqueue(() => this.doAddMessage(role, content));
+	}
+
+	private async doAddMessage(role: MessageRole, content: string): Promise<SnapshotNode> {
 		await this.ensureInit();
 		const trimmed = content.trim();
 		if (trimmed === '') {
@@ -184,7 +217,11 @@ export class CharacterManager {
 	 * checkout：切换到任意快照并重建状态与消息。
 	 * 纯读操作，不写快照表——分支切换无副作用。
 	 */
-	async checkout(targetId: string): Promise<void> {
+	checkout(targetId: string): Promise<void> {
+		return this.enqueue(() => this.doCheckout(targetId));
+	}
+
+	private async doCheckout(targetId: string): Promise<void> {
 		await this.ensureInit();
 		const rebuilt = await this.deps.snapshots.checkout(targetId);
 		this.headId = targetId;
@@ -195,18 +232,26 @@ export class CharacterManager {
 	}
 
 	/** 时间推进：正数前进、负数回拨，自动生成状态快照。 */
-	async advanceTime(minutes: number): Promise<SnapshotNode> {
+	advanceTime(minutes: number): Promise<SnapshotNode> {
+		return this.enqueue(() => this.doAdvanceTime(minutes));
+	}
+
+	private async doAdvanceTime(minutes: number): Promise<SnapshotNode> {
 		await this.ensureInit();
 		if (!Number.isFinite(minutes)) {
 			throw new StateValidationError('推进分钟数必须是有限数字');
 		}
 		const nextTime = addMinutes(this.state.schedule.time, minutes);
 		const label = minutes >= 0 ? `时间推进 +${minutes} 分钟` : `时间回拨 ${minutes} 分钟`;
-		return this.update({ schedule: { time: nextTime } }, { desc: label });
+		return this.doUpdate({ schedule: { time: nextTime } }, { desc: label });
 	}
 
 	/** 手动检查点：空 delta 快照，用于记录「值得回退的位置」。 */
-	async addCheckpoint(desc: string): Promise<SnapshotNode> {
+	addCheckpoint(desc: string): Promise<SnapshotNode> {
+		return this.enqueue(() => this.doAddCheckpoint(desc));
+	}
+
+	private async doAddCheckpoint(desc: string): Promise<SnapshotNode> {
 		await this.ensureInit();
 		const trimmed = desc.trim() || '手动检查点';
 		const node = await this.deps.snapshots.addSnapshot({

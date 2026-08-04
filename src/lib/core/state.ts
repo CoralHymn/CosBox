@@ -2,6 +2,8 @@ import { StateValidationError } from './errors';
 import type {
 	CharacterAttributes,
 	CharacterState,
+	ClothingItem,
+	LocationDef,
 	LocationState,
 	OutfitState,
 	ScheduleEntry,
@@ -14,7 +16,7 @@ import type {
 export const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const;
 
 /** 状态顶层允许的键，防止 typo 静默写入。 */
-const STATE_TOP_KEYS = ['outfit', 'location', 'schedule', 'attributes'] as const;
+const STATE_TOP_KEYS = ['outfit', 'location', 'places', 'schedule', 'attributes'] as const;
 
 /** 穿着槽位键，用于校验。 */
 const OUTFIT_SLOT_KEYS = ['top', 'bottom', 'shoes'] as const;
@@ -35,13 +37,15 @@ export function createInitialState(): CharacterState {
 			top: '白色衬衫',
 			bottom: '深蓝百褶裙',
 			shoes: '黑色皮鞋',
-			accessories: ['蝴蝶结发带']
+			accessories: ['蝴蝶结发带'],
+			wardrobe: createInitialWardrobe()
 		},
 		location: {
 			id: 'school-gate',
 			name: '学院正门',
 			description: '樱花道尽头的校门，晨间常有学生出入'
 		},
+		places: createInitialPlaces(),
 		schedule: {
 			time: { day: 0, hour: 8, minute: 0 },
 			entries: createInitialScheduleEntries()
@@ -56,6 +60,29 @@ export function createInitialState(): CharacterState {
 			money: 500
 		}
 	};
+}
+
+/** 生成初始衣柜：当前穿着对应的衣物 + 几件备选（含穿后描述）。 */
+export function createInitialWardrobe(): ClothingItem[] {
+	return [
+		{ id: 'cloth-01', name: '白色衬衫', description: '白色棉质衬衫，领口带细蕾丝，袖口挽起两折' },
+		{ id: 'cloth-02', name: '深蓝百褶裙', description: '深蓝色及膝百褶裙，走动时裙摆轻轻摆动' },
+		{ id: 'cloth-03', name: '黑色皮鞋', description: '黑色低跟皮鞋，鞋面擦得发亮' },
+		{ id: 'cloth-04', name: '蝴蝶结发带', description: '红色蝴蝶结发带，别在右侧发间' },
+		{ id: 'cloth-05', name: '黑色卫衣', description: '宽松黑色连帽卫衣，胸前有白色字母印花' },
+		{ id: 'cloth-06', name: '白色运动鞋', description: '白色运动鞋，鞋带系成蝴蝶结，鞋边干净' }
+	];
+}
+
+/** 生成初始地点库：与日程 locationId 相互独立的一等数据。 */
+export function createInitialPlaces(): LocationDef[] {
+	return [
+		{ id: 'school-gate', name: '学院正门', description: '樱花道尽头的校门，晨间常有学生出入' },
+		{ id: 'classroom', name: '教室 2-B', description: '二楼尽头的教室，窗外能看到操场' },
+		{ id: 'cafeteria', name: '食堂', description: '午间最热闹的地方，招牌是咖喱饭' },
+		{ id: 'library', name: '图书馆', description: '安静的阅读空间，三楼据说有禁书区' },
+		{ id: 'rooftop', name: '天台', description: '教学楼顶，午后阳光正好，可以望见整座学园' }
+	];
 }
 
 /** 生成初始日程表：周一的一堂早课与午休。 */
@@ -86,6 +113,9 @@ export function applyStateDelta(state: CharacterState, patch: StatePatch): Chara
 	}
 	if (patch.location !== undefined) {
 		merged.location = { ...state.location, ...structuredClone(patch.location) };
+	}
+	if (patch.places !== undefined) {
+		merged.places = structuredClone(patch.places);
 	}
 	if (patch.schedule !== undefined) {
 		merged.schedule = { ...state.schedule, ...structuredClone(patch.schedule) };
@@ -122,6 +152,7 @@ export function validateCharacterState(state: CharacterState): void {
 	}
 	validateOutfit(state.outfit);
 	validateLocation(state.location);
+	validatePlaces(state.places);
 	validateSchedule(state.schedule);
 	validateAttributes(state.attributes);
 }
@@ -142,6 +173,28 @@ function validateOutfit(outfit: OutfitState): void {
 	) {
 		throw new StateValidationError('配饰必须是字符串数组');
 	}
+	if (!Array.isArray(outfit.wardrobe)) {
+		throw new StateValidationError('衣柜必须是数组');
+	}
+	const wardrobeIds = new Set<string>();
+	for (const item of outfit.wardrobe) {
+		if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+			throw new StateValidationError('衣柜条目必须是对象');
+		}
+		if (typeof item.id !== 'string' || item.id.trim() === '') {
+			throw new StateValidationError('衣柜条目 id 必须是非空字符串');
+		}
+		if (typeof item.name !== 'string' || item.name.trim() === '') {
+			throw new StateValidationError('衣柜条目名称必须是非空字符串');
+		}
+		if (typeof item.description !== 'string') {
+			throw new StateValidationError('衣柜条目描述必须是字符串');
+		}
+		if (wardrobeIds.has(item.id)) {
+			throw new StateValidationError(`衣柜条目 id 重复：${item.id}`);
+		}
+		wardrobeIds.add(item.id);
+	}
 }
 
 function validateLocation(location: LocationState): void {
@@ -156,6 +209,31 @@ function validateLocation(location: LocationState): void {
 		if ((key === 'id' || key === 'name') && value.trim() === '') {
 			throw new StateValidationError(`地点字段 ${key} 不能为空`);
 		}
+	}
+}
+
+function validatePlaces(places: LocationDef[]): void {
+	if (!Array.isArray(places)) {
+		throw new StateValidationError('地点库必须是数组');
+	}
+	const ids = new Set<string>();
+	for (const place of places) {
+		if (place === null || typeof place !== 'object' || Array.isArray(place)) {
+			throw new StateValidationError('地点条目必须是对象');
+		}
+		if (typeof place.id !== 'string' || place.id.trim() === '') {
+			throw new StateValidationError('地点条目 id 必须是非空字符串');
+		}
+		if (typeof place.name !== 'string' || place.name.trim() === '') {
+			throw new StateValidationError('地点条目名称必须是非空字符串');
+		}
+		if (typeof place.description !== 'string') {
+			throw new StateValidationError('地点条目描述必须是字符串');
+		}
+		if (ids.has(place.id)) {
+			throw new StateValidationError(`地点 id 重复：${place.id}`);
+		}
+		ids.add(place.id);
 	}
 }
 
