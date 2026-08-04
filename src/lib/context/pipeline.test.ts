@@ -187,4 +187,26 @@ describe('buildContext', () => {
 		});
 		expect(bundle.systemMessage).not.toContain('【工具使用】');
 	});
+
+	it('注入工具执行反馈块', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: [],
+			toolFeedback:
+				'【工具执行反馈】以下工具已成功调用并立即生效，当前状态已同步更新：\n- set_outfit(slot=上衣, item=白色衬衫) → 已把上衣更换为「白色衬衫」'
+		});
+		expect(bundle.systemMessage).toContain('【工具执行反馈】');
+		expect(bundle.systemMessage).toContain('set_outfit(slot=上衣, item=白色衬衫)');
+	});
+
+	it('工具执行反馈为空时不注入', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: [],
+			toolFeedback: '   '
+		});
+		expect(bundle.systemMessage).not.toContain('【工具执行反馈】');
+	});
 });
