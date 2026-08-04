@@ -58,7 +58,9 @@
 					value={entry.keys.join('，')}
 					placeholder="触发关键词（逗号分隔）"
 					onchange={(event) =>
-						upsertEntry(entry.id, { keys: splitKeys((event.currentTarget as HTMLInputElement).value) })}
+						upsertEntry(entry.id, {
+							keys: splitKeys((event.currentTarget as HTMLInputElement).value)
+						})}
 				/>
 				<input
 					class="input"
@@ -66,24 +68,33 @@
 					type="number"
 					value={entry.priority}
 					placeholder="优先级"
-					onchange={(event) => upsertEntry(entry.id, { priority: Number((event.currentTarget as HTMLInputElement).value) })}
+					onchange={(event) =>
+						upsertEntry(entry.id, {
+							priority: Number((event.currentTarget as HTMLInputElement).value)
+						})}
 				/>
 				<label class="row-actions" style="gap: 5px;">
 					<input
 						class="checkbox"
 						type="checkbox"
 						checked={entry.enabled}
-						onchange={(event) => upsertEntry(entry.id, { enabled: (event.currentTarget as HTMLInputElement).checked })}
+						onchange={(event) =>
+							upsertEntry(entry.id, { enabled: (event.currentTarget as HTMLInputElement).checked })}
 					/>
 					<span class="muted">启用</span>
 				</label>
-				<button class="btn btn-danger btn-small" onclick={() => onRemove(entry.id)} aria-label="删除条目">✕</button>
+				<button
+					class="btn btn-danger btn-small"
+					onclick={() => onRemove(entry.id)}
+					aria-label="删除条目">✕</button
+				>
 			</div>
 			<textarea
 				class="textarea"
 				value={entry.content}
 				placeholder="设定内容"
-				onchange={(event) => upsertEntry(entry.id, { content: (event.currentTarget as HTMLTextAreaElement).value })}
+				onchange={(event) =>
+					upsertEntry(entry.id, { content: (event.currentTarget as HTMLTextAreaElement).value })}
 			></textarea>
 		</div>
 	{:else}
@@ -98,7 +109,11 @@
 		</div>
 		<div class="field">
 			<label for="wi-content">设定内容</label>
-			<textarea id="wi-content" class="textarea" bind:value={draftContent} placeholder="命中时注入上下文的内容"></textarea>
+			<textarea
+				id="wi-content"
+				class="textarea"
+				bind:value={draftContent}
+				placeholder="命中时注入上下文的内容"></textarea>
 		</div>
 		<div class="field">
 			<label for="wi-priority">优先级</label>

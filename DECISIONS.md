@@ -71,3 +71,23 @@
 **选择**：`description/personality/scenario` → 世界书条目（comment 标签标记）；`name/tags/creator/version` → 属性；`first_mes` → 初始问候消息；`system_prompt` → 角色档案；`character_book` → 世界书条目（保留 enabled/insertion_order）。导出做反向映射。
 **理由**：文本设定留在「可被关键词触发」的世界书里，与状态语义一致；comment 标签保证导出 round-trip 稳定。
 **代价**：数值型属性（如 affection）无法从 V3 还原，V3 规范本身不含该信息。
+
+## D12：主流模型服务商预设
+
+**问题**：接入不同服务商时，用户需要手抄端点地址与模型名。
+**选择**：维护 `LLM_PROVIDER_PRESETS` 目录（OpenAI / Anthropic / Gemini / DeepSeek / Kimi / Qwen /
+GLM / 千帆 / 混元 / 零一 / SiliconFlow / Mistral / xAI / Groq / OpenRouter / Together / Ollama /
+LiteLLM / vLLM / Azure），选择预设自动填充 OpenAI 兼容端点与常用模型候选（datalist），保留「自定义」入口；
+传输协议统一走 `/chat/completions`。
+**理由**：绝大多数服务商提供 OpenAI 兼容端点；预设只是「填值」，用户仍可手改地址与模型名。
+**代价**：Anthropic / Gemini 若官方兼容端点不可用，需经 LiteLLM Proxy 等网关；模型名单会随版本过时，
+因此预设中的模型只是建议值，设置面板明确提示可手改。
+
+## D13：网络搜索注入
+
+**问题**：角色扮演需要「当前事实」，但 LLM 上下文没有实时信息。
+**选择**：Tavily / Serper / Brave 三家搜索服务商，直接在浏览器端 fetch 调用；启用搜索后，发送消息可附带
+结果并以【网络搜索结果】块注入系统提示；离线 demo provider 用首条结果标题给出确定性回应。
+**理由**：三家服务商都只需一个 API Key 即可在客户端调用；注入系统提示让模型把结果当作事实约束。
+**代价**：浏览器直连第三方搜索 API 会暴露 Key（仅存于本地 IndexedDB）；生产化时可改为自建代理，
+但本项目定位纯客户端 demo，接受该取舍。

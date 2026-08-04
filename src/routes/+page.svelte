@@ -16,6 +16,9 @@
 	import { ChatService } from '../lib/llm/chat-service';
 	import { DemoLlmClient } from '../lib/llm/demo-provider';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
+	import { findProviderPreset } from '../lib/llm/providers';
+	import type { SearchResult } from '../lib/search/types';
+	import { WebSearchClient } from '../lib/search/search-client';
 	import type { AppProfile } from '../lib/stores/settings.svelte';
 	import { CharacterManager } from '../lib/manager/character-manager';
 	import { createCharacterSession } from '../lib/stores/character.svelte';
@@ -44,13 +47,26 @@
 	const toasts = createToasts();
 	const demoClient = new DemoLlmClient();
 	const openAiClient = new OpenAiCompatibleClient();
+	const searchClient = new WebSearchClient();
 
 	let tab = $state<TabId>('chat');
 	let busy = $state(false);
+	let searching = $state(false);
 	let ready = $state(false);
 
-	const providerLabel = $derived(
-		settings.config.provider === 'demo' ? '演示模式' : settings.config.model || 'OpenAI-compatible'
+	const providerLabel = $derived.by(() => {
+		if (settings.config.provider === 'demo') {
+			return '演示模式';
+		}
+		const preset = findProviderPreset(settings.config.providerId);
+		if (preset) {
+			return `${preset.label} · ${settings.config.model}`;
+		}
+		return settings.config.model || 'OpenAI-compatible';
+	});
+
+	const searchSupported = $derived(
+		settings.config.webSearch.enabled && settings.config.webSearch.apiKey.trim() !== ''
 	);
 
 	onMount(async () => {
@@ -65,12 +81,23 @@
 		}
 	});
 
-	async function handleSend(content: string): Promise<void> {
+	async function handleSend(content: string, options: { search: boolean }): Promise<void> {
 		if (busy) {
 			return;
 		}
 		busy = true;
+		let searchResults: SearchResult[] | undefined;
 		try {
+			if (options.search) {
+				searching = true;
+				try {
+					searchResults = await searchClient.search(content, settings.config.webSearch);
+				} catch (err) {
+					toasts.error(err);
+				} finally {
+					searching = false;
+				}
+			}
 			await session.addMessage('user', content);
 			const input: ContextPipelineInput = {
 				state: session.state,
@@ -78,16 +105,22 @@
 				worldInfo: worldInfo.entries,
 				characterName:
 					settings.profile.name ||
-					(typeof session.state.attributes.name === 'string' ? session.state.attributes.name : undefined),
-				systemPrompt: settings.profile.systemPrompt ?? undefined
+					(typeof session.state.attributes.name === 'string'
+						? session.state.attributes.name
+						: undefined),
+				systemPrompt: settings.profile.systemPrompt ?? undefined,
+				...(searchResults !== undefined ? { searchResults } : {})
 			};
-			const service = new ChatService(settings.config.provider === 'demo' ? demoClient : openAiClient);
+			const service = new ChatService(
+				settings.config.provider === 'demo' ? demoClient : openAiClient
+			);
 			const { reply } = await service.generateReply(input, settings.config);
 			await session.addMessage('assistant', reply);
 		} catch (err) {
 			toasts.error(err);
 		} finally {
 			busy = false;
+			searching = false;
 		}
 	}
 
@@ -141,7 +174,9 @@
 		}
 	}
 
-	async function handleSaveConfig(config: Parameters<typeof settings.saveConfig>[0]): Promise<void> {
+	async function handleSaveConfig(
+		config: Parameters<typeof settings.saveConfig>[0]
+	): Promise<void> {
 		try {
 			await settings.saveConfig(config);
 			toasts.success('模型设置已保存');
@@ -196,7 +231,9 @@
 				conversation: session.conversation,
 				creator: typeof attributes.creator === 'string' ? attributes.creator : undefined,
 				characterVersion:
-					typeof attributes.character_version === 'string' ? attributes.character_version : undefined,
+					typeof attributes.character_version === 'string'
+						? attributes.character_version
+						: undefined,
 				tags
 			});
 			downloadTextFile(`${name}.chara-v3.json`, serializeCharaCard(card));
@@ -215,7 +252,9 @@
 		</div>
 		<div class="header-spacer"></div>
 		{#if ready}
-			<span class="chip"><span class="dot"></span>{formatWorldTime(session.state.schedule.time)}</span>
+			<span class="chip"
+				><span class="dot"></span>{formatWorldTime(session.state.schedule.time)}</span
+			>
 			<span class="chip ok"><span class="dot"></span>{providerLabel}</span>
 			<span class="chip"><span class="dot"></span>{session.snapshots.length} 快照</span>
 			{#if busy}
@@ -236,12 +275,18 @@
 					conversation={session.conversation}
 					characterState={session.state}
 					{busy}
+					{searchSupported}
+					{searching}
 					onSend={handleSend}
 				/>
 			{:else if tab === 'state'}
 				<StatePanel characterState={session.state} onUpdate={handleStateUpdate} />
 			{:else if tab === 'schedule'}
-				<SchedulePanel schedule={session.state.schedule} onUpdate={handleStateUpdate} onAdvance={handleAdvance} />
+				<SchedulePanel
+					schedule={session.state.schedule}
+					onUpdate={handleStateUpdate}
+					onAdvance={handleAdvance}
+				/>
 			{:else if tab === 'versions'}
 				<VersionPanel
 					snapshots={session.snapshots}
@@ -251,7 +296,11 @@
 					onAddCheckpoint={handleCheckpoint}
 				/>
 			{:else if tab === 'world'}
-				<WorldInfoPanel entries={worldInfo.entries} onUpsert={handleWorldUpsert} onRemove={handleWorldRemove} />
+				<WorldInfoPanel
+					entries={worldInfo.entries}
+					onUpsert={handleWorldUpsert}
+					onRemove={handleWorldRemove}
+				/>
 			{:else if tab === 'transfer'}
 				<ImportExportPanel onImport={handleImport} onExport={handleExport} />
 			{:else}

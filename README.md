@@ -23,20 +23,23 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。在「设置」页切换到
-OpenAI-compatible 端点即可接入 LiteLLM Proxy / vLLM / Ollama 等任意服务。
+默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。在「设置」页可直接选择主流服务商预设——
+OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、智谱 GLM、百度千帆、腾讯混元、
+零一万物、SiliconFlow、Mistral、xAI Grok、Groq、OpenRouter、Together AI、Ollama、LiteLLM Proxy、
+vLLM、Azure OpenAI——自动填充兼容端点与常用模型候选；也可以选「自定义」填任意 OpenAI-compatible 端点。
+此外支持 Tavily / Serper / Brave 网络搜索，发送消息时可把实时结果注入 LLM 上下文。
 
 ## 脚本
 
-| 命令 | 说明 |
-| --- | --- |
-| `npm run dev` | 开发服务器 |
-| `npm run build` / `preview` | 构建 / 预览产物 |
-| `npm run check` | svelte-check 类型与诊断 |
-| `npm run lint` / `format` | ESLint / Prettier |
-| `npm test` | Vitest 单元测试 |
-| `npm run test:coverage` | 单元测试 + 覆盖率（核心层 100% 语句/行/函数） |
-| `npm run test:e2e` | Playwright 端到端测试 |
+| 命令                        | 说明                                          |
+| --------------------------- | --------------------------------------------- |
+| `npm run dev`               | 开发服务器                                    |
+| `npm run build` / `preview` | 构建 / 预览产物                               |
+| `npm run check`             | svelte-check 类型与诊断                       |
+| `npm run lint` / `format`   | ESLint / Prettier                             |
+| `npm test`                  | Vitest 单元测试                               |
+| `npm run test:coverage`     | 单元测试 + 覆盖率（核心层 100% 语句/行/函数） |
+| `npm run test:e2e`          | Playwright 端到端测试                         |
 
 ## 功能（P0–P5）
 

@@ -45,6 +45,13 @@ export class LlmError extends CosBoxError {
 	}
 }
 
+/** 网页搜索失败（网络、鉴权、格式异常等）。 */
+export class SearchError extends CosBoxError {
+	constructor(message: string) {
+		super(message, 'SEARCH');
+	}
+}
+
 /** 角色卡导入/导出失败。 */
 export class ImportError extends CosBoxError {
 	constructor(message: string) {

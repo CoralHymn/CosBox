@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DemoLlmClient, buildDemoReply, extractLine } from './demo-provider';
+import { DemoLlmClient, buildDemoReply, extractLine, extractSearchTitle } from './demo-provider';
 import { DEFAULT_LLM_CONFIG, type ChatMessage } from './types';
 
 const systemMessage =
@@ -24,6 +24,23 @@ describe('extractLine', () => {
 	});
 });
 
+describe('extractSearchTitle', () => {
+	it('提取搜索结果块中第一条 - 标题', () => {
+		const system =
+			'【网络搜索结果】\n- 樱花学园官网：学园简介（https://example.com）\n- 另一个结果：内容';
+		expect(extractSearchTitle(system)).toBe('樱花学园官网');
+	});
+
+	it('无搜索块或无条目返回 null', () => {
+		expect(extractSearchTitle('【当前状态】\n时间：周一')).toBeNull();
+		expect(extractSearchTitle('【网络搜索结果】\n（无结果）')).toBeNull();
+	});
+
+	it('标题为空时返回 null', () => {
+		expect(extractSearchTitle('【网络搜索结果】\n- ：只有冒号')).toBeNull();
+	});
+});
+
 describe('buildDemoReply', () => {
 	it('时间问题返回当前时间', () => {
 		expect(buildDemoReply(messages('现在几点了？'))).toContain('周一 08:00');
@@ -35,6 +52,35 @@ describe('buildDemoReply', () => {
 
 	it('穿着问题返回当前穿着', () => {
 		expect(buildDemoReply(messages('你今天穿什么？'))).toContain('白色衬衫');
+	});
+
+	it('系统消息含搜索结果时返回搜索回应', () => {
+		const reply = buildDemoReply([
+			{ role: 'system', content: '【网络搜索结果】\n- 樱花学园官网：简介' },
+			{ role: 'user', content: '帮我查一下' }
+		]);
+		expect(reply).toContain('樱花学园官网');
+	});
+
+	it('状态行缺失时回退占位文案', () => {
+		expect(
+			buildDemoReply([
+				{ role: 'system', content: '【当前状态】' },
+				{ role: 'user', content: '现在几点了？' }
+			])
+		).toContain('现在');
+		expect(
+			buildDemoReply([
+				{ role: 'system', content: '【当前状态】' },
+				{ role: 'user', content: '你在哪里？' }
+			])
+		).toContain('老地方');
+		expect(
+			buildDemoReply([
+				{ role: 'system', content: '【当前状态】' },
+				{ role: 'user', content: '今天穿什么？' }
+			])
+		).toContain('平时那套');
 	});
 
 	it('默认回应引用用户输入并截断', () => {

@@ -428,6 +428,12 @@ button:disabled {
 	max-height: 160px;
 }
 
+.composer .btn.active {
+	background: var(--accent-dim);
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
 .side-preview {
 	border-left: 1px solid var(--border);
 	background: var(--bg-elevated);

@@ -30,7 +30,10 @@
 		locationId = characterState.location.id;
 		locationName = characterState.location.name;
 		locationDesc = characterState.location.description;
-		attrs = Object.entries(characterState.attributes).map(([key, value]) => ({ key, value: String(value) }));
+		attrs = Object.entries(characterState.attributes).map(([key, value]) => ({
+			key,
+			value: String(value)
+		}));
 	});
 
 	function commitOutfit(): void {
@@ -127,7 +130,12 @@
 		</div>
 		<div class="field">
 			<label for="outfit-accessories">配饰（用逗号分隔）</label>
-			<input id="outfit-accessories" class="input" bind:value={accessories} onchange={commitOutfit} />
+			<input
+				id="outfit-accessories"
+				class="input"
+				bind:value={accessories}
+				onchange={commitOutfit}
+			/>
 		</div>
 	</div>
 
@@ -154,8 +162,17 @@
 		{#each attrs as row, index (row.key + index)}
 			<div class="key-value-row">
 				<input class="input" bind:value={row.key} onchange={commitAttributes} placeholder="键" />
-				<input class="input value-input" bind:value={row.value} onchange={commitAttributes} placeholder="值" />
-				<button class="btn btn-danger btn-small" onclick={() => removeAttributeRow(index)} aria-label="删除属性">✕</button>
+				<input
+					class="input value-input"
+					bind:value={row.value}
+					onchange={commitAttributes}
+					placeholder="值"
+				/>
+				<button
+					class="btn btn-danger btn-small"
+					onclick={() => removeAttributeRow(index)}
+					aria-label="删除属性">✕</button
+				>
 			</div>
 		{/each}
 		<button class="btn btn-small" onclick={addAttributeRow}>＋ 添加属性</button>

@@ -12,9 +12,21 @@
 
 <aside class="side-preview">
 	<p class="card-title">实时状态预览</p>
-	<p class="preview-line"><span class="k">时间</span><span>{formatWorldTime(characterState.schedule.time)}（{describeCurrentActivity(characterState.schedule)}）</span></p>
+	<p class="preview-line">
+		<span class="k">时间</span><span
+			>{formatWorldTime(characterState.schedule.time)}（{describeCurrentActivity(
+				characterState.schedule
+			)}）</span
+		>
+	</p>
 	<p class="preview-line"><span class="k">地点</span><span>{characterState.location.name}</span></p>
-	<p class="preview-line"><span class="k">穿着</span><span>{formatOutfit(characterState.outfit)}</span></p>
-	<p class="preview-line"><span class="k">属性</span><span>{formatAttributes(characterState.attributes)}</span></p>
-	<p class="preview-line"><span class="k">日程</span><span>{summarizeSchedule(characterState.schedule)}</span></p>
+	<p class="preview-line">
+		<span class="k">穿着</span><span>{formatOutfit(characterState.outfit)}</span>
+	</p>
+	<p class="preview-line">
+		<span class="k">属性</span><span>{formatAttributes(characterState.attributes)}</span>
+	</p>
+	<p class="preview-line">
+		<span class="k">日程</span><span>{summarizeSchedule(characterState.schedule)}</span>
+	</p>
 </aside>
