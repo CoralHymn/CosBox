@@ -75,6 +75,19 @@ export class SnapshotRepository {
 		}
 	}
 
+	/**
+	 * 批量删除快照节点。
+	 * 删除前不做完整性校验（逻辑由调用方如 CharacterManager 负责），
+	 * 不存在的 id 会被跳过而不会报错。
+	 */
+	async removeMany(ids: readonly string[]): Promise<void> {
+		try {
+			await this.database.snapshots.bulkDelete([...ids]);
+		} catch (err) {
+			throw new StorageError('删除快照失败', { cause: err });
+		}
+	}
+
 	/** 统计快照数量。 */
 	async count(): Promise<number> {
 		try {

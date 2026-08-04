@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SnapshotError } from './errors';
 import {
 	chainToRoot,
+	collectBranchPath,
 	collectLinearChain,
 	createRootSnapshot,
 	getBranchTips,
@@ -253,5 +254,25 @@ describe('collectLinearChain', () => {
 		const nodes = toMap([makeNode('leaf', null, null, 1)]);
 		const chain = collectLinearChain(getChildrenMap(nodes.values()), nodes.get('leaf')!);
 		expect(chain.map((n) => n.id)).toEqual(['leaf']);
+	});
+});
+
+describe('collectBranchPath', () => {
+	it('收集从 tip 到分支点（不含分支点）的链', () => {
+		const nodes = toMap([
+			makeNode('root', null, null, 1),
+			makeNode('fork', 'root', null, 2),
+			makeNode('a', 'fork', null, 3),
+			makeNode('b', 'fork', null, 4),
+			makeNode('a1', 'a', null, 5)
+		]);
+		const children = getChildrenMap(nodes.values());
+		expect(collectBranchPath(children, nodes, 'a1').map((n) => n.id)).toEqual(['a1', 'a']);
+		expect(collectBranchPath(children, nodes, 'b').map((n) => n.id)).toEqual(['b']);
+	});
+
+	it('根节点没有分支链', () => {
+		const nodes = toMap([makeNode('root', null, null, 1)]);
+		expect(collectBranchPath(getChildrenMap(nodes.values()), nodes, 'root')).toEqual([]);
 	});
 });

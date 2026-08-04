@@ -9,11 +9,13 @@
 		childrenMap: Map<string, SnapshotNode[]>;
 		headId: string | null;
 		onCheckout: (id: string) => void;
+		onDeleteBranch: (tipId: string) => void;
 		/** 分支点下的节点向右缩进；单链节点平级显示，避免快照树无限向右延伸。 */
 		indented?: boolean;
 	}
 
-	let { node, childrenMap, headId, onCheckout, indented = false }: Props = $props();
+	let { node, childrenMap, headId, onCheckout, onDeleteBranch, indented = false }: Props =
+		$props();
 
 	const typeLabel: Record<SnapshotNode['metadata']['type'], string> = {
 		root: '初始',
@@ -41,12 +43,24 @@
 			{:else}
 				<button class="btn btn-small" onclick={() => onCheckout(item.id)}>切换</button>
 			{/if}
+			{#if (childrenMap.get(item.id) ?? []).length === 0}
+				<button class="btn btn-small btn-danger" onclick={() => onDeleteBranch(item.id)}
+					>删除</button
+				>
+			{/if}
 		</div>
 	{/each}
 	{#if branchChildren.length > 1}
 		<div class="branch-children">
 			{#each branchChildren as child (child.id)}
-				<VersionNode node={child} {childrenMap} {headId} {onCheckout} indented={true} />
+				<VersionNode
+					node={child}
+					{childrenMap}
+					{headId}
+					{onCheckout}
+					{onDeleteBranch}
+					indented={true}
+				/>
 			{/each}
 		</div>
 	{/if}

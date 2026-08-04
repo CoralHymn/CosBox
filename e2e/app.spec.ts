@@ -68,6 +68,38 @@ test('版本页切换回退状态与对话', async ({ page }) => {
 	await expect(page.getByText(/早上好/)).not.toBeVisible();
 });
 
+test('版本页删除分支后快照数减少且分支消失', async ({ page }) => {
+	await page.goto('/');
+
+	// 分支 A：早上好
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	// 切回根，再开分支 B：中午好
+	await page.getByRole('button', { name: /版本/ }).click();
+	await page.getByRole('button', { name: '切换' }).first().click();
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('中午好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	await page.getByRole('button', { name: /版本/ }).click();
+	await expect(page.locator('.list-row')).toHaveCount(2);
+	const snapshotsBefore = await page
+		.locator('.chip')
+		.filter({ hasText: '快照' })
+		.textContent();
+
+	page.on('dialog', (dialog) => void dialog.accept());
+	await page.getByRole('button', { name: '删除' }).first().click();
+
+	await expect(page.locator('.list-row')).toHaveCount(1);
+	await expect
+		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
+		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 5) - 2));
+});
+
 test('日程：时间推进自动生成快照', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /日程/ }).click();

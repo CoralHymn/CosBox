@@ -160,6 +160,18 @@
 		}
 	}
 
+	async function handleDeleteBranch(tipId: string): Promise<void> {
+		if (!window.confirm('删除该分支将移除从分支点到末端的所有快照，且不可恢复。确定删除？')) {
+			return;
+		}
+		try {
+			const deleted = await session.deleteBranch(tipId);
+			toasts.success(`已删除 ${deleted} 个快照`);
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
 	async function handleWorldUpsert(entry: WorldInfoEntry): Promise<void> {
 		try {
 			await worldInfo.upsert(entry);
@@ -304,6 +316,7 @@
 					branches={session.branches}
 					onCheckout={handleCheckout}
 					onAddCheckpoint={handleCheckpoint}
+					onDeleteBranch={handleDeleteBranch}
 				/>
 			{:else if tab === 'world'}
 				<WorldInfoPanel
