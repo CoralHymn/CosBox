@@ -10,10 +10,13 @@
 		places: LocationDef[];
 		/** 衣柜：/wear 补全数据源。 */
 		wardrobe: ClothingItem[];
+		/** 输入框内容变化回调（供开发者预览使用）。 */
+		onTextChange?: (text: string) => void;
 		onSend: (content: string, options: { search: boolean }) => void;
 	}
 
-	let { disabled, searchSupported, searching, places, wardrobe, onSend }: Props = $props();
+	let { disabled, searchSupported, searching, places, wardrobe, onTextChange, onSend }: Props =
+		$props();
 	let text = $state('');
 	let search = $state(false);
 	let activeIndex = $state(0);
@@ -119,8 +122,9 @@
 		placeholder="输入消息；或输入 / 使用快捷命令，Enter 发送，Shift+Enter 换行"
 		bind:value={text}
 		onkeydown={onKeydown}
-		oninput={() => {
+		oninput={(event) => {
 			dismissed = false;
+			onTextChange?.((event.currentTarget as HTMLTextAreaElement).value);
 		}}
 		onblur={() => {
 			dismissed = true;

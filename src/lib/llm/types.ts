@@ -68,6 +68,8 @@ export interface LlmChatResult {
 	/** 最终文本；若本轮全部是工具调用则为 null。 */
 	content: string | null;
 	toolCalls: ToolCall[];
+	/** 模型的思考过程（reasoning_content / reasoning）；仅展示，不随请求回传。 */
+	thinking?: string;
 	/** API 返回或本地估算的 token 用量；部分端点不提供时为 undefined。 */
 	usage?: TokenUsage;
 }

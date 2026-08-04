@@ -24,7 +24,12 @@ export class DemoLlmClient implements LlmClient {
 	): Promise<LlmChatResult> {
 		await delay(250, signal);
 		const content = buildDemoReply(messages);
-		return { content, toolCalls: [], usage: demoUsage(messages, content) };
+		return {
+			content,
+			toolCalls: [],
+			usage: demoUsage(messages, content),
+			thinking: demoThinking(messages)
+		};
 	}
 
 	/** 演示摘要：确定性文本，保证离线与 e2e 可断言。 */
@@ -65,18 +70,29 @@ export function buildDemoToolResult(
 	messages: ChatMessage[],
 	tools: readonly StateToolSchema[]
 ): LlmChatResult {
+	const thinking = demoThinking(messages);
 	const last = messages[messages.length - 1];
 	if (last?.role === 'tool') {
 		const content = buildDemoToolReply(last.content);
-		return { content, toolCalls: [], usage: demoUsage(messages, content) };
+		return { content, toolCalls: [], usage: demoUsage(messages, content), thinking };
 	}
 	const text = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
 	const toolCalls = pickDemoToolCall(text, tools);
 	if (toolCalls.length > 0) {
-		return { content: null, toolCalls, usage: demoUsage(messages, null) };
+		return { content: null, toolCalls, usage: demoUsage(messages, null), thinking };
 	}
 	const content = buildDemoReply(messages);
-	return { content, toolCalls: [], usage: demoUsage(messages, content) };
+	return { content, toolCalls: [], usage: demoUsage(messages, content), thinking };
+}
+
+/** 演示思考：仅当用户询问「在想什么/思考」时返回确定性内容，便于 e2e 断言。 */
+function demoThinking(messages: ChatMessage[]): string | undefined {
+	const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+	const text = lastUser?.content ?? '';
+	if (/思考|在想什么|怎么想|考虑/.test(text)) {
+		return `（演示）让我先想想：对方刚说「${truncate(text, 24)}」，我应该结合当前状态回应。`;
+	}
+	return undefined;
 }
 
 /** 生成确定性的演示用量：prompt 按消息估算，completion 按输出文本估算。 */

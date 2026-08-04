@@ -12,7 +12,7 @@ import {
 } from './state-summary';
 
 describe('formatOutfit', () => {
-	it('按穿戴顺序拼接所有槽位', () => {
+	it('按穿戴顺序输出带标签的槽位与配饰', () => {
 		expect(
 			formatOutfit({
 				headwear: '贝雷帽',
@@ -25,10 +25,12 @@ describe('formatOutfit', () => {
 				accessories: ['发带', '手表'],
 				wardrobe: []
 			})
-		).toBe('贝雷帽、衬衫、白色内衣、白色内裤、裙子、白袜、皮鞋、发带、手表');
+		).toBe(
+			'帽子：贝雷帽；上衣：衬衫；内衣：白色内衣；内裤：白色内裤；下装：裙子；袜子：白袜；鞋：皮鞋；配饰：发带、手表'
+		);
 	});
 
-	it('空字符串槽位被过滤', () => {
+	it('空槽位显式标注「未穿」', () => {
 		expect(
 			formatOutfit({
 				headwear: '',
@@ -41,10 +43,12 @@ describe('formatOutfit', () => {
 				accessories: [],
 				wardrobe: []
 			})
-		).toBe('衬衫');
+		).toBe(
+			'帽子：未穿；上衣：衬衫；内衣：未穿；内裤：未穿；下装：未穿；袜子：未穿；鞋：未穿；配饰：未穿'
+		);
 	});
 
-	it('全空时返回占位文案', () => {
+	it('全空时每个槽位都标注「未穿」', () => {
 		expect(
 			formatOutfit({
 				headwear: null,
@@ -57,7 +61,9 @@ describe('formatOutfit', () => {
 				accessories: [],
 				wardrobe: []
 			})
-		).toBe('（无穿着描述）');
+		).toBe(
+			'帽子：未穿；上衣：未穿；内衣：未穿；内裤：未穿；下装：未穿；袜子：未穿；鞋：未穿；配饰：未穿'
+		);
 	});
 });
 
@@ -187,7 +193,8 @@ describe('summarizeState', () => {
 		expect(text).toContain('【当前状态】');
 		expect(text).toContain('时间：周一 08:00');
 		expect(text).toContain('地点：学校 > 学院正门');
-		expect(text).toContain('穿着：白色衬衫');
+		expect(text).toContain('上衣：白色衬衫');
+		expect(text).toContain('帽子：未穿');
 		expect(text).toContain('属性：name:绫音');
 		expect(text).toContain('今日日程：周一 08:00-09:00 晨会');
 		expect(text).toContain('【已知地点】学校 > 学院正门（樱花道尽头的校门，晨间常有学生出入）');

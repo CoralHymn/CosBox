@@ -155,6 +155,8 @@ export interface ChatMessageView {
 	role: MessageRole;
 	content: string;
 	timestamp: number;
+	/** 模型的思考过程（reasoning_content / reasoning），仅展示不发送。 */
+	thinking?: string;
 	/** 仅用于界面展示、不进入发送给 LLM 的上下文（如 /help 帮助文本）。 */
 	skipContext?: boolean;
 }
@@ -169,7 +171,13 @@ export interface SnapshotMetadata {
 /** 快照 delta：状态补丁、消息、或空（检查点）。 */
 export type SnapshotDelta =
 	| { kind: 'state'; patch: StatePatch }
-	| { kind: 'message'; role: MessageRole; content: string; skipContext?: boolean }
+	| {
+			kind: 'message';
+			role: MessageRole;
+			content: string;
+			thinking?: string;
+			skipContext?: boolean;
+	  }
 	| null;
 
 /** 版本图节点：单父多子的增量快照。 */

@@ -157,6 +157,23 @@ describe('CharacterManager', () => {
 		expect(manager.getConversation()[0]!.skipContext).toBe(true);
 	});
 
+	it('addMessage 的 thinking 选项写入快照并随重建保留', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '回答', { thinking: '  思考内容  ' });
+		expect(manager.getConversation()[0]!.thinking).toBe('思考内容');
+		const headId = manager.getHeadId()!;
+		await manager.checkout(headId);
+		expect(manager.getConversation()[0]!.thinking).toBe('思考内容');
+	});
+
+	it('addMessage 的 thinking 为空时不写入该字段', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '回答', { thinking: '   ' });
+		expect(manager.getConversation()[0]!.thinking).toBeUndefined();
+	});
+
 	it('未注入 now 时回退到 Date.now', async () => {
 		const manager = new CharacterManager({ snapshots, kv });
 		await manager.init();

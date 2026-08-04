@@ -5,25 +5,31 @@ import type {
 	ClothingKind,
 	LocationDef,
 	OutfitState,
+	OutfitSlot,
 	ScheduleState
 } from '../core/types';
 
 /**
  * 把穿着结构渲染成自然语言（按穿戴顺序）：
- * 如「贝雷帽、白色衬衫、白色棉质内衣、白色棉质内裤、深蓝百褶裙、白色过膝袜、黑色皮鞋、蝴蝶结发带」。
+ * 如「帽子：未穿；上衣：白色衬衫；内衣：白色棉质内衣；…；配饰：蝴蝶结发带」。
  */
 export function formatOutfit(outfit: OutfitState): string {
-	const parts = [
-		outfit.headwear,
-		outfit.top,
-		outfit.underwear,
-		outfit.underpants,
-		outfit.bottom,
-		outfit.socks,
-		outfit.shoes,
-		...outfit.accessories
-	].filter((part): part is string => part !== null && part !== '');
-	return parts.length > 0 ? parts.join('、') : '（无穿着描述）';
+	const slots: ReadonlyArray<[OutfitSlot, string]> = [
+		['headwear', '帽子'],
+		['top', '上衣'],
+		['underwear', '内衣'],
+		['underpants', '内裤'],
+		['bottom', '下装'],
+		['socks', '袜子'],
+		['shoes', '鞋']
+	];
+	const parts = slots.map(([slot, label]) => {
+		const value = outfit[slot];
+		return `${label}：${value !== null && value.trim() !== '' ? value : '未穿'}`;
+	});
+	const accessories = outfit.accessories.filter((item) => item.trim() !== '').join('、');
+	parts.push(`配饰：${accessories === '' ? '未穿' : accessories}`);
+	return parts.join('；');
 }
 
 /**

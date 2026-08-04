@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { ConfigPatch, StatePatch, WorldInfoEntry } from '../lib/core/types';
+	import type { ChatMessageView, ConfigPatch, StatePatch, WorldInfoEntry } from '../lib/core/types';
 	import { formatWorldTime } from '../lib/core/state';
-	import type { ContextBundle, ContextPipelineInput } from '../lib/context/pipeline';
+	import { buildContext, type ContextBundle, type ContextPipelineInput } from '../lib/context/pipeline';
 	import { KvRepository } from '../lib/db/kv-repo';
 	import { getDb } from '../lib/db/schema';
 	import { SnapshotRepository } from '../lib/db/snapshot-repo';
@@ -13,7 +13,11 @@
 		parseCharaCard,
 		serializeCharaCard
 	} from '../lib/import-export/chara-card-v3';
-	import { ChatService, type DebugPromptView } from '../lib/llm/chat-service';
+	import {
+		ChatService,
+		type DebugPromptView,
+		type PromptPreviewResult
+	} from '../lib/llm/chat-service';
 	import {
 		DEFAULT_COMPACT_THRESHOLD,
 		DEFAULT_KEEP_RECENT,
@@ -160,7 +164,7 @@
 							state: compactState
 						}
 					: undefined;
-			const { reply, debug, bundle, usage, compaction } = await service.generateReply(
+			const { reply, debug, bundle, usage, compaction, thinking } = await service.generateReply(
 				input,
 				settings.config,
 				{
@@ -176,7 +180,7 @@
 			debugPrompt = debug;
 			lastContext = { bundle, usage: usage ?? null, compaction };
 			compactState = compaction;
-			await session.addMessage('assistant', reply);
+			await session.addMessage('assistant', reply, { thinking });
 		} catch (err) {
 			toasts.error(err);
 		} finally {
@@ -211,6 +215,59 @@
 		} finally {
 			compacting = false;
 		}
+	}
+
+	/**
+	 * 预览「如果现在点击发送，会发送给 AI 什么」：把输入框内容当作待发送的用户消息，
+	 * 走与真实发送相同的上下文组装（状态摘要 + 世界信息 + 历史），但不调用 LLM、
+	 * 不落快照、不触发网络搜索。
+	 */
+	function handlePreview(draft: string): PromptPreviewResult {
+		const trimmed = draft.trim();
+		if (parseSlashCommand(trimmed) !== null) {
+			return {
+				kind: 'notice',
+				text: `「${trimmed}」将以斜杠命令执行，不会调用 LLM；执行后会在对话中追加一条系统提示让 AI 感知。`
+			};
+		}
+		if (trimmed === '') {
+			return { kind: 'notice', text: '输入为空：点击发送不会调用 LLM。' };
+		}
+		const pending: ChatMessageView = {
+			id: 'preview-pending',
+			role: 'user',
+			content: trimmed,
+			timestamp: Date.now()
+		};
+		const conversation = [...session.conversation, pending];
+		const input: ContextPipelineInput = {
+			state: session.state,
+			conversation,
+			worldInfo: worldInfo.entries,
+			characterName:
+				settings.profile.name ||
+				(typeof session.state.attributes.name === 'string'
+					? session.state.attributes.name
+					: undefined),
+			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			historyOptions: { maxMessages: Math.max(1, conversation.length) }
+		};
+		const bundle = buildContext(input);
+		const notes: string[] = [];
+		if (settings.config.autoCompact === true) {
+			notes.push('若发送时达到压缩阈值，系统消息前还会插入模型生成的上下文摘要（预览未包含）。');
+		}
+		if (searchSupported) {
+			notes.push('若勾选网络搜索，发送时还会注入实时搜索结果（预览未包含）。');
+		}
+		return {
+			kind: 'prompt',
+			debug: {
+				systemMessage: bundle.systemMessage,
+				messages: [{ role: 'system', content: bundle.systemMessage }, ...bundle.messages]
+			},
+			note: notes.join('\n')
+		};
 	}
 
 	/** 斜杠命令：直接改状态并生成快照，再补一条系统提示让 AI 感知。 */
@@ -461,6 +518,7 @@
 					{searching}
 					developerMode={settings.developerMode}
 					{debugPrompt}
+					onPreview={handlePreview}
 					onSend={handleSend}
 				/>
 			{:else if tab === 'state'}

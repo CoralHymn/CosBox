@@ -20,7 +20,7 @@ export interface CharacterSessionStore {
 	addMessage: (
 		role: MessageRole,
 		content: string,
-		options?: { skipContext?: boolean }
+		options?: { skipContext?: boolean; thinking?: string }
 	) => Promise<SnapshotNode>;
 	checkout: (targetId: string) => Promise<void>;
 	advanceTime: (minutes: number) => Promise<SnapshotNode>;

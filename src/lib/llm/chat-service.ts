@@ -26,6 +26,10 @@ export interface DebugPromptView {
 	messages: ChatMessage[];
 }
 
+/** 开发者输入预览结果：完整提示词，或提示性说明（斜杠命令/空输入）。 */
+export type PromptPreviewResult =
+	{ kind: 'prompt'; debug: DebugPromptView; note?: string } | { kind: 'notice'; text: string };
+
 /** 自动上下文压缩参数（生成回复时按需触发）。 */
 export interface CompactionOptions {
 	/** 模型上下文窗口；null 表示未知（此时不自动压缩）。 */
@@ -74,6 +78,7 @@ export class ChatService {
 		debug: DebugPromptView;
 		usage: TokenUsage | undefined;
 		compaction: CompactionState | null;
+		thinking: string | undefined;
 	}> {
 		let usage: TokenUsage | undefined;
 		let compaction: CompactionState | null = options.compaction?.state ?? null;
@@ -129,7 +134,15 @@ export class ChatService {
 					const result = await this.client.chatWithTools(messages, options.tools, config, signal);
 					usage = mergeUsage(usage, result.usage);
 					if (result.toolCalls.length === 0) {
-						return { reply: result.content ?? '', bundle, executedTools, debug, usage, compaction };
+						return {
+							reply: result.content ?? '',
+							bundle,
+							executedTools,
+							debug,
+							usage,
+							compaction,
+							thinking: result.thinking
+						};
 					}
 					const toolMessages: ChatMessage[] = [];
 					for (const call of result.toolCalls) {
@@ -162,7 +175,8 @@ export class ChatService {
 					executedTools,
 					debug,
 					usage,
-					compaction
+					compaction,
+					thinking: undefined
 				};
 			}
 		}
@@ -174,7 +188,8 @@ export class ChatService {
 			executedTools,
 			debug,
 			usage: mergeUsage(usage, result.usage),
-			compaction
+			compaction,
+			thinking: result.thinking
 		};
 	}
 

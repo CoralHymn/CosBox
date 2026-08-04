@@ -213,7 +213,7 @@ export class CharacterManager {
 	addMessage(
 		role: MessageRole,
 		content: string,
-		options: { skipContext?: boolean } = {}
+		options: { skipContext?: boolean; thinking?: string } = {}
 	): Promise<SnapshotNode> {
 		return this.enqueue(() => this.doAddMessage(role, content, options));
 	}
@@ -221,7 +221,7 @@ export class CharacterManager {
 	private async doAddMessage(
 		role: MessageRole,
 		content: string,
-		options: { skipContext?: boolean }
+		options: { skipContext?: boolean; thinking?: string }
 	): Promise<SnapshotNode> {
 		await this.ensureInit();
 		const trimmed = content.trim();
@@ -236,6 +236,9 @@ export class CharacterManager {
 				kind: 'message',
 				role,
 				content: trimmed,
+				...(options.thinking !== undefined && options.thinking.trim() !== ''
+					? { thinking: options.thinking.trim() }
+					: {}),
 				...(options.skipContext === true ? { skipContext: true } : {})
 			},
 			timestamp: this.now()
