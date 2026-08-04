@@ -8,7 +8,8 @@ import type {
 	MessageRole,
 	SnapshotDelta,
 	SnapshotNode,
-	StatePatch
+	StatePatch,
+	WorldTime
 } from './types';
 import { newId } from '../utils/id';
 
@@ -49,6 +50,7 @@ export function isMessageDelta(delta: SnapshotDelta): delta is {
 	kind: 'message';
 	role: MessageRole;
 	content: string;
+	worldTime?: WorldTime;
 	thinking?: string;
 	skipContext?: boolean;
 } {
@@ -119,6 +121,7 @@ export function rebuildFromNodes(
 				role: delta.role,
 				content: delta.content,
 				timestamp: node.timestamp,
+				...(delta.worldTime !== undefined ? { worldTime: delta.worldTime } : {}),
 				...(delta.thinking !== undefined && delta.thinking !== ''
 					? { thinking: delta.thinking }
 					: {}),

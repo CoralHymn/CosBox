@@ -30,9 +30,12 @@ describe('defaultSystemPrompt', () => {
 });
 
 describe('buildToolGuidance', () => {
-	it('包含状态工具名称与调用说明', () => {
+	it('以强指令语气列出状态工具与触发时机', () => {
 		const text = buildToolGuidance();
 		expect(text).toContain('【工具使用】');
+		expect(text).toContain('必须');
+		expect(text).toContain('立即调用');
+		expect(text).toContain('不允许只口头描述');
 		expect(text).toContain('goto_location');
 		expect(text).toContain('set_outfit');
 		expect(text).toContain('advance_time');

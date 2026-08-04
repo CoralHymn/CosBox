@@ -30,10 +30,17 @@ export interface DebugPromptView {
 export type PromptPreviewResult =
 	{ kind: 'prompt'; debug: DebugPromptView; note?: string } | { kind: 'notice'; text: string };
 
-/** agent 循环中带工具调用那一轮的叙事文本（AI 一次回复的多段之一）。 */
-export interface ReplySegment {
-	content: string;
+/** agent 循环中一轮工具调用的反馈（供持久化展示）。 */
+export interface RoundToolFeedback {
+	name: string;
+	output: string;
+}
+
+/** agent 循环中的一轮：叙事文本（可空）+ 该轮执行的工具反馈。 */
+export interface ReplyRound {
+	content: string | null;
 	thinking?: string;
+	tools: RoundToolFeedback[];
 }
 
 /** 自动上下文压缩参数（生成回复时按需触发）。 */
@@ -87,8 +94,8 @@ export class ChatService {
 		usage: TokenUsage | undefined;
 		compaction: CompactionState | null;
 		thinking: string | undefined;
-		/** 工具调用轮次中的叙事段落（按顺序；最终回复在 reply）。 */
-		segments: ReplySegment[];
+		/** 工具调用轮次（按顺序；每轮含叙事文本与工具反馈，最终回复在 reply）。 */
+		rounds: ReplyRound[];
 	}> {
 		let usage: TokenUsage | undefined;
 		let compaction: CompactionState | null = options.compaction?.state ?? null;
@@ -135,7 +142,7 @@ export class ChatService {
 		];
 		let debug: DebugPromptView = { systemMessage: bundle.systemMessage, messages };
 		const executedTools: ExecutedToolCall[] = [];
-		const segments: ReplySegment[] = [];
+		const rounds: ReplyRound[] = [];
 
 		if (options.tools !== undefined && options.tools.length > 0 && options.toolContext) {
 			if (this.client.chatWithTools) {
@@ -159,19 +166,16 @@ export class ChatService {
 							usage,
 							compaction,
 							thinking: result.thinking,
-							segments
+							rounds
 						};
 					}
-					// 带工具调用的那一轮也可能包含叙事文本：保留为独立段落，避免被丢弃。
-					const segmentContent = result.content ?? '';
-					if (segmentContent.trim() !== '') {
-						segments.push({ content: segmentContent, thinking: result.thinking });
-					}
 					const toolMessages: ChatMessage[] = [];
+					const roundTools: RoundToolFeedback[] = [];
 					const feedbackLines: string[] = [];
 					for (const call of result.toolCalls) {
 						const outcome = await executeStateTool(options.tools, call, options.toolContext);
 						executedTools.push(outcome);
+						roundTools.push({ name: call.name, output: outcome.output });
 						feedbackLines.push(
 							`- ${call.name}(${formatToolArguments(call.arguments)}) → ${outcome.output}`
 						);
@@ -182,6 +186,11 @@ export class ChatService {
 							name: call.name
 						});
 					}
+					rounds.push({
+						content: result.content ?? null,
+						thinking: result.thinking,
+						tools: roundTools
+					});
 					messages = [
 						...messages,
 						{ role: 'assistant', content: result.content ?? '', toolCalls: result.toolCalls },
@@ -205,7 +214,7 @@ export class ChatService {
 					usage,
 					compaction,
 					thinking: undefined,
-					segments
+					rounds
 				};
 			}
 		}
@@ -219,7 +228,7 @@ export class ChatService {
 			usage: mergeUsage(usage, result.usage),
 			compaction,
 			thinking: result.thinking,
-			segments
+			rounds
 		};
 	}
 

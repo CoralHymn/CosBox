@@ -492,6 +492,12 @@ button:disabled {
 	max-width: 90%;
 }
 
+.message.system.tool-note {
+	border-color: rgba(124, 156, 255, 0.45);
+	color: var(--accent);
+	background: var(--accent-dim);
+}
+
 .thinking {
 	background: var(--bg);
 	border: 1px solid var(--border);

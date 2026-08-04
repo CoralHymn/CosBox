@@ -155,6 +155,8 @@ export interface ChatMessageView {
 	role: MessageRole;
 	content: string;
 	timestamp: number;
+	/** 消息产生时的世界时间（供上下文标注，如「（周一 09:00）」）。 */
+	worldTime?: WorldTime;
 	/** 模型的思考过程（reasoning_content / reasoning），仅展示不发送。 */
 	thinking?: string;
 	/** 仅用于界面展示、不进入发送给 LLM 的上下文（如 /help 帮助文本）。 */
@@ -175,6 +177,7 @@ export type SnapshotDelta =
 			kind: 'message';
 			role: MessageRole;
 			content: string;
+			worldTime?: WorldTime;
 			thinking?: string;
 			skipContext?: boolean;
 	  }

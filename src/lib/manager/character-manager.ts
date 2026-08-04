@@ -236,6 +236,7 @@ export class CharacterManager {
 				kind: 'message',
 				role,
 				content: trimmed,
+				worldTime: clonePlain(this.state.schedule.time),
 				...(options.thinking !== undefined && options.thinking.trim() !== ''
 					? { thinking: options.thinking.trim() }
 					: {}),
