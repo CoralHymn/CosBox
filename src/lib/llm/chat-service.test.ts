@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { addMinutes, applyStateDelta, createInitialState } from '../core/state';
-import type { StatePatch } from '../core/types';
+import type { ChatMessageView, StatePatch } from '../core/types';
 import type { ContextPipelineInput } from '../context/pipeline';
 import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
-import { ChatService } from './chat-service';
+import { ChatService, serializeDebugPrompt, type CompactionOptions } from './chat-service';
 import { STATE_TOOLS, type StateToolContext } from './state-tools';
 import type { ChatMessage, LlmClient, LlmConfig } from './types';
 
@@ -250,6 +250,169 @@ describe('ChatService', () => {
 		);
 		expect(usage).toBeUndefined();
 	});
+
+	it('自动压缩：用量达到阈值时用摘要替换早期消息并累加用量', async () => {
+		const summarize = vi.fn(async () => ({
+			summary: '延续摘要',
+			usage: { promptTokens: 50, completionTokens: 10, cachedTokens: 0 }
+		}));
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({
+				content: '好的',
+				toolCalls: [],
+				usage: { promptTokens: 100, completionTokens: 20, cachedTokens: 5 }
+			})),
+			summarize
+		};
+		const conversation = makeConversation(25);
+		const service = new ChatService(client);
+		const compaction: CompactionOptions = {
+			contextWindow: 600,
+			threshold: 0.5,
+			keepRecent: 20,
+			state: null
+		};
+		const {
+			reply,
+			compaction: resultState,
+			usage,
+			bundle
+		} = await service.generateReply(
+			{ state: createInitialState(), conversation, worldInfo: [] },
+			config,
+			{ compaction }
+		);
+		expect(reply).toBe('好的');
+		expect(summarize).toHaveBeenCalledTimes(1);
+		expect(resultState?.summary).toBe('延续摘要');
+		expect(resultState?.boundaryId).toBe('5');
+		expect(bundle.messages.some((message) => message.content.includes('延续摘要'))).toBe(true);
+		expect(usage).toEqual({ promptTokens: 150, completionTokens: 30, cachedTokens: 5 });
+	});
+
+	it('自动压缩：用量未达阈值时完整发送且不调用摘要', async () => {
+		const summarize = vi.fn();
+		const chat = vi.fn(async () => ({ content: '好的', toolCalls: [] }));
+		const client: LlmClient = { chat, summarize };
+		const conversation = makeConversation(25);
+		const service = new ChatService(client);
+		const { compaction, debug } = await service.generateReply(
+			{ state: createInitialState(), conversation, worldInfo: [] },
+			config,
+			{
+				compaction: {
+					contextWindow: 1_000_000,
+					threshold: 0.8,
+					keepRecent: 20,
+					state: null
+				}
+			}
+		);
+		expect(summarize).not.toHaveBeenCalled();
+		expect(compaction).toBeNull();
+		expect(debug.messages).toHaveLength(26);
+	});
+
+	it('已有压缩状态时发送摘要 + 边界后消息，且不重复压缩', async () => {
+		const chat = vi.fn(async () => ({ content: '好的', toolCalls: [] }));
+		const service = new ChatService({ chat });
+		const conversation = makeConversation(25);
+		const { compaction, debug } = await service.generateReply(
+			{ state: createInitialState(), conversation, worldInfo: [] },
+			config,
+			{
+				compaction: {
+					contextWindow: 1_000_000,
+					threshold: 0.8,
+					keepRecent: 20,
+					state: { summary: '旧摘要', boundaryId: '20' }
+				}
+			}
+		);
+		expect(compaction).toEqual({ summary: '旧摘要', boundaryId: '20' });
+		expect(debug.messages).toHaveLength(7);
+		expect(debug.messages.some((message) => message.content.includes('旧摘要'))).toBe(true);
+	});
+
+	it('手动压缩：总结边界后的早期消息并返回新状态', async () => {
+		const summarize = vi.fn(async () => ({ summary: '手动摘要', usage: undefined }));
+		const service = new ChatService({ chat: vi.fn(), summarize });
+		const result = await service.compactConversation(makeConversation(25), config);
+		expect(result.state?.summary).toBe('手动摘要');
+		expect(result.state?.boundaryId).toBe('5');
+		expect(summarize).toHaveBeenCalledTimes(1);
+	});
+
+	it('手动压缩：已有状态时从边界继续并携带旧摘要', async () => {
+		const summarize = vi.fn(async (request: ChatMessage[], _config: LlmConfig) => {
+			void request;
+			void _config;
+			return { summary: '合并摘要', usage: undefined };
+		});
+		const service = new ChatService({ chat: vi.fn(), summarize });
+		const result = await service.compactConversation(makeConversation(30), config, {
+			state: { summary: '旧摘要', boundaryId: '5' }
+		});
+		expect(result.state?.summary).toBe('合并摘要');
+		expect(result.state?.boundaryId).toBe('10');
+		const request = summarize.mock.calls[0]![0] as ChatMessage[];
+		expect(request[1]!.content).toContain('旧摘要');
+		expect(request[1]!.content).toContain('[assistant] 消息5');
+	});
+
+	it('手动压缩：消息数不超过保留窗口时原样返回', async () => {
+		const summarize = vi.fn();
+		const service = new ChatService({ chat: vi.fn(), summarize });
+		const result = await service.compactConversation(makeConversation(3), config);
+		expect(result.state).toBeNull();
+		expect(summarize).not.toHaveBeenCalled();
+	});
+
+	it('手动压缩：摘要失败（非取消）时回退确定性兜底', async () => {
+		const summarize = vi.fn(async () => Promise.reject(new Error('模型挂了')));
+		const service = new ChatService({ chat: vi.fn(), summarize });
+		const result = await service.compactConversation(makeConversation(25), config);
+		expect(result.state?.summary).toContain('压缩摘要');
+		expect(result.usage).toBeUndefined();
+	});
+
+	it('手动压缩：取消时如实上抛', async () => {
+		const controller = new AbortController();
+		const summarize = vi.fn(async () => Promise.reject(new DOMException('Aborted', 'AbortError')));
+		const service = new ChatService({ chat: vi.fn(), summarize });
+		controller.abort();
+		await expect(
+			service.compactConversation(makeConversation(25), config, {}, controller.signal)
+		).rejects.toThrow();
+	});
+
+	it('客户端无 summarize 时用 chat 兜底生成摘要', async () => {
+		const chat = vi.fn(async () => ({ content: 'chat 摘要', toolCalls: [] }));
+		const service = new ChatService({ chat });
+		const result = await service.compactConversation(makeConversation(25), config);
+		expect(result.state?.summary).toBe('chat 摘要');
+		expect(chat).toHaveBeenCalled();
+	});
+});
+
+describe('serializeDebugPrompt', () => {
+	it('序列化系统消息、普通消息与工具调用', () => {
+		const text = serializeDebugPrompt({
+			systemMessage: '系统提示',
+			messages: [
+				{ role: 'user', content: '你好' },
+				{
+					role: 'assistant',
+					content: '',
+					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+				}
+			]
+		});
+		expect(text).toContain('[system] 系统提示');
+		expect(text).toContain('[user] 你好');
+		expect(text).toContain('[tool_calls]');
+		expect(text).toContain('"name": "goto_location"');
+	});
 });
 
 /** 内存版工具上下文：状态在对象内直接演进。 */
@@ -267,4 +430,14 @@ function makeToolContext(initial = createInitialState()): StateToolContext {
 			};
 		}
 	};
+}
+
+/** 构造 n 条交替 user/assistant 的消息序列。 */
+function makeConversation(count: number): ChatMessageView[] {
+	return Array.from({ length: count }, (_, index) => ({
+		id: String(index),
+		role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+		content: `消息${index}`,
+		timestamp: index
+	}));
 }

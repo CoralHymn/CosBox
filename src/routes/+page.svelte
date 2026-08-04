@@ -14,7 +14,13 @@
 		serializeCharaCard
 	} from '../lib/import-export/chara-card-v3';
 	import { ChatService, type DebugPromptView } from '../lib/llm/chat-service';
+	import {
+		DEFAULT_COMPACT_THRESHOLD,
+		DEFAULT_KEEP_RECENT,
+		type CompactionState
+	} from '../lib/llm/compaction';
 	import { DemoLlmClient } from '../lib/llm/demo-provider';
+	import { resolveContextWindow } from '../lib/llm/model-info';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
@@ -61,13 +67,20 @@
 	let ready = $state(false);
 	/** 开发者模式下展示的最近一次发送给 AI 的完整提示词。 */
 	let debugPrompt = $state<DebugPromptView | null>(null);
-	/** 最近一次请求的上下文包与用量（供侧栏上下文面板展示）。 */
-	let lastContext = $state<{ bundle: ContextBundle | null; usage: TokenUsage | null }>({
+	/** 最近一次请求的上下文包、用量与压缩状态（供侧栏上下文面板展示）。 */
+	let lastContext = $state<{
+		bundle: ContextBundle | null;
+		usage: TokenUsage | null;
+		compaction: CompactionState | null;
+	}>({
 		bundle: null,
-		usage: null
+		usage: null,
+		compaction: null
 	});
-	/** 发送给模型的历史消息条数上限；压缩只影响请求内容，不动本地历史。 */
-	let historyMaxMessages = $state(20);
+	/** 跨请求延续的压缩状态（摘要 + 边界）；只影响发送给模型的内容。 */
+	let compactState = $state<CompactionState | null>(null);
+	/** 正在执行手动压缩。 */
+	let compacting = $state(false);
 
 	const providerLabel = $derived.by(() => {
 		if (settings.config.provider === 'demo') {
@@ -122,7 +135,6 @@
 			const input: ContextPipelineInput = {
 				state: session.state,
 				conversation: session.conversation,
-				historyOptions: { maxMessages: historyMaxMessages },
 				worldInfo: worldInfo.entries,
 				characterName:
 					settings.profile.name ||
@@ -135,22 +147,69 @@
 			const service = new ChatService(
 				settings.config.provider === 'demo' ? demoClient : openAiClient
 			);
-			const { reply, debug, bundle, usage } = await service.generateReply(input, settings.config, {
-				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
-				toolContext: {
-					getState: () => session.state,
-					update: (patch, metadata) => session.update(patch, metadata),
-					advanceTime: (minutes) => session.advanceTime(minutes)
+			const contextWindow = resolveContextWindow(
+				settings.config.modelContextWindow,
+				settings.config.model
+			);
+			const compactionOptions =
+				settings.config.autoCompact === true
+					? {
+							contextWindow,
+							threshold: settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD,
+							keepRecent: DEFAULT_KEEP_RECENT,
+							state: compactState
+						}
+					: undefined;
+			const { reply, debug, bundle, usage, compaction } = await service.generateReply(
+				input,
+				settings.config,
+				{
+					tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
+					toolContext: {
+						getState: () => session.state,
+						update: (patch, metadata) => session.update(patch, metadata),
+						advanceTime: (minutes) => session.advanceTime(minutes)
+					},
+					...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
 				}
-			});
+			);
 			debugPrompt = debug;
-			lastContext = { bundle, usage: usage ?? null };
+			lastContext = { bundle, usage: usage ?? null, compaction };
+			compactState = compaction;
 			await session.addMessage('assistant', reply);
 		} catch (err) {
 			toasts.error(err);
 		} finally {
 			busy = false;
 			searching = false;
+		}
+	}
+
+	/** 手动压缩：立即把早期对话总结为摘要，供下次请求使用。 */
+	async function handleCompactNow(): Promise<void> {
+		if (busy || compacting) {
+			return;
+		}
+		compacting = true;
+		try {
+			const service = new ChatService(
+				settings.config.provider === 'demo' ? demoClient : openAiClient
+			);
+			const result = await service.compactConversation(session.conversation, settings.config, {
+				state: compactState,
+				keepRecent: DEFAULT_KEEP_RECENT
+			});
+			compactState = result.state;
+			if (result.state === null) {
+				toasts.push('info', '对话较短，暂无需压缩');
+			} else {
+				lastContext = { ...lastContext, compaction: result.state };
+				toasts.success('已生成上下文摘要，将在下次请求使用');
+			}
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			compacting = false;
 		}
 	}
 
@@ -391,8 +450,11 @@
 					config={settings.config}
 					context={lastContext.bundle}
 					usage={lastContext.usage}
-					{historyMaxMessages}
-					onHistoryMaxChange={(max) => (historyMaxMessages = max)}
+					compaction={lastContext.compaction}
+					autoCompact={settings.config.autoCompact === true}
+					compactThreshold={settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD}
+					{compacting}
+					onCompactNow={handleCompactNow}
 					{busy}
 					{searchSupported}
 					{searching}

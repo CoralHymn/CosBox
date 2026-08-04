@@ -106,4 +106,12 @@ describe('normalizeLlmConfig', () => {
 		expect(result.modelContextWindow).toBe(65_536);
 		expect(normalizeLlmConfig({}).modelContextWindow).toBeUndefined();
 	});
+
+	it('保留 autoCompact 与 compactThreshold，缺省回退默认', () => {
+		const result = normalizeLlmConfig({ autoCompact: false, compactThreshold: 0.6 });
+		expect(result.autoCompact).toBe(false);
+		expect(result.compactThreshold).toBe(0.6);
+		expect(normalizeLlmConfig({}).autoCompact).toBe(true);
+		expect(normalizeLlmConfig({}).compactThreshold).toBe(0.8);
+	});
 });

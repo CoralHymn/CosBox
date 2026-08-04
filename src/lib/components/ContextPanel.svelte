@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ContextBundle } from '../context/pipeline';
+	import type { CompactionState } from '../llm/compaction';
 	import {
 		estimateCost,
 		estimateMessagesTokens,
@@ -14,12 +15,27 @@
 		context: ContextBundle | null;
 		/** 最近一次请求的 token 用量（API 返回或本地估算）。 */
 		usage: TokenUsage | null;
-		/** 发送给模型的历史消息条数上限（压缩开关）。 */
-		historyMaxMessages: number;
-		onHistoryMaxChange: (max: number) => void;
+		/** 最近一次请求使用的压缩状态；null = 未压缩。 */
+		compaction: CompactionState | null;
+		/** 自动压缩开关（只读展示，配置在设置页）。 */
+		autoCompact: boolean;
+		/** 压缩触发阈值（只读展示）。 */
+		compactThreshold: number;
+		/** 正在执行手动压缩。 */
+		compacting: boolean;
+		onCompactNow: () => void;
 	}
 
-	let { config, context, usage, historyMaxMessages, onHistoryMaxChange }: Props = $props();
+	let {
+		config,
+		context,
+		usage,
+		compaction,
+		autoCompact,
+		compactThreshold,
+		compacting,
+		onCompactNow
+	}: Props = $props();
 
 	/** 实际发送给模型的完整消息数组（系统消息 + 处理后的历史）。 */
 	const sentMessages = $derived(
@@ -52,6 +68,21 @@
 	const barClass = $derived(
 		percent === null ? '' : percent >= 90 ? 'err' : percent >= 70 ? 'warn' : ''
 	);
+	/** 摘要之外原样保留的最近消息数（从上次请求的历史中数出）。 */
+	const keptRecent = $derived(
+		context === null
+			? 0
+			: context.history.filter((message) => message.id !== 'context-summary').length
+	);
+	const statusText = $derived.by(() => {
+		if (compaction !== null) {
+			return `已压缩：早期对话已总结为摘要，最近 ${keptRecent} 条完整保留。`;
+		}
+		if (autoCompact === false) {
+			return '已关闭自动压缩：完整发送全部历史。';
+		}
+		return `未达触发阈值（${Math.round(compactThreshold * 100)}%），完整发送全部历史。`;
+	});
 </script>
 
 <div class="context-panel">
@@ -82,26 +113,18 @@
 			模型 {config.model} · 窗口 {contextWindow === null ? '未知' : contextWindow.toLocaleString()}
 		</p>
 		<div class="ctx-compress">
-			<label for="ctx-history-max">发送给模型的历史消息数</label>
-			<select
-				id="ctx-history-max"
-				class="select"
-				value={historyMaxMessages}
-				onchange={(event) =>
-					onHistoryMaxChange(Number((event.currentTarget as HTMLSelectElement).value))}
+			<p class="muted" style="margin: 0;">{statusText}</p>
+			<button
+				class="btn btn-small"
+				onclick={onCompactNow}
+				disabled={compacting || context === null}
 			>
-				<option value={5}>5 条（激进压缩）</option>
-				<option value={10}>10 条（压缩）</option>
-				<option value={20}>20 条（完整）</option>
-			</select>
-			{#if context.compressedCount > 0}
-				<p class="muted" style="margin: 6px 0 0;">
-					上次请求已省略 {context.compressedCount} 条早期消息。
-				</p>
-			{/if}
+				{compacting ? '压缩中…' : '立即压缩'}
+			</button>
 		</div>
 		<p class="muted" style="margin: 8px 0 0;">
-			压缩只影响发送给 AI 的上下文，聊天记录与快照不受影响。
+			压缩由模型生成延续摘要（保留角色关系、关键事件等细节），只影响发送给 AI 的内容，
+			聊天记录与快照不受影响。
 		</p>
 	{/if}
 </div>

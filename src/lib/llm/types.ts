@@ -1,5 +1,6 @@
 import type { MessageRole } from '../core/types';
 import { DEFAULT_WEB_SEARCH_CONFIG, type WebSearchConfig } from '../search/types';
+import { DEFAULT_COMPACT_THRESHOLD } from './compaction';
 
 /** LLM 服务配置（demo = 内置离线演示，openai-compatible = 任意兼容端点）。 */
 export interface LlmConfig {
@@ -14,6 +15,10 @@ export interface LlmConfig {
 	maxTokens: number;
 	/** 模型上下文窗口（token）；来自「获取模型列表」或手动填写，未知时不填。 */
 	modelContextWindow?: number;
+	/** 自动上下文压缩：接近上下文上限时把早期对话总结成摘要（缺省视为开启）。 */
+	autoCompact?: boolean;
+	/** 压缩触发阈值：估计用量（含输出预算）占上下文窗口的比例（缺省 0.8）。 */
+	compactThreshold?: number;
 	/** 是否允许 AI 在对话中调用状态工具（改地点/时间/穿着/属性）。缺省视为关闭。 */
 	allowAiStateTools?: boolean;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
@@ -50,6 +55,14 @@ export interface TokenUsage {
 	cachedTokens: number;
 }
 
+/** 上下文压缩（摘要）的结果。 */
+export interface LlmSummaryResult {
+	/** 生成的延续摘要文本。 */
+	summary: string;
+	/** 摘要请求的 token 用量（端点提供时）。 */
+	usage?: TokenUsage;
+}
+
 /** 一次带工具能力的对话结果。 */
 export interface LlmChatResult {
 	/** 最终文本；若本轮全部是工具调用则为 null。 */
@@ -62,6 +75,12 @@ export interface LlmChatResult {
 /** 统一的 LLM 客户端接口。chatWithTools 可选：客户端不支持工具时退化为纯文本对话。 */
 export interface LlmClient {
 	chat(messages: ChatMessage[], config: LlmConfig, signal?: AbortSignal): Promise<LlmChatResult>;
+	/** 上下文压缩用的延续摘要；不实现时由 ChatService 用 chat 兜底。 */
+	summarize?(
+		request: ChatMessage[],
+		config: LlmConfig,
+		signal?: AbortSignal
+	): Promise<LlmSummaryResult>;
 	chatWithTools?(
 		messages: ChatMessage[],
 		tools: readonly StateToolSchema[],
@@ -79,6 +98,8 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	model: 'gpt-4o-mini',
 	temperature: 0.8,
 	maxTokens: 1024,
+	autoCompact: true,
+	compactThreshold: DEFAULT_COMPACT_THRESHOLD,
 	allowAiStateTools: false,
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };

@@ -370,3 +370,49 @@ estimateMessagesTokens`、`sumUsage`、`findModelInfo`（上下文窗口 + 三�
 
 - 单元测试：全量 348 个；覆盖率 100% 语句/行/函数（分支 95.05%）；17 条 e2e 全过；
   build/check/lint 全绿。
+
+## 2026-08-05（续）：上下文压缩改为阈值 + LLM 摘要；提示词查看改为大弹窗
+
+### 需求反馈
+
+1. 开发者选项里「完整提示词」展开框太小，不利于调试。
+2. 「发送给模型的历史消息数」不是现代 agent 的上下文管理方式——按条数截断会损失大部分
+   对话细节；要求调研 Chatbox / opencode 等开源软件的做法并重构。
+
+### 调研结论
+
+- opencode（`session/compaction.ts`）：按模型可用输入窗口估算用量，自动压缩开启且达到阈值时，
+  用 LLM 生成「延续导向」摘要（goal / instructions / discoveries / accomplished work /
+  relevant files）后继续；另有轻量级 tool 结果清理。
+- Chatbox（`context-management/compaction.ts` + `summary-generator.ts`）：`needsCompaction`
+  在估算 token 超过上下文窗口阈值（默认 80%）时触发，用模型生成摘要并作为特殊 `isSummary`
+  消息前置；`CompactionPoint` 标记边界，边界前的消息从发送上下文中剔除、最近消息保留；
+  系统提示始终钉在开头。
+- 结论：现代做法 = 阈值触发 + 摘要（保留最近消息），而不是按条数截断。
+
+### 实现
+
+**上下文压缩重构（`llm/compaction.ts` + `ChatService`）**
+
+- `shouldCompact`：估算用量（含输出预算）≥ 阈值 × 上下文窗口时触发；窗口未知不触发。
+- `buildSummaryRequest`：延续摘要系统提示 +（可选）已有摘要 + 待压缩消息序列化；
+  摘要由 `LlmClient.summarize` 生成（OpenAI 客户端走普通对话、demo 返回确定性摘要），
+  失败（非取消）回退 `fallbackSummary`，对话不中断。
+- `CompactionState { summary, boundaryId }` 跨请求延续：只总结边界后的新消息并合并旧摘要；
+  checkout 后边界失效则从当前分支重新开始。
+- 发送历史 = `【上下文摘要】系统消息 + 最近 20 条`；`session.conversation` 与快照链始终完整。
+- 侧栏「上下文用量」改为显示压缩状态 + 「立即压缩」按钮（手动压缩无论阈值都会执行）；
+  设置页新增「上下文压缩」卡片：自动压缩开关 + 触发阈值滑杆（50%–95%，默认 80%），
+  持久化到 `LlmConfig.autoCompact / compactThreshold`。
+- `LlmClient.chat` 行为调整：未压缩时完整发送全部历史（不再默认截断 20 条）。
+
+**提示词大弹窗**
+
+- `ChatPanel` 的 `<details>` 改为「开发者：查看最近一次完整提示词」按钮 + 全屏遮罩弹窗
+  （约 88vh 高、`pre-wrap` 换行、滚动），含「复制全部」（`serializeDebugPrompt`）与
+  Esc / 遮罩 / 按钮关闭；不再挤压聊天主区。
+
+### 门禁
+
+- 单元测试：全量 381 个；覆盖率 100% 语句/行/函数（分支 94.54%，compaction / model-info /
+  model-service 三模块 100% 分支）；17 条 e2e 全过；build/check/lint 全绿。

@@ -5,6 +5,7 @@ import type {
 	LlmChatResult,
 	LlmClient,
 	LlmConfig,
+	LlmSummaryResult,
 	StateToolSchema,
 	ToolCall,
 	TokenUsage
@@ -24,6 +25,24 @@ export class DemoLlmClient implements LlmClient {
 		await delay(250, signal);
 		const content = buildDemoReply(messages);
 		return { content, toolCalls: [], usage: demoUsage(messages, content) };
+	}
+
+	/** 演示摘要：确定性文本，保证离线与 e2e 可断言。 */
+	async summarize(
+		request: ChatMessage[],
+		_config: LlmConfig,
+		signal?: AbortSignal
+	): Promise<LlmSummaryResult> {
+		await delay(250, signal);
+		const summary = buildDemoSummary(request);
+		return {
+			summary,
+			usage: {
+				promptTokens: estimateMessagesTokens(request),
+				completionTokens: estimateTokens(summary),
+				cachedTokens: 0
+			}
+		};
 	}
 
 	/**
@@ -67,6 +86,24 @@ function demoUsage(messages: ChatMessage[], content: string | null): TokenUsage 
 		completionTokens: content === null ? 0 : estimateTokens(content),
 		cachedTokens: 0
 	};
+}
+
+/**
+ * 生成确定性的演示摘要：统计请求里序列化的消息条数，并引用最近的用户消息。
+ * 只用于离线演示，真实端点的摘要由模型生成。
+ */
+export function buildDemoSummary(messages: ChatMessage[]): string {
+	const userContent =
+		[...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+	const counted = userContent.match(/\[(user|assistant|system)\]/g)?.length ?? 0;
+	const lastUserLine = [...userContent.split('\n')]
+		.reverse()
+		.find((line) => line.startsWith('[user] '));
+	const tail =
+		lastUserLine === undefined
+			? '继续角色扮演即可'
+			: `最近提到「${truncate(lastUserLine.replace('[user] ', ''), 24)}」`;
+	return `（演示摘要）已将早前 ${counted} 条消息总结，${tail}。`;
 }
 
 /** 根据用户文本选择确定性的演示工具调用（仅当该工具在列表中）。 */

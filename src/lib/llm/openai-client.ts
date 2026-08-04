@@ -4,6 +4,7 @@ import type {
 	LlmChatResult,
 	LlmClient,
 	LlmConfig,
+	LlmSummaryResult,
 	StateToolSchema,
 	ToolCall,
 	TokenUsage
@@ -21,6 +22,16 @@ export class OpenAiCompatibleClient implements LlmClient {
 		signal?: AbortSignal
 	): Promise<LlmChatResult> {
 		return this.chatWithTools(messages, [], config, signal);
+	}
+
+	/** 上下文压缩摘要：把摘要请求当普通对话发送，取最终文本。 */
+	async summarize(
+		request: ChatMessage[],
+		config: LlmConfig,
+		signal?: AbortSignal
+	): Promise<LlmSummaryResult> {
+		const result = await this.chat(request, config, signal);
+		return { summary: result.content ?? '', usage: result.usage };
 	}
 
 	/**
