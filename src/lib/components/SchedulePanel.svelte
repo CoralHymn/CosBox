@@ -1,15 +1,16 @@
 <script lang="ts">
 	import { DAY_NAMES, formatMinutesOfDay, formatWorldTime } from '../core/state';
-	import type { ScheduleEntry, ScheduleState, StatePatch } from '../core/types';
+	import type { ConfigPatch, ScheduleEntry, ScheduleState } from '../core/types';
 	import { newId } from '../utils/id';
 
 	interface Props {
 		schedule: ScheduleState;
-		onUpdate: (patch: StatePatch, desc: string) => void;
 		onAdvance: (minutes: number) => void;
+		/** 日程条目属于世界配置：编辑不生成快照、不进版本历史。 */
+		onConfig: (patch: ConfigPatch) => void;
 	}
 
-	let { schedule, onUpdate, onAdvance }: Props = $props();
+	let { schedule, onAdvance, onConfig }: Props = $props();
 
 	let draftTitle = $state('');
 	let draftDay = $state(0);
@@ -40,28 +41,22 @@
 			title,
 			...(draftLocation.trim() !== '' ? { locationId: draftLocation.trim() } : {})
 		};
-		onUpdate({ schedule: { entries: [...schedule.entries, entry] } }, '新增日程条目');
+		onConfig({ scheduleEntries: [...schedule.entries, entry] });
 		draftTitle = '';
 	}
 
 	function updateEntry(id: string, patch: Partial<ScheduleEntry>): void {
-		onUpdate(
+		onConfig(
 			{
-				schedule: {
-					entries: schedule.entries.map((entry) =>
-						entry.id === id ? { ...entry, ...patch } : entry
-					)
-				}
-			},
-			'更新日程条目'
+				scheduleEntries: schedule.entries.map((entry) =>
+					entry.id === id ? { ...entry, ...patch } : entry
+				)
+			}
 		);
 	}
 
 	function removeEntry(id: string): void {
-		onUpdate(
-			{ schedule: { entries: schedule.entries.filter((entry) => entry.id !== id) } },
-			'删除日程条目'
-		);
+		onConfig({ scheduleEntries: schedule.entries.filter((entry) => entry.id !== id) });
 	}
 </script>
 

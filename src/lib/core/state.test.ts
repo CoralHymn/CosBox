@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { StateValidationError } from './errors';
 import {
 	addMinutes,
+	applyConfigOverrides,
 	applyStateDelta,
 	createInitialScheduleEntries,
 	createInitialState,
@@ -536,5 +537,41 @@ describe('时间格式化与日程查询', () => {
 		};
 		expect(describeCurrentActivity(schedule)).toContain('晨会');
 		expect(describeCurrentActivity({ ...schedule, entries: [] })).toBe('自由活动');
+	});
+});
+
+describe('applyConfigOverrides', () => {
+	it('叠加三个配置段：地点库/衣柜/日程条目整体替换', () => {
+		const state = createInitialState();
+		const overrides = {
+			places: [{ id: 'sea', category: '校外', name: '海边', description: '浪很大' }],
+			wardrobe: [{ id: 'w1', category: '常服', kind: 'top' as const, name: '红色风衣', description: '修身款' }],
+			scheduleEntries: [{ id: 's1', day: 1, start: 540, end: 600, title: '游泳课' }]
+		};
+		const next = applyConfigOverrides(state, overrides);
+		expect(next.places).toEqual(overrides.places);
+		expect(next.outfit.wardrobe).toEqual(overrides.wardrobe);
+		expect(next.schedule.entries).toEqual(overrides.scheduleEntries);
+		// 剧情状态不受影响
+		expect(next.location.name).toBe(state.location.name);
+		expect(next.outfit.top).toBe(state.outfit.top);
+		expect(next.schedule.time).toEqual(state.schedule.time);
+		expect(next).not.toBe(state);
+	});
+
+	it('空覆盖不改变状态', () => {
+		const state = createInitialState();
+		const next = applyConfigOverrides(state, {});
+		expect(next).toEqual(state);
+	});
+
+	it('非法配置抛错且不产生部分结果', () => {
+		const state = createInitialState();
+		expect(() =>
+			applyConfigOverrides(state, {
+				scheduleEntries: [{ id: 'bad', day: 9, start: 0, end: 10, title: 'x' }]
+			})
+		).toThrow(StateValidationError);
+		expect(state.schedule.entries.length).toBe(3);
 	});
 });

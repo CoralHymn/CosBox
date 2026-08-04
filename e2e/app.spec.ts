@@ -61,7 +61,8 @@ test('版本页切换回退状态与对话', async ({ page }) => {
 	await expect(page.getByText('更新穿着').first()).toBeVisible();
 	await expect(page.getByText('分支列表').first()).toBeVisible();
 
-	// 切换回根快照（第一个「切换」按钮即根节点）
+	// 分支默认收起：先展开，再切换回根快照（第一个「切换」按钮即根节点）
+	await page.getByRole('button', { name: '展开' }).first().click();
 	await page.getByRole('button', { name: '切换' }).first().click();
 	await page.getByRole('button', { name: /对话/ }).click();
 	await expect(page.getByText('白色衬衫').first()).toBeVisible();
@@ -78,6 +79,7 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 
 	// 切回根，再开分支 B：中午好
 	await page.getByRole('button', { name: /版本/ }).click();
+	await page.getByRole('button', { name: '展开' }).first().click();
 	await page.getByRole('button', { name: '切换' }).first().click();
 	await page.getByRole('button', { name: /对话/ }).click();
 	await page.getByPlaceholder(/输入消息/).fill('中午好');
@@ -142,21 +144,45 @@ test('日程：时间推进自动生成快照', async ({ page }) => {
 	await expect(page.getByRole('banner').getByText('周一 08:15')).toBeVisible();
 });
 
-test('日程：修改条目星期与新增条目不报 structuredClone 错误', async ({ page }) => {
+test('日程：条目编辑属于配置，不生成版本快照', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /日程/ }).click();
 
-	// 修改第一条的星期：状态更新并生成快照
+	// 修改第一条的星期：状态更新但不生成快照
 	await page.locator('.list-row select').first().selectOption('1');
 	await expect(page.locator('.list-row select').first()).toHaveValue('1');
-	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/2 快照/);
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
 
-	// 新增条目
+	// 新增条目：行出现但快照数不变
 	await page.locator('#entry-title').fill('晚自习');
 	await page.locator('#entry-start').fill('19:00');
 	await page.locator('#entry-end').fill('20:30');
 	await page.getByRole('button', { name: '添加条目' }).click();
 	await expect(page.locator('.list-row')).toHaveCount(4);
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+});
+
+test('地点库与衣柜的维护编辑不生成版本快照', async ({ page }) => {
+	await page.goto('/');
+
+	// 地点：添加地点是配置编辑，不生成快照；设为当前所在地才是剧情状态
+	await page.getByRole('button', { name: /地点/ }).click();
+	await page.locator('#new-place-category').fill('校外');
+	await page.locator('#new-place-name').fill('海边');
+	await page.locator('#new-place-desc').fill('涨潮');
+	await page.getByRole('button', { name: '添加地点' }).click();
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+	await page.locator('#current-place').selectOption({ label: '校外 > 海边' });
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/2 快照/);
+
+	// 衣柜：添加衣物是配置编辑，不生成快照；更换当前穿着才是剧情状态
+	await page.getByRole('button', { name: /衣柜/ }).click();
+	await page.locator('#new-item-category').fill('常服');
+	await page.locator('#new-item-name').fill('红色风衣');
+	await page.locator('#new-item-desc').fill('修身款');
+	await page.getByRole('button', { name: '添加衣物' }).click();
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/2 快照/);
+	await page.locator('#wardrobe-top').selectOption('红色风衣');
 	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/3 快照/);
 });
 
@@ -184,6 +210,38 @@ test('设置页选择主流服务商预设自动填充地址与模型', async ({
 
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
+});
+
+test('设置：角色档案默认显示、保存不回清、回到默认、开发者模式', async ({ page }) => {
+	await page.goto('/');
+
+	// 未启用网络搜索时，对话页不显示搜索按钮
+	await expect(page.getByRole('button', { name: '网络搜索' })).toHaveCount(0);
+
+	await page.getByRole('button', { name: /设置/ }).click();
+	// 角色档案默认显示内置角色与提示词模板
+	await expect(page.locator('#profile-name')).toHaveValue('绫音');
+	await expect(page.locator('#profile-prompt')).not.toHaveValue('');
+
+	// 输入并保存后文本框不回清
+	await page.locator('#profile-name').fill('测试角色');
+	await page.locator('#profile-prompt').fill('你是测试角色');
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await expect(page.locator('#profile-name')).toHaveValue('测试角色');
+	await expect(page.locator('#profile-prompt')).toHaveValue('你是测试角色');
+
+	// 回到默认仅重置角色档案
+	await page.getByRole('button', { name: '回到默认' }).click();
+	await expect(page.locator('#profile-name')).toHaveValue('绫音');
+
+	// 开发者模式：开启后对话页可展开查看完整提示词
+	await page.locator('#dev-mode-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await page.getByText(/最近一次发送给 AI 的完整提示词/).click();
+	await expect(page.getByText('【当前状态】').first()).toBeVisible();
 });
 
 test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {

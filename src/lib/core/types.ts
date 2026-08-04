@@ -129,6 +129,23 @@ export interface StatePatch {
 	attributes?: Partial<CharacterAttributes>;
 }
 
+/**
+ * 世界配置覆盖：地点库 / 衣柜 / 日程条目的维护编辑不进入版本历史，
+ * 而是单独持久化并在重建状态后叠加（剧情状态仍走快照链）。
+ */
+export interface ConfigOverrides {
+	places?: LocationDef[];
+	wardrobe?: ClothingItem[];
+	scheduleEntries?: ScheduleEntry[];
+}
+
+/** 配置补丁：仅允许地点库 / 衣柜 / 日程条目三个字段。 */
+export type ConfigPatch = {
+	places?: LocationDef[];
+	wardrobe?: ClothingItem[];
+	scheduleEntries?: ScheduleEntry[];
+};
+
 /** 消息角色。 */
 export type MessageRole = 'user' | 'assistant' | 'system';
 

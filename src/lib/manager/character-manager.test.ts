@@ -426,4 +426,89 @@ describe('CharacterManager', () => {
 		expect(manager.getBranches()[0]!.tipId).not.toBe(branchAHead);
 		expect(await snapshots.count()).toBe(4);
 	});
+
+	it('now 在同一毫秒内仍然单调递增（分支排序稳定）', async () => {
+		const manager = new CharacterManager({ snapshots, kv, now: () => 1000 });
+		await manager.init();
+		await manager.update({ attributes: { step: 1 } }, { desc: 's1' });
+		await manager.update({ attributes: { step: 2 } }, { desc: 's2' });
+		const nodes = await snapshots.getAll();
+		expect(nodes.map((node) => node.timestamp).sort((a, b) => a - b)).toEqual([1000, 1001, 1002]);
+	});
+
+	it('applyConfig 更新状态并持久化，但不生成快照、不推进 head', async () => {
+		const manager = createManager();
+		await manager.init();
+		const head = manager.getHeadId()!;
+		await manager.applyConfig({
+			places: [{ id: 'sea', category: '校外', name: '海边', description: '浪很大' }],
+			wardrobe: [
+				{ id: 'w1', category: '常服', kind: 'top', name: '红色风衣', description: '修身款' }
+			],
+			scheduleEntries: [{ id: 's1', day: 0, start: 600, end: 660, title: '自习' }]
+		});
+		expect(manager.getState().places.map((place) => place.name)).toEqual(['海边']);
+		expect(manager.getState().outfit.wardrobe.map((item) => item.name)).toEqual(['红色风衣']);
+		expect(manager.getState().schedule.entries.map((entry) => entry.title)).toEqual(['自习']);
+		expect(manager.getHeadId()).toBe(head);
+		expect(await snapshots.count()).toBe(1);
+		const saved = await kv.get('config.overrides');
+		expect(saved).toEqual({
+			places: [{ id: 'sea', category: '校外', name: '海边', description: '浪很大' }],
+			wardrobe: [
+				{ id: 'w1', category: '常服', kind: 'top', name: '红色风衣', description: '修身款' }
+			],
+			scheduleEntries: [{ id: 's1', day: 0, start: 600, end: 660, title: '自习' }]
+		});
+	});
+
+	it('checkout 重建后叠加世界配置覆盖，剧情状态仍回退', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await manager.applyConfig({
+			places: [{ id: 'lake', category: '校外', name: '湖边', description: '' }]
+		});
+		await manager.update({ outfit: { top: '故事里的外套' } }, { desc: '换装' });
+		await manager.checkout(root);
+		expect(manager.getState().outfit.top).toBe(createInitialState().outfit.top);
+		expect(manager.getState().places.map((place) => place.name)).toEqual(['湖边']);
+	});
+
+	it('applyConfig 非法配置抛错且不落 kv、不改状态', async () => {
+		const manager = createManager();
+		await manager.init();
+		await expect(
+			manager.applyConfig({
+				scheduleEntries: [{ id: 'bad', day: 9, start: 0, end: 10, title: 'x' }]
+			})
+		).rejects.toThrow(StateValidationError);
+		expect(await kv.get('config.overrides')).toBeUndefined();
+		expect(manager.getState().schedule.entries).toHaveLength(3);
+	});
+
+	it('applyConfig 的覆盖在重新初始化后仍生效', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.applyConfig({
+			places: [{ id: 'park', category: '校外', name: '公园', description: '' }]
+		});
+		const manager2 = createManager();
+		await manager2.init();
+		expect(manager2.getState().places.map((place) => place.name)).toEqual(['公园']);
+	});
+
+	it('applyConfig 与其他变更按入队顺序串行落地', async () => {
+		const manager = createManager();
+		await manager.init();
+		await Promise.all([
+			manager.applyConfig({
+				places: [{ id: 'a', category: '', name: '地点A', description: '' }]
+			}),
+			manager.update({ outfit: { top: '外套' } }, { desc: '换装' })
+		]);
+		expect(manager.getState().places[0]!.name).toBe('地点A');
+		expect(manager.getState().outfit.top).toBe('外套');
+		expect(await snapshots.count()).toBe(2);
+	});
 });

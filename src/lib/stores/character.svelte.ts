@@ -2,6 +2,7 @@ import type {
 	BranchSummary,
 	CharacterState,
 	ChatMessageView,
+	ConfigPatch,
 	MessageRole,
 	SnapshotNode,
 	StatePatch
@@ -21,6 +22,8 @@ export interface CharacterSessionStore {
 	advanceTime: (minutes: number) => Promise<SnapshotNode>;
 	addCheckpoint: (desc: string) => Promise<SnapshotNode>;
 	deleteBranch: (tipId: string) => Promise<number>;
+	/** 世界配置覆盖（地点库/衣柜/日程条目）：不生成快照、不进版本历史。 */
+	applyConfig: (patch: ConfigPatch) => Promise<void>;
 }
 
 /**
@@ -63,6 +66,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 		checkout: (targetId) => manager.checkout(targetId),
 		advanceTime: (minutes) => manager.advanceTime(minutes),
 		addCheckpoint: (desc) => manager.addCheckpoint(desc),
-		deleteBranch: (tipId) => manager.deleteBranch(tipId)
+		deleteBranch: (tipId) => manager.deleteBranch(tipId),
+		applyConfig: (patch) => manager.applyConfig(patch)
 	};
 }

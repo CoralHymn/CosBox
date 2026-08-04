@@ -125,17 +125,19 @@
 		onblur={() => {
 			dismissed = true;
 		}}></textarea>
-	<button
-		class="btn"
-		class:active={search}
-		title={searchSupported ? '发送时附带网络搜索' : '需在设置中启用并配置搜索 API Key'}
-		onclick={toggleSearch}
-		disabled={!searchSupported || searching}
-		aria-pressed={search}
-		aria-label="网络搜索"
-	>
-		{searching ? '…' : '🔍'}
-	</button>
+	{#if searchSupported}
+		<button
+			class="btn"
+			class:active={search}
+			title="发送时附带网络搜索"
+			onclick={toggleSearch}
+			disabled={searching}
+			aria-pressed={search}
+			aria-label="网络搜索"
+		>
+			{searching ? '…' : '🔍'}
+		</button>
+	{/if}
 	<button class="btn btn-primary" onclick={submit} disabled={disabled || text.trim() === ''}
 		>发送</button
 	>

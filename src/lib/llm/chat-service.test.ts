@@ -73,7 +73,7 @@ describe('ChatService', () => {
 			conversation: [{ id: '1', role: 'user', content: '我们去食堂吧', timestamp: 1 }],
 			worldInfo: []
 		};
-		const { reply, executedTools, bundle } = await service.generateReply(input, config, {
+		const { reply, executedTools, bundle, debug } = await service.generateReply(input, config, {
 			tools: [...STATE_TOOLS],
 			toolContext: ctx
 		});
@@ -83,6 +83,8 @@ describe('ChatService', () => {
 		expect(executedTools[0]!.output).toContain('已切换地点');
 		expect(ctx.getState().location.name).toBe('食堂');
 		expect(bundle.stateSummary).toContain('食堂');
+		expect(debug.systemMessage).toContain('食堂');
+		expect(debug.messages.some((message) => message.role === 'tool')).toBe(true);
 
 		const calls = vi.mocked(client.chatWithTools!).mock.calls;
 		expect(calls).toHaveLength(2);
@@ -177,6 +179,24 @@ describe('ChatService', () => {
 		);
 		expect(reply).toBe('');
 		expect(executedTools).toEqual([]);
+	});
+
+	it('返回 debug 提示词视图：系统消息与消息数组', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => '回复')
+		};
+		const service = new ChatService(client);
+		const { debug } = await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }],
+				worldInfo: []
+			},
+			config
+		);
+		expect(debug.systemMessage).toContain('【当前状态】');
+		expect(debug.messages[0]!.content).toBe(debug.systemMessage);
+		expect(debug.messages.map((message) => message.role)).toEqual(['system', 'user']);
 	});
 });
 
