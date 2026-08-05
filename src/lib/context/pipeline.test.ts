@@ -237,6 +237,24 @@ describe('buildContext', () => {
 		expect(bundle.messages[0]!.worldTime).toEqual({ day: 0, hour: 9, minute: 0 });
 	});
 
+	it('assistant 消息的思考原样回传为 reasoning（DeepSeek V4 多轮兼容）', () => {
+		const conversation: ChatMessageView[] = [
+			{
+				id: '1',
+				role: 'assistant',
+				content: '回答',
+				timestamp: 1,
+				thinking: '上一轮思考'
+			}
+		];
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: []
+		});
+		expect(bundle.messages[0]!.reasoning).toBe('上一轮思考');
+	});
+
 	it('工具执行反馈为空时不注入', () => {
 		const bundle = buildContext({
 			state: createInitialState(),

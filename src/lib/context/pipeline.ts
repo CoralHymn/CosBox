@@ -119,7 +119,12 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
 		role: message.role,
 		content: message.content,
-		...(message.worldTime !== undefined ? { worldTime: message.worldTime } : {})
+		...(message.worldTime !== undefined ? { worldTime: message.worldTime } : {}),
+		// DeepSeek V4 思考模式要求历史中的 assistant 消息尽量带 reasoning_content
+		// （部分部署对缺失字段会续答异常）；把落库的思考原样回传，非 DeepSeek 端点忽略。
+		...(message.role === 'assistant' && message.thinking !== undefined
+			? { reasoning: message.thinking }
+			: {})
 	}));
 
 	return {

@@ -109,8 +109,9 @@ describe('ChatService', () => {
 			.fn()
 			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '第一次思考' })
 			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '第二次思考' });
+		const chat = vi.fn(async () => ({ content: null, toolCalls: [], thinking: '纯文本也思考' }));
 		const client: LlmClient = {
-			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chat,
 			chatWithTools
 		};
 		const service = new ChatService(client);
@@ -122,6 +123,25 @@ describe('ChatService', () => {
 		expect(reply).toBe('');
 		expect(thinking).toBe('第一次思考');
 		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		expect(chat).toHaveBeenCalledTimes(1);
+	});
+
+	it('工具路径：带工具重试失败后，去掉工具声明重试成功并采用正文', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '工具轮思考' })
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '重试仍思考' });
+		const chat = vi.fn(async () => ({ content: '纯文本兜底回复', toolCalls: [] }));
+		const client: LlmClient = { chat, chatWithTools };
+		const service = new ChatService(client);
+		const { reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('纯文本兜底回复');
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		expect(chat).toHaveBeenCalledTimes(1);
 	});
 
 	it('纯文本路径：只思考无正文时自动重试', async () => {
