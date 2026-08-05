@@ -283,7 +283,18 @@ describe('AI 生成演示路径', () => {
 			demoGeneratedItems('locations', '【世界观：奇幻】').some((item) => item.name === '炼金室')
 		).toBe(true);
 		expect(
-			demoGeneratedItems('locations', '【世界观：现代】').some((item) => item.name === '便利店')
+			demoGeneratedItems('locations', '【世界观：现代】').some((item) => item.name === '中央商店街')
+		).toBe(true);
+		// 大类是区域：奶茶店/咖啡店并入商业街，沙滩/温泉馆并入郊外，博物馆并入市中心
+		const modern = demoGeneratedItems('locations', '【世界观：现代】');
+		expect(modern.filter((item) => item.category === '商业街').length).toBeGreaterThanOrEqual(2);
+		expect(
+			modern.filter((item) => item.category === '郊外').some((item) => item.name === '银沙海滨浴场')
+		).toBe(true);
+		expect(
+			modern
+				.filter((item) => item.category === '市中心')
+				.some((item) => item.name === '城市历史博物馆')
 		).toBe(true);
 	});
 

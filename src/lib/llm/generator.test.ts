@@ -26,6 +26,10 @@ describe('buildGenerationSystemPrompt', () => {
 		expect(prompt).toContain('禁止任何现代科技或现代建筑');
 		expect(prompt).toContain('review_generation');
 		expect(prompt).toContain('【用户要求】学园');
+		// 大类按区域规划：小店铺合并进商业街，公共设施归入市中心/郊外
+		expect(prompt).toContain('区域/地段');
+		expect(prompt).toContain('商业街');
+		expect(prompt).toContain('郊外');
 	});
 
 	it('衣柜：性别约束随请求注入', () => {
@@ -160,6 +164,32 @@ describe('parseGeneratedItems / reviewGeneratedItems', () => {
 		];
 		const issues = reviewGeneratedItems('locations', items, 'modern');
 		expect(issues.some((issue) => issue.includes('名称重复'))).toBe(true);
+	});
+
+	it('审查：场所类型被当作大类时提示合并进区域', () => {
+		const issues = reviewGeneratedItems(
+			'locations',
+			[
+				{ id: 'a', category: '奶茶店', name: 'XX奶茶', description: 'x' },
+				{ id: 'b', category: '咖啡厅', name: '云朵咖啡屋', description: 'x' }
+			],
+			'modern'
+		);
+		expect(issues.some((issue) => issue.includes('场所类型'))).toBe(true);
+		expect(issues.some((issue) => issue.includes('商业街'))).toBe(true);
+	});
+
+	it('审查：区域式大类（商业街/市中心/郊外）不提示', () => {
+		const issues = reviewGeneratedItems(
+			'locations',
+			[
+				{ id: 'a', category: '商业街', name: '中央商店街', description: 'x' },
+				{ id: 'b', category: '郊外', name: '银沙海滨浴场', description: 'x' },
+				{ id: 'c', category: '市中心', name: '城市历史博物馆', description: 'x' }
+			],
+			'modern'
+		);
+		expect(issues).toEqual([]);
 	});
 
 	it('现代世界观无禁词', () => {
