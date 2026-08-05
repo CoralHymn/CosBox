@@ -633,6 +633,10 @@ test('地点库支持拖拽排序', async ({ page }) => {
 		.locator('div.group')
 		.filter({ has: page.locator('.group-name', { hasText: '学校' }) });
 	const rows = schoolGroup.locator('.list-row');
+	// 默认不可拖拽，开启「编辑排序」后可拖
+	await expect(rows.first()).toHaveAttribute('draggable', 'false');
+	await page.getByRole('button', { name: '编辑排序' }).click();
+	await expect(rows.first()).toHaveAttribute('draggable', 'true');
 	await expect(rows.locator('input[placeholder="地点名"]').first()).toHaveValue('学院正门');
 
 	// 把第一项拖到第三项 → 教室 2-B 移到最前
@@ -649,6 +653,9 @@ test('衣柜支持拖拽排序', async ({ page }) => {
 		.locator('div.group')
 		.filter({ has: page.locator('.group-name', { hasText: '常服' }) });
 	const rows = casualGroup.locator('.list-row');
+	await expect(rows.first()).toHaveAttribute('draggable', 'false');
+	await page.getByRole('button', { name: '编辑排序' }).click();
+	await expect(rows.first()).toHaveAttribute('draggable', 'true');
 	await expect(rows.locator('input[placeholder="衣物名"]').first()).toHaveValue('白色衬衫');
 
 	// 把第一件拖到第三件 → 深蓝百褶裙移到最前
