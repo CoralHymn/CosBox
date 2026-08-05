@@ -341,6 +341,33 @@ describe('ChatService', () => {
 		expect(reply).toBe('好，我们出发了。');
 	});
 
+	it('agent 循环：正常工具轮（自带 tool_calls）的叙事文本保留在轮次中', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '（微微一笑）我这就换上运动服。',
+				toolCalls: [{ id: 'c1', name: 'set_outfit', arguments: { slot: 'top', item: '黑色卫衣' } }]
+			})
+			.mockResolvedValueOnce({
+				content: '（整理好衣领）嗯，这样就舒服多了。',
+				toolCalls: []
+			});
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { rounds, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(rounds).toHaveLength(1);
+		expect(rounds[0]!.content).toBe('（微微一笑）我这就换上运动服。');
+		expect(rounds[0]!.tools[0]!.name).toBe('set_outfit');
+		expect(reply).toBe('（整理好衣领）嗯，这样就舒服多了。');
+	});
+
 	it('agent 循环：补发调用两档重试仍不调用时保留原正文且不执行工具', async () => {
 		const chatWithTools = vi
 			.fn()
