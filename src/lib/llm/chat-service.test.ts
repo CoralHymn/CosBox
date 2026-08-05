@@ -329,6 +329,98 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(2);
 	});
 
+	it('agent 循环：正文描述时间流逝却没调用时，补发 advance_time 并执行', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '（看向窗外）已经傍晚了。', toolCalls: [] })
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 240 } }]
+			})
+			.mockResolvedValueOnce({ content: '天色暗下来了。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 12, minute: 0 });
+		expect(reply).toBe('天色暗下来了。');
+		expect(chatWithTools).toHaveBeenCalledTimes(3);
+	});
+
+	it('agent 循环：常规补调仍不调用时用 tool_choice=required 强制补调', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '过了两个小时了。', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '好的，我推进一下。', toolCalls: [] })
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 120 } }]
+			})
+			.mockResolvedValueOnce({ content: '两个小时过去了。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 10, minute: 0 });
+		expect(reply).toBe('两个小时过去了。');
+		expect(chatWithTools).toHaveBeenCalledTimes(4);
+		expect(chatWithTools.mock.calls[2]![5]).toEqual({ forceToolCall: true });
+	});
+
+	it('agent 循环：时间流逝措辞的补调全部失败时保留原正文且不执行', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '已经深夜了。', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '嗯。', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '嗯。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(executedTools).toEqual([]);
+		expect(reply).toBe('已经深夜了。');
+		expect(chatWithTools).toHaveBeenCalledTimes(3);
+	});
+
+	it('agent 循环：正文无时间流逝措辞且未调用工具时，直接返回不补调', async () => {
+		const chatWithTools = vi.fn().mockResolvedValueOnce({ content: '嗯嗯。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(executedTools).toEqual([]);
+		expect(reply).toBe('嗯嗯。');
+		expect(chatWithTools).toHaveBeenCalledTimes(1);
+	});
+
 	it('调试视图携带本次实际请求参数', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '好的', toolCalls: [] }))

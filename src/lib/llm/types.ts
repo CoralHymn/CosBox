@@ -105,7 +105,9 @@ export interface LlmClient {
 		tools: readonly StateToolSchema[],
 		config: LlmConfig,
 		signal?: AbortSignal,
-		onDelta?: (delta: string) => void
+		onDelta?: (delta: string) => void,
+		/** 强制模型至少发出一个工具调用（tool_choice=required）；部分端点不支持会报错。 */
+		options?: { forceToolCall?: boolean }
 	): Promise<LlmChatResult>;
 }
 

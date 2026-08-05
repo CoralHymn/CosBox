@@ -96,6 +96,10 @@ const DEFAULT_MAX_TOOL_TURNS = 4;
 const THINKING_ONLY_NUDGE =
 	'【系统提示】你上一轮只输出了思考过程，没有输出正文。请直接输出正文回复，' +
 	'正文必不可少；如果剧情需要调用状态工具，请先正常调用工具，再输出正文。';
+/** 正文描述了时间流逝/推进但未调用 advance_time 时的补调提示。 */
+const TIME_CLAIM_NUDGE =
+	'【系统提示】你的回复描述了时间流逝或推进到具体时刻，但没有调用 advance_time 同步世界时间。' +
+	'请先调用 advance_time（minutes 为具体分钟数），然后再输出正文。';
 
 /**
  * 对话服务：把「状态 + 历史 + 世界信息」组装为上下文，再调用 LLM。
@@ -210,6 +214,20 @@ export class ChatService {
 							if (retried !== null) {
 								result = retried;
 							}
+						}
+					}
+					// 正文直接描述时间流逝/推进（「已经傍晚了」「过了两个小时」）却没调用
+					// advance_time：先提示补调，再尝试 tool_choice=required 强制补调。
+					// 已执行过工具后不再触发，避免把「推进后的状态描述」再次误判为漏调用。
+					if (
+						result.toolCalls.length === 0 &&
+						executedTools.length === 0 &&
+						detectTimeClaim(result.content ?? '')
+					) {
+						const retried = await this.retryTimeClaim(messages, config, options, signal);
+						usage = mergeUsage(usage, retried?.usage);
+						if (retried !== null) {
+							result = retried;
 						}
 					}
 					// 思考型模型偶发「只思考、不输出正文」（finish_reason=stop）：
@@ -500,6 +518,52 @@ export class ChatService {
 			return null;
 		}
 	}
+
+	/**
+	 * 正文描述了时间流逝但未调用 advance_time 时的补调重试：
+	 * 第一档追加「必须调用 advance_time」提示；仍不调用则第二档用
+	 * tool_choice=required 强制模型至少发一个工具调用（端点不支持时自动回退）。
+	 * 只有重试真正发出 tool_calls 才采用，避免采纳“只说不做”的正文。
+	 */
+	private async retryTimeClaim(
+		messages: ReadonlyArray<ChatMessage>,
+		config: LlmConfig,
+		options: GenerateReplyOptions,
+		signal?: AbortSignal
+	): Promise<LlmChatResult | null> {
+		const retryMessages: ChatMessage[] = [
+			...messages,
+			{ role: 'system', content: TIME_CLAIM_NUDGE }
+		];
+		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
+			if (
+				this.client.chatWithTools === undefined ||
+				options.tools === undefined ||
+				options.tools.length === 0 ||
+				options.toolContext === undefined
+			) {
+				return null;
+			}
+			try {
+				return await this.client.chatWithTools(
+					retryMessages,
+					options.tools,
+					config,
+					signal,
+					options.onDelta,
+					{ forceToolCall }
+				);
+			} catch {
+				return null;
+			}
+		};
+		const first = await attempt(false);
+		if (first && first.toolCalls.length > 0) {
+			return first;
+		}
+		const forced = await attempt(true);
+		return forced && forced.toolCalls.length > 0 ? forced : null;
+	}
 }
 
 /** 把最近一次请求序列化为纯文本（供调试复制）。 */
@@ -558,6 +622,30 @@ function detectPlannedTool(thinking: string | undefined): string | null {
 	}
 	return null;
 }
+
+/**
+ * 从 assistant 正文中识别「描述了时间流逝/推进到具体时刻」的措辞
+ * （与 advance_time 强相关）；只匹配具体时间/时长声明，避免把
+ * 「时间过得真快」这类闲聊误判为必须推进时间。
+ */
+function detectTimeClaim(content: string): boolean {
+	return TIME_CLAIM_PATTERNS.some((pattern) => pattern.test(content));
+}
+
+/** 阿拉伯数字或中文数字（两/半 等）。 */
+const CN_NUM = '(?:\\d+|[一二两三四五六七八九十半]+)';
+
+const TIME_CLAIM_PATTERNS: readonly RegExp[] = [
+	/过了一段时间|过了一会儿|过了(?:很久|好久|许久|一阵子)/,
+	/已经(?:是)?(?:下午|傍晚|晚上|入夜|深夜|凌晨|中午|黄昏|天黑)/,
+	/天(?:色)?(?:已经|已)?(?:黑|暗)(?:下来)?了?/,
+	new RegExp(`(?:过了|已经过去|过去)${CN_NUM}\\s*个?(?:分钟|小时|钟头)`),
+	new RegExp(`${CN_NUM}\\s*个?(?:分钟|小时|钟头)(?:后|过去|前)`),
+	/时间(?:已经)?(?:推进|流逝|过去)(?:了|到)/,
+	/时间(?:来到|到了)/,
+	/已经(?:是)?\s*\d{1,2}\s*点/,
+	/已经\s*\d{1,2}[:：]\d{2}/
+];
 
 /** 生成最近一次响应的诊断摘要（空正文排查用）。 */
 function buildLastResponse(result: LlmChatResult): DebugLastResponse {

@@ -369,6 +369,35 @@ describe('OpenAiCompatibleClient', () => {
 		expect(body.messages[2]!.tool_call_id).toBe('c1');
 	});
 
+	it('forceToolCall 时请求体带 tool_choice=required', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chatWithTools(
+			[{ role: 'user', content: 'hi' }],
+			TOOL_SCHEMAS,
+			config,
+			undefined,
+			undefined,
+			{ forceToolCall: true }
+		);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.tool_choice).toBe('required');
+	});
+
+	it('未设置 forceToolCall 时不带 tool_choice', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chatWithTools([{ role: 'user', content: 'hi' }], TOOL_SCHEMAS, config);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body).not.toHaveProperty('tool_choice');
+	});
+
 	it('chatWithTools 解析标准 tool_calls，content 可为 null', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(
