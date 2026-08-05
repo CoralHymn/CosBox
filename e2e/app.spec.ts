@@ -132,29 +132,41 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 5) - 2));
 });
 
-test('版本页批量删除：勾选快照后删除所选', async ({ page }) => {
+test('版本页批量删除：勾选分支后删除所选分支', async ({ page }) => {
 	await page.goto('/');
-	await page.getByPlaceholder(/输入消息/).fill('你好');
+	// 分支 A
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	// 切回根，再开分支 B
+	await page.getByRole('button', { name: /版本/ }).click();
+	await page.getByRole('button', { name: '展开' }).first().click();
+	await page
+		.locator('.branch-chain .version-row')
+		.locator('button', { hasText: '切换' })
+		.last()
+		.click();
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('中午好');
 	await page.getByRole('button', { name: '发送' }).click();
 	await expect(page.getByText(/演示模式回应/)).toBeVisible();
 
 	await page.getByRole('button', { name: /版本/ }).click();
-	const snapshotsBefore = page.locator('.batch-bar').count();
-
+	await expect(page.locator('.branch-card')).toHaveCount(2);
 	await page.getByRole('button', { name: '批量删除' }).click();
 	await expect(page.locator('.batch-bar')).toBeVisible();
-	const rows = page.locator('.batch-bar ~ .branch-chain .version-row');
-	await expect(rows.first()).toBeVisible();
 
-	// 选中一条非根快照并接受确认框
+	// 勾选一条分支并接受确认框
 	page.once('dialog', (dialog) => void dialog.accept());
-	await rows.first().locator('input[type="checkbox"]').check();
+	await page
+		.locator('.batch-bar ~ .branch-chain .version-row input[type="checkbox"]')
+		.first()
+		.check();
 	await page.getByRole('button', { name: /删除所选/ }).click();
 
-	// 批量列表消失、分支列表恢复正常
 	await expect(page.locator('.batch-bar')).not.toBeVisible();
-	await expect(page.getByText('分支列表').first()).toBeVisible();
-	void snapshotsBefore;
+	await expect(page.locator('.branch-card')).toHaveCount(1);
 });
 
 test('输入 / 触发快捷命令补全：/goto 补地点、/wear 先补槽位再补衣物', async ({ page }) => {

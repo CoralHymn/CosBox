@@ -11,8 +11,8 @@
 		onCheckout: (id: string) => void;
 		onAddCheckpoint: (desc: string) => void;
 		onDeleteBranch: (tipId: string) => void;
-		/** 批量删除快照（含选中节点的全部后代）。 */
-		onDeleteSnapshots: (ids: string[]) => void;
+		/** 批量删除分支（每个分支只删除其独有快照）。 */
+		onDeleteBranches: (tipIds: string[]) => void;
 	}
 
 	let {
@@ -22,13 +22,13 @@
 		onCheckout,
 		onAddCheckpoint,
 		onDeleteBranch,
-		onDeleteSnapshots
+		onDeleteBranches
 	}: Props = $props();
 	let checkpointDesc = $state('');
-	/** 批量删除模式：显示可勾选的扁平快照列表。 */
+	/** 批量删除模式：显示可勾选的分支列表。 */
 	let batchMode = $state(false);
-	/** 批量模式下选中的快照 id。 */
-	let selected = new SvelteSet<string>();
+	/** 批量模式下选中的分支 tip id。 */
+	let selectedBranches = new SvelteSet<string>();
 	/** 默认全部收起；用户显式展开的分支记录在这里。 */
 	let expanded = new SvelteSet<string>();
 
@@ -104,41 +104,39 @@
 	/** 进入/退出批量模式；进入时清空旧选择。 */
 	function toggleBatchMode(): void {
 		batchMode = !batchMode;
-		selected.clear();
+		selectedBranches.clear();
 	}
 
 	function toggleSelected(id: string): void {
-		if (selected.has(id)) {
-			selected.delete(id);
+		if (selectedBranches.has(id)) {
+			selectedBranches.delete(id);
 		} else {
-			selected.add(id);
+			selectedBranches.add(id);
 		}
 	}
 
 	function selectAll(): void {
-		selected.clear();
-		for (const node of snapshots) {
-			if (node.parentId !== null) {
-				selected.add(node.id);
-			}
+		selectedBranches.clear();
+		for (const branch of branches) {
+			selectedBranches.add(branch.tipId);
 		}
 	}
 
 	function clearSelection(): void {
-		selected.clear();
+		selectedBranches.clear();
 	}
 
 	/** 批量删除：确认后交给父级执行。 */
 	function deleteSelected(): void {
-		const ids = [...selected];
+		const ids = [...selectedBranches];
 		if (ids.length === 0) {
 			return;
 		}
-		if (!window.confirm(`确定删除选中的 ${ids.length} 个快照及其全部后代？此操作不可恢复。`)) {
+		if (!window.confirm(`确定删除选中的 ${ids.length} 个分支及其独有快照？此操作不可恢复。`)) {
 			return;
 		}
-		onDeleteSnapshots(ids);
-		selected.clear();
+		onDeleteBranches(ids);
+		selectedBranches.clear();
 		batchMode = false;
 	}
 </script>
@@ -160,37 +158,38 @@
 		{#if batchMode}
 			<div class="batch-bar">
 				<button class="btn btn-small" onclick={selectAll}>全选</button>
-				<button class="btn btn-small" onclick={clearSelection} disabled={selected.size === 0}
-					>清空</button
+				<button
+					class="btn btn-small"
+					onclick={clearSelection}
+					disabled={selectedBranches.size === 0}>清空</button
 				>
-				<span class="muted">已选 {selected.size} 个</span>
+				<span class="muted">已选 {selectedBranches.size} 个</span>
 				<button
 					class="btn btn-small btn-danger"
-					disabled={selected.size === 0}
-					onclick={deleteSelected}>删除所选（{selected.size}）</button
+					disabled={selectedBranches.size === 0}
+					onclick={deleteSelected}>删除所选（{selectedBranches.size}）</button
 				>
 			</div>
 			<div class="branch-chain">
-				{#each [...snapshots].reverse() as node (node.id)}
+				{#each branchRows as row (row.branch.tipId)}
 					<div class="version-row">
 						<input
 							type="checkbox"
 							class="checkbox"
-							disabled={node.parentId === null}
-							checked={selected.has(node.id)}
-							onchange={() => toggleSelected(node.id)}
+							checked={selectedBranches.has(row.branch.tipId)}
+							onchange={() => toggleSelected(row.branch.tipId)}
 						/>
-						<span class="badge {node.metadata.type}">{typeLabel[node.metadata.type]}</span>
-						<span class="version-desc" title={node.metadata.desc}>{node.metadata.desc}</span>
-						<span class="muted">{formatDateTime(node.timestamp)}</span>
-						{#if node.id === headId}
+						<span class="badge {row.branch.type}">{typeLabel[row.branch.type]}</span>
+						<span class="version-desc" title={row.branch.desc}>{row.branch.desc}</span>
+						<span class="muted">{row.uniqueCount} 个独有快照</span>
+						{#if row.branch.tipId === headId}
 							<span class="badge current">当前</span>
 						{/if}
 					</div>
 				{/each}
 			</div>
 			<p class="muted" style="margin: 8px 0 0;">
-				删除选中的快照时，其后代快照会一并删除；根快照不可删除；当前所在快照被删时会自动回退到最近保留的版本。
+				删除分支只移除该分支独有的快照，分支点与共享历史保留；只剩一个分支时不可删除；当前所在分支被删时会自动回退到分叉点。
 			</p>
 		{:else}
 			{#if branchRows.length === 0}

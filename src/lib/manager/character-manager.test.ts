@@ -487,58 +487,76 @@ describe('CharacterManager', () => {
 		expect(await snapshots.count()).toBe(1);
 	});
 
-	it('deleteSnapshots 空选择或根快照抛错', async () => {
-		const manager = createManager();
-		await manager.init();
-		const root = manager.getHeadId()!;
-		await expect(manager.deleteSnapshots([])).rejects.toThrow('没有可删除的快照');
-		await expect(manager.deleteSnapshots([root])).rejects.toThrow('不能删除根快照');
-	});
-
-	it('deleteSnapshots 删除中间节点连带后代，head 回退到最近保留版本', async () => {
-		const manager = createManager();
-		await manager.init();
-		await manager.addMessage('user', '第一条');
-		const first = manager.getHeadId()!;
-		await manager.addMessage('assistant', '第二条');
-		const second = manager.getHeadId()!;
-		await manager.addMessage('user', '第三条');
-
-		const removed = await manager.deleteSnapshots([second]);
-		expect(removed).toBe(2);
-		expect(manager.getHeadId()).toBe(first);
-		expect(manager.getConversation().map((m) => m.content)).toEqual(['第一条']);
-	});
-
-	it('deleteSnapshots 选中祖先与后代时去重删除', async () => {
+	it('deleteBranches 空选择或非分支末端节点抛错', async () => {
 		const manager = createManager();
 		await manager.init();
 		await manager.addMessage('user', '一');
-		const one = manager.getHeadId()!;
+		const mid = manager.getHeadId()!;
 		await manager.addMessage('assistant', '二');
-		const two = manager.getHeadId()!;
-		await manager.addMessage('user', '三');
-		// 侧分支（从根另开），保证删除后仍有分支保留。
-		const root = manager.getSnapshots()[0]!.id;
-		await manager.checkout(root);
-		await manager.addMessage('user', '侧分支');
-		const side = manager.getHeadId()!;
-
-		const removed = await manager.deleteSnapshots([one, two]);
-		expect(removed).toBe(3);
-		expect(manager.getHeadId()).toBe(side);
-		expect(manager.getConversation().map((m) => m.content)).toEqual(['侧分支']);
-		expect(manager.getBranches()).toHaveLength(1);
+		await expect(manager.deleteBranches([])).rejects.toThrow('没有可删除的分支');
+		await expect(manager.deleteBranches([mid])).rejects.toThrow('没有可删除的分支');
 	});
 
-	it('deleteSnapshots 删除全部非根节点时拒绝', async () => {
+	it('deleteBranches 删除当前分支并回退到分叉点', async () => {
 		const manager = createManager();
 		await manager.init();
-		await manager.addMessage('user', '唯一');
-		const msg = manager.getHeadId()!;
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		await manager.addMessage('user', '分支A消息');
+		const branchAHead = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支B上衣' } }, { desc: '分支B' });
+		const branchBHead = manager.getHeadId()!;
 
-		await expect(manager.deleteSnapshots([msg])).rejects.toThrow('没有剩余分支');
-		expect(manager.getConversation()[0]!.content).toBe('唯一');
+		await manager.checkout(branchAHead);
+		const removed = await manager.deleteBranches([branchAHead]);
+		expect(removed).toBe(2);
+		expect(manager.getHeadId()).toBe(fork);
+		expect(manager.getBranches()).toHaveLength(1);
+		expect(manager.getBranches()[0]!.tipId).toBe(branchBHead);
+	});
+
+	it('deleteBranches 同时删除多条分支，保留共享分支点', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		await manager.addMessage('user', '分支A消息');
+		const branchAHead = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支B上衣' } }, { desc: '分支B' });
+		const branchBHead = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支C上衣' } }, { desc: '分支C' });
+		const branchCHead = manager.getHeadId()!;
+
+		const removed = await manager.deleteBranches([branchAHead, branchBHead]);
+		expect(removed).toBe(3);
+		expect(manager.getHeadId()).toBe(branchCHead);
+		expect(manager.getBranches()).toHaveLength(1);
+		expect(manager.getBranches()[0]!.tipId).toBe(branchCHead);
+	});
+
+	it('deleteBranches 删除全部分支时拒绝', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.update({ attributes: { step: 0 } }, { desc: '分支点' });
+		const fork = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支A上衣' } }, { desc: '分支A' });
+		const branchAHead = manager.getHeadId()!;
+		await manager.checkout(fork);
+		await manager.update({ outfit: { top: '分支B上衣' } }, { desc: '分支B' });
+		const branchBHead = manager.getHeadId()!;
+
+		await expect(manager.deleteBranches([branchAHead, branchBHead])).rejects.toThrow(
+			'只剩一个分支'
+		);
+		expect(manager.getBranches()).toHaveLength(2);
 	});
 
 	it('deleteBranch 多分支下删除一条分支后仍保留其余分支', async () => {

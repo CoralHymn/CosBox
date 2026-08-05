@@ -448,13 +448,13 @@
 		}
 	}
 
-	/** 批量删除快照（含选中节点的全部后代）。 */
-	async function handleDeleteSnapshots(ids: string[]): Promise<void> {
-		if (ids.length === 0) {
+	/** 批量删除分支（每个分支只删除其独有快照）。 */
+	async function handleDeleteBranches(tipIds: string[]): Promise<void> {
+		if (tipIds.length === 0) {
 			return;
 		}
 		try {
-			const removed = await session.deleteSnapshots(ids);
+			const removed = await session.deleteBranches(tipIds);
 			toasts.success(`已删除 ${removed} 个快照`);
 		} catch (err) {
 			toasts.error(err);
@@ -770,7 +770,7 @@
 					onCheckout={handleCheckout}
 					onAddCheckpoint={handleCheckpoint}
 					onDeleteBranch={handleDeleteBranch}
-					onDeleteSnapshots={handleDeleteSnapshots}
+					onDeleteBranches={handleDeleteBranches}
 				/>
 			{:else if tab === 'world'}
 				<WorldInfoPanel
