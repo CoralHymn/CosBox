@@ -487,6 +487,60 @@ describe('CharacterManager', () => {
 		expect(await snapshots.count()).toBe(1);
 	});
 
+	it('deleteSnapshots 空选择或根快照抛错', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await expect(manager.deleteSnapshots([])).rejects.toThrow('没有可删除的快照');
+		await expect(manager.deleteSnapshots([root])).rejects.toThrow('不能删除根快照');
+	});
+
+	it('deleteSnapshots 删除中间节点连带后代，head 回退到最近保留版本', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '第一条');
+		const first = manager.getHeadId()!;
+		await manager.addMessage('assistant', '第二条');
+		const second = manager.getHeadId()!;
+		await manager.addMessage('user', '第三条');
+
+		const removed = await manager.deleteSnapshots([second]);
+		expect(removed).toBe(2);
+		expect(manager.getHeadId()).toBe(first);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['第一条']);
+	});
+
+	it('deleteSnapshots 选中祖先与后代时去重删除', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '一');
+		const one = manager.getHeadId()!;
+		await manager.addMessage('assistant', '二');
+		const two = manager.getHeadId()!;
+		await manager.addMessage('user', '三');
+		// 侧分支（从根另开），保证删除后仍有分支保留。
+		const root = manager.getSnapshots()[0]!.id;
+		await manager.checkout(root);
+		await manager.addMessage('user', '侧分支');
+		const side = manager.getHeadId()!;
+
+		const removed = await manager.deleteSnapshots([one, two]);
+		expect(removed).toBe(3);
+		expect(manager.getHeadId()).toBe(side);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['侧分支']);
+		expect(manager.getBranches()).toHaveLength(1);
+	});
+
+	it('deleteSnapshots 删除全部非根节点时拒绝', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '唯一');
+		const msg = manager.getHeadId()!;
+
+		await expect(manager.deleteSnapshots([msg])).rejects.toThrow('没有剩余分支');
+		expect(manager.getConversation()[0]!.content).toBe('唯一');
+	});
+
 	it('deleteBranch 多分支下删除一条分支后仍保留其余分支', async () => {
 		const manager = createManager();
 		await manager.init();

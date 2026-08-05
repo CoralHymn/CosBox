@@ -11,11 +11,24 @@
 		onCheckout: (id: string) => void;
 		onAddCheckpoint: (desc: string) => void;
 		onDeleteBranch: (tipId: string) => void;
+		/** 批量删除快照（含选中节点的全部后代）。 */
+		onDeleteSnapshots: (ids: string[]) => void;
 	}
 
-	let { snapshots, headId, branches, onCheckout, onAddCheckpoint, onDeleteBranch }: Props =
-		$props();
+	let {
+		snapshots,
+		headId,
+		branches,
+		onCheckout,
+		onAddCheckpoint,
+		onDeleteBranch,
+		onDeleteSnapshots
+	}: Props = $props();
 	let checkpointDesc = $state('');
+	/** 批量删除模式：显示可勾选的扁平快照列表。 */
+	let batchMode = $state(false);
+	/** 批量模式下选中的快照 id。 */
+	let selected = new SvelteSet<string>();
 	/** 默认全部收起；用户显式展开的分支记录在这里。 */
 	let expanded = new SvelteSet<string>();
 
@@ -87,6 +100,47 @@
 		onAddCheckpoint(checkpointDesc.trim());
 		checkpointDesc = '';
 	}
+
+	/** 进入/退出批量模式；进入时清空旧选择。 */
+	function toggleBatchMode(): void {
+		batchMode = !batchMode;
+		selected.clear();
+	}
+
+	function toggleSelected(id: string): void {
+		if (selected.has(id)) {
+			selected.delete(id);
+		} else {
+			selected.add(id);
+		}
+	}
+
+	function selectAll(): void {
+		selected.clear();
+		for (const node of snapshots) {
+			if (node.parentId !== null) {
+				selected.add(node.id);
+			}
+		}
+	}
+
+	function clearSelection(): void {
+		selected.clear();
+	}
+
+	/** 批量删除：确认后交给父级执行。 */
+	function deleteSelected(): void {
+		const ids = [...selected];
+		if (ids.length === 0) {
+			return;
+		}
+		if (!window.confirm(`确定删除选中的 ${ids.length} 个快照及其全部后代？此操作不可恢复。`)) {
+			return;
+		}
+		onDeleteSnapshots(ids);
+		selected.clear();
+		batchMode = false;
+	}
 </script>
 
 <div class="panel">
@@ -97,55 +151,99 @@
 	</p>
 
 	<div class="card">
-		<h3 class="card-title">分支列表（{branchRows.length}）</h3>
-		{#if branchRows.length === 0}
-			<p class="empty-hint">暂无分支</p>
-		{:else}
-			{#each branchRows as row (row.branch.tipId)}
-				<div class="branch-card" class:current={row.branch.tipId === headId}>
-					<div class="branch-header">
-						<span class="badge {row.branch.type}">{typeLabel[row.branch.type]}</span>
-						<span class="version-desc" title={row.branch.desc}>{row.branch.desc}</span>
-						<span class="muted">{row.chain.length - 1} 个快照</span>
-						{#if row.branch.tipId === headId}
+		<div class="card-title-row">
+			<h3 class="card-title">分支列表（{branchRows.length}）</h3>
+			<button class="btn btn-small" onclick={toggleBatchMode}>
+				{batchMode ? '退出批量删除' : '批量删除'}
+			</button>
+		</div>
+		{#if batchMode}
+			<div class="batch-bar">
+				<button class="btn btn-small" onclick={selectAll}>全选</button>
+				<button class="btn btn-small" onclick={clearSelection} disabled={selected.size === 0}
+					>清空</button
+				>
+				<span class="muted">已选 {selected.size} 个</span>
+				<button
+					class="btn btn-small btn-danger"
+					disabled={selected.size === 0}
+					onclick={deleteSelected}>删除所选（{selected.size}）</button
+				>
+			</div>
+			<div class="branch-chain">
+				{#each [...snapshots].reverse() as node (node.id)}
+					<div class="version-row">
+						<input
+							type="checkbox"
+							class="checkbox"
+							disabled={node.parentId === null}
+							checked={selected.has(node.id)}
+							onchange={() => toggleSelected(node.id)}
+						/>
+						<span class="badge {node.metadata.type}">{typeLabel[node.metadata.type]}</span>
+						<span class="version-desc" title={node.metadata.desc}>{node.metadata.desc}</span>
+						<span class="muted">{formatDateTime(node.timestamp)}</span>
+						{#if node.id === headId}
 							<span class="badge current">当前</span>
 						{/if}
-						<button class="btn btn-small" onclick={() => toggleExpanded(row.branch.tipId)}>
-							{expanded.has(row.branch.tipId) ? '收起' : '展开'}
-						</button>
-						{#if row.branch.tipId !== headId}
-							<button class="btn btn-small" onclick={() => onCheckout(row.branch.tipId)}
-								>切换</button
-							>
-						{/if}
-						<button
-							class="btn btn-small btn-danger"
-							disabled={branches.length <= 1}
-							title={branches.length <= 1 ? '只剩一个分支时不能删除' : '删除该分支独有的快照'}
-							onclick={() => onDeleteBranch(row.branch.tipId)}>删除</button
-						>
 					</div>
-					{#if row.forkDesc !== null}
-						<p class="muted" style="margin: 0 0 4px;">分叉自：「{row.forkDesc}」</p>
-					{/if}
-					{#if expanded.has(row.branch.tipId)}
-						<div class="branch-chain">
-							{#each [...row.chain].reverse() as node (node.id)}
-								<div class="version-row" class:shared={row.sharedIds.has(node.id)}>
-									<span class="badge {node.metadata.type}">{typeLabel[node.metadata.type]}</span>
-									<span class="version-desc" title={node.metadata.desc}>{node.metadata.desc}</span>
-									<span class="muted">{formatDateTime(node.timestamp)}</span>
-									{#if node.id === headId}
-										<span class="badge current">当前</span>
-									{:else}
-										<button class="btn btn-small" onclick={() => onCheckout(node.id)}>切换</button>
-									{/if}
-								</div>
-							{/each}
+				{/each}
+			</div>
+			<p class="muted" style="margin: 8px 0 0;">
+				删除选中的快照时，其后代快照会一并删除；根快照不可删除；当前所在快照被删时会自动回退到最近保留的版本。
+			</p>
+		{:else}
+			{#if branchRows.length === 0}
+				<p class="empty-hint">暂无分支</p>
+			{:else}
+				{#each branchRows as row (row.branch.tipId)}
+					<div class="branch-card" class:current={row.branch.tipId === headId}>
+						<div class="branch-header">
+							<span class="badge {row.branch.type}">{typeLabel[row.branch.type]}</span>
+							<span class="version-desc" title={row.branch.desc}>{row.branch.desc}</span>
+							<span class="muted">{row.chain.length - 1} 个快照</span>
+							{#if row.branch.tipId === headId}
+								<span class="badge current">当前</span>
+							{/if}
+							<button class="btn btn-small" onclick={() => toggleExpanded(row.branch.tipId)}>
+								{expanded.has(row.branch.tipId) ? '收起' : '展开'}
+							</button>
+							{#if row.branch.tipId !== headId}
+								<button class="btn btn-small" onclick={() => onCheckout(row.branch.tipId)}
+									>切换</button
+								>
+							{/if}
+							<button
+								class="btn btn-small btn-danger"
+								disabled={branches.length <= 1}
+								title={branches.length <= 1 ? '只剩一个分支时不能删除' : '删除该分支独有的快照'}
+								onclick={() => onDeleteBranch(row.branch.tipId)}>删除</button
+							>
 						</div>
-					{/if}
-				</div>
-			{/each}
+						{#if row.forkDesc !== null}
+							<p class="muted" style="margin: 0 0 4px;">分叉自：「{row.forkDesc}」</p>
+						{/if}
+						{#if expanded.has(row.branch.tipId)}
+							<div class="branch-chain">
+								{#each [...row.chain].reverse() as node (node.id)}
+									<div class="version-row" class:shared={row.sharedIds.has(node.id)}>
+										<span class="badge {node.metadata.type}">{typeLabel[node.metadata.type]}</span>
+										<span class="version-desc" title={node.metadata.desc}>{node.metadata.desc}</span
+										>
+										<span class="muted">{formatDateTime(node.timestamp)}</span>
+										{#if node.id === headId}
+											<span class="badge current">当前</span>
+										{:else}
+											<button class="btn btn-small" onclick={() => onCheckout(node.id)}>切换</button
+											>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/each}
+			{/if}
 		{/if}
 	</div>
 
@@ -157,3 +255,23 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	.card-title-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		margin-bottom: 8px;
+	}
+	.card-title-row .card-title {
+		margin: 0;
+	}
+	.batch-bar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
+		flex-wrap: wrap;
+	}
+</style>

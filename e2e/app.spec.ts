@@ -124,12 +124,37 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 	const snapshotsBefore = await page.locator('.chip').filter({ hasText: '快照' }).textContent();
 
 	page.on('dialog', (dialog) => void dialog.accept());
-	await page.getByRole('button', { name: '删除' }).first().click();
+	await page.getByRole('button', { name: '删除', exact: true }).first().click();
 
 	await expect(page.locator('.branch-card')).toHaveCount(1);
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 5) - 2));
+});
+
+test('版本页批量删除：勾选快照后删除所选', async ({ page }) => {
+	await page.goto('/');
+	await page.getByPlaceholder(/输入消息/).fill('你好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	await page.getByRole('button', { name: /版本/ }).click();
+	const snapshotsBefore = page.locator('.batch-bar').count();
+
+	await page.getByRole('button', { name: '批量删除' }).click();
+	await expect(page.locator('.batch-bar')).toBeVisible();
+	const rows = page.locator('.batch-bar ~ .branch-chain .version-row');
+	await expect(rows.first()).toBeVisible();
+
+	// 选中一条非根快照并接受确认框
+	page.once('dialog', (dialog) => void dialog.accept());
+	await rows.first().locator('input[type="checkbox"]').check();
+	await page.getByRole('button', { name: /删除所选/ }).click();
+
+	// 批量列表消失、分支列表恢复正常
+	await expect(page.locator('.batch-bar')).not.toBeVisible();
+	await expect(page.getByText('分支列表').first()).toBeVisible();
+	void snapshotsBefore;
 });
 
 test('输入 / 触发快捷命令补全：/goto 补地点、/wear 先补槽位再补衣物', async ({ page }) => {

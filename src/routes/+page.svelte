@@ -448,6 +448,19 @@
 		}
 	}
 
+	/** 批量删除快照（含选中节点的全部后代）。 */
+	async function handleDeleteSnapshots(ids: string[]): Promise<void> {
+		if (ids.length === 0) {
+			return;
+		}
+		try {
+			const removed = await session.deleteSnapshots(ids);
+			toasts.success(`已删除 ${removed} 个快照`);
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
 	async function handleWorldUpsert(entry: WorldInfoEntry): Promise<void> {
 		try {
 			await worldInfo.upsert(entry);
@@ -757,6 +770,7 @@
 					onCheckout={handleCheckout}
 					onAddCheckpoint={handleCheckpoint}
 					onDeleteBranch={handleDeleteBranch}
+					onDeleteSnapshots={handleDeleteSnapshots}
 				/>
 			{:else if tab === 'world'}
 				<WorldInfoPanel

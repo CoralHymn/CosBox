@@ -392,6 +392,68 @@ export class CharacterManager {
 		return this.enqueue(() => this.doDeleteBranch(tipId));
 	}
 
+	/**
+	 * 批量删除快照：删除选中节点及其全部后代（子快照连带删除）。
+	 * 根快照不可删除；删除后必须仍有分支存在；当前 head 位于被删子树时，
+	 * 自动回退到链上最近的未删除祖先。
+	 * @returns 实际删除的快照数量
+	 */
+	deleteSnapshots(ids: readonly string[]): Promise<number> {
+		return this.enqueue(() => this.doDeleteSnapshots(ids));
+	}
+
+	private async doDeleteSnapshots(ids: readonly string[]): Promise<number> {
+		await this.ensureInit();
+		const all = await this.deps.snapshots.getAll();
+		const map = new Map(all.map((node) => [node.id, node]));
+		const childrenMap = getChildrenMap(all);
+		const selected = [...new Set(ids)].filter((id) => map.has(id));
+		if (selected.length === 0) {
+			throw new SnapshotError('没有可删除的快照');
+		}
+		// 展开为子树并集（选中节点的后代无需重复删除）。
+		const toDelete = new Set<string>();
+		for (const id of selected) {
+			if (map.get(id)?.parentId === null) {
+				throw new SnapshotError('不能删除根快照');
+			}
+			const queue = [id];
+			while (queue.length > 0) {
+				const current = queue.shift()!;
+				if (toDelete.has(current)) {
+					continue;
+				}
+				toDelete.add(current);
+				for (const child of childrenMap.get(current) ?? []) {
+					queue.push(child.id);
+				}
+			}
+		}
+		// 删除后至少保留一个分支（根之外仍有节点）。
+		const remaining = all.filter((node) => !toDelete.has(node.id));
+		if (remaining.length <= 1) {
+			throw new SnapshotError('删除后没有剩余分支，已取消');
+		}
+		// head 位于被删子树时，回退到链上最近的未删除祖先。
+		if (this.headId !== null && toDelete.has(this.headId)) {
+			let cursor = map.get(this.headId);
+			while (cursor !== undefined && toDelete.has(cursor.id)) {
+				cursor = cursor.parentId === null ? undefined : map.get(cursor.parentId);
+			}
+			if (cursor === undefined) {
+				throw new SnapshotError('无法确定回退节点，已取消');
+			}
+			const rebuilt = await this.deps.snapshots.checkout(cursor.id);
+			this.headId = cursor.id;
+			this.state = rebuilt.state;
+			this.conversation = rebuilt.messages;
+			await this.persistHead();
+		}
+		await this.deps.snapshots.removeMany([...toDelete]);
+		await this.refresh();
+		return toDelete.size;
+	}
+
 	private async doDeleteBranch(tipId: string): Promise<number> {
 		await this.ensureInit();
 		const all = await this.deps.snapshots.getAll();
