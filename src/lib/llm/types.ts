@@ -23,6 +23,8 @@ export interface LlmConfig {
 	stream?: boolean;
 	/** 是否允许 AI 在对话中调用状态工具（改地点/时间/穿着/属性）。缺省视为关闭。 */
 	allowAiStateTools?: boolean;
+	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
+	llmStateConfirm?: boolean;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
 	webSearch: WebSearchConfig;
 }
@@ -126,6 +128,7 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	compactThreshold: DEFAULT_COMPACT_THRESHOLD,
 	stream: false,
 	allowAiStateTools: false,
+	llmStateConfirm: false,
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
 

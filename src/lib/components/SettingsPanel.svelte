@@ -47,6 +47,7 @@
 	let compactThreshold = $state(0.8);
 	let stream = $state(false);
 	let allowAiStateTools = $state(false);
+	let llmStateConfirm = $state(false);
 	let devMode = $state(false);
 	let profileName = $state('');
 	let systemPrompt = $state('');
@@ -87,6 +88,7 @@
 		compactThreshold = config.compactThreshold ?? 0.8;
 		stream = config.stream === true;
 		allowAiStateTools = config.allowAiStateTools === true;
+		llmStateConfirm = config.llmStateConfirm === true;
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
 		searchApiKey = config.webSearch.apiKey;
@@ -129,6 +131,7 @@
 			compactThreshold,
 			stream,
 			allowAiStateTools,
+			llmStateConfirm,
 			webSearch: {
 				enabled: searchEnabled,
 				provider: searchProvider,
@@ -389,6 +392,18 @@
 			/>
 			<label for="ai-tools-enabled" class="muted"
 				>允许 AI 自主修改状态（地点 / 时间 / 穿着 / 属性）</label
+			>
+		</div>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input
+				id="llm-state-confirm"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={llmStateConfirm}
+				disabled={!allowAiStateTools}
+			/>
+			<label for="llm-state-confirm" class="muted"
+				>使用 LLM 状态确认（AI 未调用工具时，由另一个 LLM 判断并补执行）</label
 			>
 		</div>
 		<p class="muted" style="margin: 0;">

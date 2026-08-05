@@ -49,6 +49,7 @@
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
+	import type { JudgeDebugView } from '../lib/llm/state-judge';
 	import { STATE_TOOLS } from '../lib/llm/state-tools';
 	import type { LlmConfig, TokenUsage } from '../lib/llm/types';
 	import { rebuildFromNodes } from '../lib/core/snapshot';
@@ -111,6 +112,8 @@
 	let compacting = $state(false);
 	/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
 	let streamingDraft = $state<string | null>(null);
+	/** 最近一次 LLM 状态判断的调试视图（开发者模式查看）。 */
+	let lastJudgeDebug = $state<JudgeDebugView | null>(null);
 
 	const providerLabel = $derived.by(() => {
 		if (settings.config.provider === 'demo') {
@@ -192,21 +195,32 @@
 						}
 					: undefined;
 			streamingDraft = '';
-			const { reply, debug, bundle, usage, compaction, thinking, finishReason, rounds } =
-				await service.generateReply(input, settings.config, {
-					onDelta: (delta) => {
-						// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
-						streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
-					},
-					tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
-					toolContext: {
-						getState: () => session.state,
-						update: (patch, metadata) => session.update(patch, metadata),
-						advanceTime: (minutes) => session.advanceTime(minutes)
-					},
-					...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
-				});
+			const {
+				reply,
+				debug,
+				bundle,
+				usage,
+				compaction,
+				thinking,
+				finishReason,
+				judgeDebug,
+				rounds
+			} = await service.generateReply(input, settings.config, {
+				onDelta: (delta) => {
+					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
+					streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
+				},
+				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
+				toolContext: {
+					getState: () => session.state,
+					update: (patch, metadata) => session.update(patch, metadata),
+					advanceTime: (minutes) => session.advanceTime(minutes)
+				},
+				enableStateJudge: settings.config.llmStateConfirm === true,
+				...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
+			});
 			debugPrompt = debug;
+			lastJudgeDebug = judgeDebug;
 			lastContext = { bundle, usage: usage ?? null, compaction };
 			compactState = compaction;
 			streamingDraft = null;
@@ -696,6 +710,7 @@
 					{searching}
 					developerMode={settings.developerMode}
 					{debugPrompt}
+					judgeDebug={lastJudgeDebug}
 					onPreview={handlePreview}
 					onSend={handleSend}
 					onEditMessage={handleEditMessage}

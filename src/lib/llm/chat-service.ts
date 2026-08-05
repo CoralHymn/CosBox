@@ -19,6 +19,7 @@ import {
 	type StateToolContext,
 	type StateToolDefinition
 } from './state-tools';
+import { runStateConfirmation, runStateJudge, type JudgeDebugView } from './state-judge';
 import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
 import { extractTextToolCalls } from './text-tools';
 import type { ChatMessage, LlmChatResult, LlmClient, LlmConfig, TokenUsage } from './types';
@@ -89,6 +90,8 @@ export interface GenerateReplyOptions {
 	compaction?: CompactionOptions;
 	/** 流式输出回调：真实端点按块回调增量文本，供 UI 边生成边显示。 */
 	onDelta?: (delta: string) => void;
+	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
+	enableStateJudge?: boolean;
 }
 
 /** 默认最大工具轮数：超过后停止并以提示文本收尾。 */
@@ -126,11 +129,14 @@ export class ChatService {
 		thinking: string | undefined;
 		/** 端点的 finish_reason（stop / length 等）；正文为空时为「输出预算耗尽」排查提供依据。 */
 		finishReason: string | undefined;
+		/** LLM 状态判断的调试视图（未启用或未触发时为 null）。 */
+		judgeDebug: JudgeDebugView | null;
 		/** 工具调用轮次（按顺序；每轮含叙事文本与工具反馈，最终回复在 reply）。 */
 		rounds: ReplyRound[];
 	}> {
 		let usage: TokenUsage | undefined;
 		let compaction: CompactionState | null = options.compaction?.state ?? null;
+		let judgeDebug: JudgeDebugView | null = null;
 
 		// 1) 按当前压缩状态组装「本次发送的历史」；无状态 = 完整历史。
 		let sendHistory = this.buildSendHistory(input.conversation, compaction);
@@ -289,6 +295,12 @@ export class ChatService {
 						}
 					}
 					if (result.toolCalls.length === 0) {
+						if (options.enableStateJudge === true && executedTools.length === 0) {
+							const judge = await this.maybeRunStateJudge(input, config, options, signal);
+							executedTools.push(...judge.executed);
+							rounds.push(...judge.rounds);
+							judgeDebug = judge.debug;
+						}
 						debug = { ...debug, lastResponse: buildLastResponse(result) };
 						return {
 							reply: sanitizeAssistantText(result.content ?? ''),
@@ -299,6 +311,7 @@ export class ChatService {
 							compaction,
 							thinking: result.thinking,
 							finishReason: result.finishReason,
+							judgeDebug,
 							rounds
 						};
 					}
@@ -358,6 +371,7 @@ export class ChatService {
 					compaction,
 					thinking: undefined,
 					finishReason: undefined,
+					judgeDebug: null,
 					rounds
 				};
 			}
@@ -379,6 +393,12 @@ export class ChatService {
 			}
 		}
 		debug = { ...debug, lastResponse: buildLastResponse(result) };
+		if (options.enableStateJudge === true && executedTools.length === 0) {
+			const judge = await this.maybeRunStateJudge(input, config, options, signal);
+			executedTools.push(...judge.executed);
+			rounds.push(...judge.rounds);
+			judgeDebug = judge.debug;
+		}
 		return {
 			reply: sanitizeAssistantText(result.content ?? ''),
 			bundle,
@@ -388,6 +408,7 @@ export class ChatService {
 			compaction,
 			thinking: result.thinking,
 			finishReason: result.finishReason,
+			judgeDebug,
 			rounds
 		};
 	}
@@ -623,6 +644,78 @@ export class ChatService {
 		}
 		const forced = await attempt(true, false);
 		return forced && forced.toolCalls.length > 0 ? forced : null;
+	}
+
+	/**
+	 * LLM 状态确认：主回复未调用工具时，由独立 LLM 判断剧情是否需要更新状态；
+	 * 需要则运行确认工具循环补执行，并把工具反馈作为轮次返回（由上层持久化）。
+	 */
+	private async maybeRunStateJudge(
+		input: ContextPipelineInput,
+		config: LlmConfig,
+		options: GenerateReplyOptions,
+		signal?: AbortSignal
+	): Promise<{
+		executed: ExecutedToolCall[];
+		rounds: ReplyRound[];
+		debug: JudgeDebugView | null;
+	}> {
+		if (
+			options.enableStateJudge !== true ||
+			options.toolContext === undefined ||
+			options.tools === undefined ||
+			options.tools.length === 0 ||
+			this.client.chatWithTools === undefined
+		) {
+			return { executed: [], rounds: [], debug: null };
+		}
+		const conversation = input.conversation;
+		const lastUser = [...conversation].reverse().find((message) => message.role === 'user');
+		const lastAssistant = [...conversation]
+			.reverse()
+			.find((message) => message.role === 'assistant');
+		const judge = await runStateJudge({
+			state: input.state,
+			lastUser,
+			lastAssistant,
+			client: this.client,
+			config,
+			signal
+		});
+		if (!judge.needsTool) {
+			return { executed: [], rounds: [], debug: judge.debug };
+		}
+		const confirmation = await runStateConfirmation({
+			state: input.state,
+			lastUser,
+			lastAssistant,
+			client: this.client,
+			config,
+			tools: options.tools,
+			toolContext: options.toolContext,
+			signal
+		});
+		const debug: JudgeDebugView = {
+			...judge.debug,
+			confirmation: {
+				messages: confirmation.messages,
+				toolCalls: confirmation.toolCalls,
+				executed: confirmation.executed
+			}
+		};
+		const rounds: ReplyRound[] =
+			confirmation.executed.length > 0
+				? [
+						{
+							content: null,
+							tools: confirmation.executed.map((tool) => ({
+								name: tool.name,
+								output: tool.output
+							}))
+						}
+					]
+				: [];
+		return { executed: confirmation.executed, rounds, debug };
 	}
 }
 

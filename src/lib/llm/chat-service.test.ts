@@ -537,6 +537,88 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
 	});
 
+	it('LLM 状态确认：判断为 True 时补执行工具并回写反馈', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '（笑）嗯。', toolCalls: [] })
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
+			})
+			.mockResolvedValueOnce({ content: '已完成。', toolCalls: [] });
+		const chat = vi.fn().mockResolvedValueOnce({ content: 'True', toolCalls: [] });
+		const client: LlmClient = { chat, chatWithTools };
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { reply, executedTools, rounds, judgeDebug } = await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [
+					{ id: '1', role: 'user', content: '过了一段时间', timestamp: 1 },
+					{ id: '2', role: 'assistant', content: '（笑）嗯。', timestamp: 2 }
+				],
+				worldInfo: []
+			},
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+		);
+		expect(judgeDebug?.needsTool).toBe(true);
+		expect(judgeDebug?.output).toBe('True');
+		expect(judgeDebug?.confirmation?.executed.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 9, minute: 0 });
+		expect(rounds[0]!.tools[0]!.output).toContain('时间推进到 周一 09:00');
+		expect(reply).toBe('（笑）嗯。');
+		// 判断 LLM 收到的是系统提示 + 最近对话载荷
+		const judgeMessages = chat.mock.calls[0]![0] as ChatMessage[];
+		expect(judgeMessages[0]!.content).toContain('只输出 True 或 False');
+	});
+
+	it('LLM 状态确认：判断为 False 时不执行工具', async () => {
+		const chatWithTools = vi.fn().mockResolvedValueOnce({ content: '嗯嗯。', toolCalls: [] });
+		const chat = vi.fn().mockResolvedValueOnce({ content: 'False', toolCalls: [] });
+		const client: LlmClient = { chat, chatWithTools };
+		const service = new ChatService(client);
+		const { executedTools, judgeDebug } = await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [{ id: '1', role: 'user', content: '你好', timestamp: 1 }],
+				worldInfo: []
+			},
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableStateJudge: true }
+		);
+		expect(executedTools).toEqual([]);
+		expect(judgeDebug?.needsTool).toBe(false);
+		expect(judgeDebug?.confirmation).toBeUndefined();
+		expect(chatWithTools).toHaveBeenCalledTimes(1);
+	});
+
+	it('LLM 状态确认：主循环已执行工具时不重复判断', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+			})
+			.mockResolvedValueOnce({ content: '我们到了。', toolCalls: [] });
+		const chat = vi.fn();
+		const client: LlmClient = { chat, chatWithTools };
+		const service = new ChatService(client);
+		const { executedTools, judgeDebug } = await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [{ id: '1', role: 'user', content: '去食堂', timestamp: 1 }],
+				worldInfo: []
+			},
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableStateJudge: true }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['goto_location']);
+		expect(judgeDebug).toBeNull();
+		expect(chat).not.toHaveBeenCalled();
+	});
+
 	it('调试视图携带本次实际请求参数', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '好的', toolCalls: [] }))
