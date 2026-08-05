@@ -142,21 +142,59 @@ export function demoGeneratedItems(
 		if (system.includes('【世界观：古代】')) {
 			return [
 				{ category: '书院', name: '讲堂', description: '先生授课的大厅，桌椅整齐排列' },
+				{ category: '书院', name: '藏书阁', description: '收藏典籍的三层木楼，午后有斜阳洒进窗棂' },
 				{ category: '集市', name: '药铺', description: '挂着杏林旗的药材铺子，药香扑鼻' },
-				{ category: '马厩', name: '马厩', description: '拴着几匹枣红马，草料味很重' }
+				{ category: '集市', name: '茶肆', description: '支着布幌的街边茶铺，常有说书人讲古' },
+				{ category: '城郊', name: '驿站', description: '官道边的换马之所，往来旅人歇脚' },
+				{ category: '城郊', name: '马厩', description: '拴着几匹枣红马，草料味很重' }
 			];
 		}
 		if (system.includes('【世界观：奇幻】')) {
 			return [
 				{ category: '魔法学院', name: '炼金室', description: '坩埚咕嘟作响，架子上摆满药剂瓶' },
+				{ category: '魔法学院', name: '大讲堂', description: '穹顶绘着星图的授课大厅' },
 				{ category: '冒险者公会', name: '任务板', description: '贴着悬赏委托的木板，人来人往' },
-				{ category: '精灵森林', name: '树屋', description: '建在巨树枝干上的木屋，藤蔓缠绕' }
+				{ category: '精灵森林', name: '树屋', description: '建在巨树枝干上的木屋，藤蔓缠绕' },
+				{
+					category: '精灵森林',
+					name: '古树祭坛',
+					description: '缠绕着发光符文的老树，是森林的圣地'
+				}
 			];
 		}
 		return [
 			{ category: '学校', name: '食堂', description: '午间最热闹的地方，招牌是咖喱饭' },
 			{ category: '学校', name: '图书馆', description: '安静的阅读空间，三楼据说有禁书区' },
-			{ category: '校外', name: '便利店', description: '24 小时营业，关东煮在柜台冒着热气' }
+			{
+				category: '商业街',
+				name: '中央商店街',
+				description: '贯穿城区的主干商业街，两侧林立着潮流服饰店与奶茶店'
+			},
+			{
+				category: '商业街',
+				name: '云朵咖啡屋',
+				description: '充满文艺气息的独立咖啡厅，招牌是手冲咖啡和芝士蛋糕'
+			},
+			{
+				category: '市中心',
+				name: '星辰购物广场',
+				description: '十层高的综合购物中心，顶层设有电影院和美食街'
+			},
+			{
+				category: '市中心',
+				name: '城市历史博物馆',
+				description: '展示城市百年变迁的展馆，设有互动体验区'
+			},
+			{
+				category: '郊外',
+				name: '银沙海滨浴场',
+				description: '城郊海岸线的白色沙滩，夏季开放游泳与水上活动'
+			},
+			{
+				category: '郊外',
+				name: '汤之里温泉馆',
+				description: '传统日式风格温泉旅馆，露天汤池可远眺山景'
+			}
 		];
 	}
 	if (kind === 'wardrobe') {

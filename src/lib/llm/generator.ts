@@ -77,13 +77,39 @@ export const WORLDVIEW_PRESETS: Record<
 	}
 };
 
+/** 地点大类中不该出现的「场所类型」关键词：应作为具体地点并入区域大类。 */
+const LOCATION_TYPE_KEYWORDS = [
+	'奶茶店',
+	'服饰店',
+	'服装店',
+	'咖啡厅',
+	'咖啡馆',
+	'超市',
+	'便利店',
+	'药店',
+	'药房',
+	'餐厅',
+	'饭店',
+	'面包店',
+	'书店',
+	'健身房',
+	'银行',
+	'发廊',
+	'理发店',
+	'网吧',
+	'加油站',
+	'地铁站',
+	'医院',
+	'诊所'
+];
+
 /** 输出格式示例（按类型）。 */
 const SCHEMA_EXAMPLES: Record<GeneratorKind, unknown> = {
 	locations: [
 		{
-			category: '学校',
-			name: '教室 2-B',
-			description: '二楼尽头的教室，窗外能看到操场'
+			category: '商业街',
+			name: '中央商店街',
+			description: '贯穿城区的主干商业街，两侧林立着潮流服饰店与奶茶店'
 		}
 	],
 	wardrobe: [
@@ -110,7 +136,7 @@ export function buildGenerationSystemPrompt(request: GenerationRequest): string 
 	const worldview = WORLDVIEW_PRESETS[request.worldview];
 	const kindLine =
 		request.kind === 'locations'
-			? '生成一份地点库列表：每个地点包含 category（大类，如「学校」）、name（名称）、description（一句话描述，用于 AI 认知）。'
+			? '生成一份地点库列表：每个地点包含 category（大类，必须是**区域/地段**，如「学校」「商业街」「市中心」「郊外」「住宅区」，而不是场所类型）、name（该区域内的具体地点名称，如「中央商店街」「阳光生活超市」）、description（一句话描述，用于 AI 认知）。\n同一大类可以包含多个不同性质的场所（如奶茶店、服饰店、咖啡店都属于「商业街」），不要为每个小店铺单独建大类；电影院、博物馆等公共设施应归入「市中心」等区域，沙滩、温泉馆等归入「郊外」。'
 			: request.kind === 'wardrobe'
 				? `生成一份衣柜（衣物预设）列表：每个衣物包含 category（大类）、kind（类型：${CLOTHING_KINDS.join('/')}）、name（名称）、description（穿上后的描述）。角色性别：${request.gender ?? '不限'}，衣物需符合该性别设定。`
 				: '生成一份周期性日程表：每个条目包含 day（0=周一 … 6=周日）、title（活动名）、start（开始时间 "HH:MM"）、end（结束时间 "HH:MM"）、可选 locationId（关联地点 id）。';
@@ -202,6 +228,15 @@ export function reviewGeneratedItems(
 			issues.push(`第 ${index + 1} 项名称重复：${key}`);
 		}
 		seen.add(key);
+		if (kind === 'locations') {
+			const category = (normalized.item as LocationDef).category;
+			const typeKeyword = LOCATION_TYPE_KEYWORDS.find((keyword) => category.includes(keyword));
+			if (typeKeyword !== undefined) {
+				issues.push(
+					`第 ${index + 1} 项的大类「${category}」像是场所类型（${typeKeyword}），请合并进更大的区域大类（如：商业街、市中心、郊外）并把该场所作为具体地点名称`
+				);
+			}
+		}
 		const haystack = JSON.stringify(normalized.item);
 		for (const keyword of banned) {
 			if (haystack.includes(keyword)) {
