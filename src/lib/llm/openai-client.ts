@@ -46,7 +46,8 @@ export class OpenAiCompatibleClient implements LlmClient {
 		tools: readonly StateToolSchema[],
 		config: LlmConfig,
 		signal?: AbortSignal,
-		onDelta?: (delta: string) => void
+		onDelta?: (delta: string) => void,
+		options?: { forceToolCall?: boolean }
 	): Promise<LlmChatResult> {
 		const baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
 		if (baseUrl === '') {
@@ -61,7 +62,9 @@ export class OpenAiCompatibleClient implements LlmClient {
 					'Content-Type': 'application/json',
 					...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
 				},
-				body: JSON.stringify(buildRequestBody(messages, tools, config)),
+				body: JSON.stringify(
+					buildRequestBody(messages, tools, config, options?.forceToolCall === true)
+				),
 				signal
 			});
 		} catch (err) {
@@ -393,7 +396,8 @@ function extractFinishReason(data: unknown): string | undefined {
 function buildRequestBody(
 	messages: ChatMessage[],
 	tools: readonly StateToolSchema[],
-	config: LlmConfig
+	config: LlmConfig,
+	forceToolCall = false
 ): Record<string, unknown> {
 	const body: Record<string, unknown> = {
 		model: config.model,
@@ -407,6 +411,10 @@ function buildRequestBody(
 	}
 	if (tools.length > 0) {
 		body.tools = tools.map(serializeTool);
+		if (forceToolCall) {
+			// 对齐 openai-agents / AG2：强制模型至少发一个工具调用（部分端点不支持）。
+			body.tool_choice = 'required';
+		}
 	}
 	return body;
 }
