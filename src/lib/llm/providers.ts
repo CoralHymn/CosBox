@@ -245,6 +245,7 @@ export interface LlmConfigPatch {
 	compactThreshold?: number;
 	stream?: boolean;
 	allowAiStateTools?: boolean;
+	llmStateConfirm?: boolean;
 	webSearch?: Partial<WebSearchConfig>;
 }
 
@@ -274,6 +275,7 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		compactThreshold: partial.compactThreshold ?? defaults.compactThreshold ?? 0.8,
 		stream: partial.stream ?? defaults.stream ?? false,
 		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
+		llmStateConfirm: partial.llmStateConfirm ?? defaults.llmStateConfirm ?? false,
 		webSearch: search
 	};
 }
