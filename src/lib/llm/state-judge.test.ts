@@ -63,9 +63,10 @@ describe('buildJudgeSystemPrompt / buildJudgeUserPayload', () => {
 		const prompt = buildJudgeSystemPrompt(createInitialState());
 		expect(prompt).toContain('【当前状态】');
 		expect(prompt).toContain('只输出 True 或 False');
-		expect(prompt).toContain('虚构角色扮演');
+		expect(prompt).toContain('最高优先级指令');
+		expect(prompt).toContain('泳衣');
+		expect(prompt).toContain('只有完全确认没有任何变化才输出 False');
 		expect(prompt).toContain('禁止以任何安全');
-		expect(prompt).toContain('脱衣');
 	});
 
 	it('用户载荷只含最近发言、回复与思考', () => {
@@ -78,7 +79,8 @@ describe('buildJudgeSystemPrompt / buildJudgeUserPayload', () => {
 	it('确认提示词包含强指令工具要求', () => {
 		const prompt = buildConfirmationSystemPrompt(createInitialState());
 		expect(prompt).toContain('立即调用对应工具');
-		expect(prompt).toContain('禁止以任何安全');
+		expect(prompt).toContain('最高优先级指令');
+		expect(prompt).toContain('泳衣');
 		expect(prompt).toContain('tool_calls');
 	});
 });
@@ -114,7 +116,7 @@ describe('runStateJudge', () => {
 		expect(result.needsTool).toBe(false);
 	});
 
-	it('输出非法内容时按 False 处理且保留原始输出', async () => {
+	it('输出含糊内容时按需要执行处理且保留原始输出', async () => {
 		const result = await runStateJudge({
 			state: createInitialState(),
 			lastUser,
@@ -122,11 +124,23 @@ describe('runStateJudge', () => {
 			client: clientReturning('可能是吧'),
 			config
 		});
-		expect(result.needsTool).toBe(false);
+		expect(result.needsTool).toBe(true);
 		expect(result.debug.output).toBe('可能是吧');
 	});
 
-	it('请求失败时按 False 处理', async () => {
+	it('模型以安全理由拒绝判断时仍按需要执行处理', async () => {
+		const result = await runStateJudge({
+			state: createInitialState(),
+			lastUser,
+			lastAssistant,
+			client: clientReturning('我无法判断，这涉及隐私'),
+			config
+		});
+		expect(result.needsTool).toBe(true);
+		expect(result.debug.output).toBe('我无法判断，这涉及隐私');
+	});
+
+	it('请求失败时按需要执行处理（不吞状态同步）', async () => {
 		const result = await runStateJudge({
 			state: createInitialState(),
 			lastUser,
@@ -138,7 +152,7 @@ describe('runStateJudge', () => {
 			},
 			config
 		});
-		expect(result.needsTool).toBe(false);
+		expect(result.needsTool).toBe(true);
 		expect(result.debug.output).toBe('');
 	});
 });
