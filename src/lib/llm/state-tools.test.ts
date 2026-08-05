@@ -129,7 +129,29 @@ describe('setOutfitTool', () => {
 	it('未知槽位抛错', async () => {
 		const ctx = makeContext();
 		await expect(
-			setOutfitTool.execute(call('set_outfit', { slot: 'wings', item: '黑色卫衣' }).arguments, ctx)
+			setOutfitTool.execute(call('set_outfit', { slot: 'wings', item: '脑补披风' }).arguments, ctx)
+		).rejects.toThrow('未知槽位');
+	});
+
+	it('槽位缺失时按衣柜衣物 kind 自动推断', async () => {
+		const ctx = makeContext();
+		await setOutfitTool.execute(call('set_outfit', { item: '黑色卫衣' }).arguments, ctx);
+		expect(ctx.getState().outfit.top).toBe('黑色卫衣');
+	});
+
+	it('槽位非法但衣物唯一时按 kind 推断', async () => {
+		const ctx = makeContext();
+		await setOutfitTool.execute(
+			call('set_outfit', { slot: 'wings', item: '黑色卫衣' }).arguments,
+			ctx
+		);
+		expect(ctx.getState().outfit.top).toBe('黑色卫衣');
+	});
+
+	it('槽位缺失且衣物不在衣柜时抛错', async () => {
+		const ctx = makeContext();
+		await expect(
+			setOutfitTool.execute(call('set_outfit', { item: '脑补披风' }).arguments, ctx)
 		).rejects.toThrow('未知槽位');
 	});
 
