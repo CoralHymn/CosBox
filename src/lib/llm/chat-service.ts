@@ -19,6 +19,7 @@ import {
 	type StateToolDefinition
 } from './state-tools';
 import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
+import { extractTextToolCalls } from './text-tools';
 import type { ChatMessage, LlmChatResult, LlmClient, LlmConfig, TokenUsage } from './types';
 
 /** 开发者模式下展示的请求参数：用于排查 max_tokens / stream 等是否真正生效。 */
@@ -183,6 +184,16 @@ export class ChatService {
 						options.onDelta
 					);
 					usage = mergeUsage(usage, result.usage);
+					// 结构化 tool_calls 缺失时，尝试从正文/思考中解析文本形式的工具调用
+					// （DeepSeek 等思考模型有时把调用写进 reasoning 而不发 tool_calls）。
+					if (result.toolCalls.length === 0) {
+						const textCalls = extractTextToolCalls(
+							`${result.thinking ?? ''}\n${result.content ?? ''}`
+						);
+						if (textCalls.length > 0) {
+							result = { ...result, toolCalls: textCalls };
+						}
+					}
 					// 思考型模型偶发「只思考、不输出正文」（finish_reason=stop）：
 					// 追加正文必填提示重试一次，重试成功则采用重试结果（可能继续走工具轮）。
 					if (isThinkingOnlyReply(result)) {

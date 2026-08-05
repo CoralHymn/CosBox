@@ -40,6 +40,7 @@
 	$effect(() => {
 		if (editing && editEl !== null) {
 			// contenteditable 不会自动带入正文，进入编辑态时先把原文写入编辑区。
+			// eslint-disable-next-line svelte/no-dom-manipulating -- contenteditable 无 Svelte 原生绑定，必须直接写 textContent
 			editEl.textContent = message.content;
 			editEl.focus();
 		}

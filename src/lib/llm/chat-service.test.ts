@@ -241,6 +241,33 @@ describe('ChatService', () => {
 		expect(assistantToolMsg?.reasoning).toBe('用户想去食堂，我需要切换地点');
 	});
 
+	it('agent 循环：未发出结构化 tool_calls 时，从文本中解析工具调用并执行', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: 'advance_time(120)',
+				toolCalls: [],
+				thinking: '时间过了一段时间，调用 advance_time 推进两小时'
+			})
+			.mockResolvedValueOnce({ content: '好了，两小时过去了。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(executedTools[0]!.output).toContain('时间推进到 周一 10:00');
+		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 10, minute: 0 });
+		expect(reply).toBe('好了，两小时过去了。');
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+	});
+
 	it('调试视图携带本次实际请求参数', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '好的', toolCalls: [] }))

@@ -62,7 +62,9 @@ export function buildToolGuidance(): string {
 		'- 离开某地或到达新地点 → 立即调用 goto_location（优先从【已知地点】中选择）；',
 		'- 穿上/脱下衣物 → 立即调用 set_outfit（必须从【衣柜】中选择，item 用精确名称；用「无」表示脱掉）；',
 		'- 属性发生变化 → 立即调用 set_attribute。',
-		'每次调用工具都会立即生效并返回反馈；「我这就去」「过了几分钟」这类表述不算数，必须真的调用工具。'
+		'- 工具调用必须通过 tool_calls 字段发出并带完整参数（advance_time 给 minutes、goto_location 给地点名、set_outfit 给 slot+item、set_attribute 给 key+value）；',
+		'- 思考过程（reasoning）里写「我要调用 xxx」不算数：决定调用后立即在本次回复中发出结构化的 tool_calls。',
+		'每次调用工具都会立即生效并返回反馈；「我这就去」「过了几分钟」这类表述不算数，必须真的发出 tool_calls。'
 	].join('\n');
 }
 
