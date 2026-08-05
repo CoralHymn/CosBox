@@ -95,6 +95,84 @@ describe('OpenAiCompatibleClient', () => {
 		expect(body.max_tokens).toBe(512);
 	});
 
+	it('content 为多段数组时拼接 text 片段', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [
+					{
+						message: {
+							content: [
+								{ type: 'text', text: '你好' },
+								{ type: 'image_url', image_url: { url: 'x' } },
+								{ type: 'text', text: '呀' }
+							]
+						}
+					}
+				]
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([{ role: 'user', content: 'hi' }], config);
+		expect(result.content).toBe('你好呀');
+	});
+
+	it('content 为 null 但响应结构完整时按空回复处理并保留思考', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [
+					{
+						message: { content: null, reasoning_content: '先想想再回答' },
+						finish_reason: 'length'
+					}
+				]
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([{ role: 'user', content: 'hi' }], config);
+		expect(result.content).toBe('');
+		expect(result.thinking).toBe('先想想再回答');
+		expect(result.finishReason).toBe('length');
+	});
+
+	it('content 字段缺失但 message 存在时按空回复处理', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(toolResponse({ choices: [{ message: {} }] }));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([{ role: 'user', content: 'hi' }], config);
+		expect(result.content).toBe('');
+	});
+
+	it('带 worldTime 的消息在请求载荷中注入时间元数据行（正文本身不污染）', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chat(
+			[{ role: 'user', content: '好了快穿上吧', worldTime: { day: 0, hour: 9, minute: 0 } }],
+			config
+		);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.messages[0].content).toBe('【世界时间：周一 09:00】\n好了快穿上吧');
+		expect(body.messages[0]).not.toHaveProperty('worldTime');
+	});
+
+	it('无 worldTime 的消息不注入时间元数据', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chat([{ role: 'user', content: '早上好' }], config);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.messages[0].content).toBe('早上好');
+	});
+
 	it('无 apiKey 时不带 Authorization 头', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(okResponse('x'));
@@ -358,12 +436,14 @@ describe('OpenAiCompatibleClient', () => {
 		expect(result.toolCalls).toEqual([{ id: 'c3', name: 'x', arguments: {} }]);
 	});
 
-	it('chatWithTools content 为 null 且无工具调用时抛 LlmError', async () => {
+	it('chatWithTools content 为 null 且无工具调用时按空回复处理', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(toolResponse({ choices: [{ message: { content: null } }] }));
 		vi.stubGlobal('fetch', fetchSpy);
 		const client = new OpenAiCompatibleClient();
-		await expect(client.chatWithTools([], TOOL_SCHEMAS, config)).rejects.toThrow('缺少 choices');
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, config);
+		expect(result.content).toBe('');
+		expect(result.toolCalls).toEqual([]);
 	});
 
 	it('chatWithTools 忽略非对象或缺失 tool 的内联 JSON', async () => {
@@ -615,6 +695,68 @@ describe('OpenAiCompatibleClient', () => {
 		const result = await client.chat([], { ...config, stream: true });
 		expect(result.thinking).toBe('让我想想');
 		expect(result.content).toBe('回答');
+	});
+
+	it('流式响应仅含思考、无正文时按空回复处理并保留思考', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"让我想想"}}]}\n\n',
+				'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], { ...config, stream: true });
+		expect(result.content).toBe('');
+		expect(result.thinking).toBe('让我想想');
+		expect(result.finishReason).toBe('length');
+	});
+
+	it('流式响应正常结束时透传 finish_reason', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"content":"好了"}}]}\n\n',
+				'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], { ...config, stream: true });
+		expect(result.content).toBe('好了');
+		expect(result.finishReason).toBe('stop');
+	});
+
+	it('流式响应仅含 usage、无正文时按空回复处理', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"usage":{"prompt_tokens":10,"completion_tokens":0,"prompt_tokens_details":{"cached_tokens":0}}}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], { ...config, stream: true });
+		expect(result.content).toBe('');
+		expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 0, cachedTokens: 0 });
+	});
+
+	it('流式响应 content 为数组时提取 text 片段', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"content":[{"type":"text","text":"你"},{"type":"text","text":"好"}]}}]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], { ...config, stream: true });
+		expect(result.content).toBe('你好');
 	});
 
 	it('流式模式下端点返回完整 JSON 时降级解析', async () => {

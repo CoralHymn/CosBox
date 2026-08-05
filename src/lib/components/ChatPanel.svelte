@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ContextBundle } from '../context/pipeline';
 	import type { CharacterState, ChatMessageView } from '../core/types';
+	import { formatWorldTime } from '../core/state';
 	import {
 		serializeDebugPrompt,
 		type DebugPromptView,
@@ -200,7 +201,11 @@
 								<pre>{modal.view.systemMessage}</pre>
 								{#each modal.view.messages as message, i (i)}
 									{#if !(i === 0 && message.role === 'system' && message.content === modal.view.systemMessage)}
-										<p class="muted" style="margin: 10px 0 4px;">[{message.role}]</p>
+										<p class="muted" style="margin: 10px 0 4px;">
+											[{message.role}]{#if message.worldTime !== undefined}（{formatWorldTime(
+													message.worldTime
+												)}）{/if}
+										</p>
 										<pre>{message.content}</pre>
 										{#if message.toolCalls !== undefined && message.toolCalls.length > 0}
 											<pre>{JSON.stringify(message.toolCalls, null, 2)}</pre>

@@ -76,6 +76,43 @@ export function findWardrobeItem(wardrobe: ClothingItem[], name: string): Clothi
 	return wardrobe.find((item) => item.name === name);
 }
 
+/**
+ * 渲染当前穿着各件的衣柜描述（与【衣柜】条目一致），如
+ * 「白色衬衫：白色棉质衬衫，领口带细蕾丝；深蓝百褶裙：过膝深蓝百褶裙」。
+ * 已穿但衣柜中无同名条目、或条目无描述时不参与；全部无描述时返回空串。
+ */
+export function formatOutfitDetails(outfit: OutfitState): string {
+	const slots: readonly OutfitSlot[] = [
+		'headwear',
+		'top',
+		'underwear',
+		'underpants',
+		'bottom',
+		'socks',
+		'shoes'
+	];
+	const wornNames: string[] = [];
+	for (const slot of slots) {
+		const value = outfit[slot];
+		if (value !== null && value.trim() !== '') {
+			wornNames.push(value.trim());
+		}
+	}
+	for (const accessory of outfit.accessories) {
+		if (accessory.trim() !== '') {
+			wornNames.push(accessory.trim());
+		}
+	}
+	const parts: string[] = [];
+	for (const name of [...new Set(wornNames)]) {
+		const description = findWardrobeItem(outfit.wardrobe, name)?.description.trim() ?? '';
+		if (description !== '') {
+			parts.push(`${name}：${description}`);
+		}
+	}
+	return parts.join('；');
+}
+
 /** 按槽位类型过滤衣柜候选：kind 匹配该槽位、或 any / 未标注（兼容老数据）。 */
 export function wardrobeItemsForSlot(wardrobe: ClothingItem[], slot: ClothingKind): ClothingItem[] {
 	return wardrobe.filter(
@@ -104,6 +141,7 @@ export function summarizeSchedule(schedule: ScheduleState): string {
  * 覆盖：时间、当前活动、地点、穿着、属性、日程。
  */
 export function summarizeState(state: CharacterState): string {
+	const outfitDetails = formatOutfitDetails(state.outfit);
 	const lines = [
 		'【当前状态】',
 		`时间：${formatWorldTime(state.schedule.time)}（${describeCurrentActivity(state.schedule)}）`,
@@ -113,6 +151,7 @@ export function summarizeState(state: CharacterState): string {
 				: state.location.name
 		}（${state.location.description}）`,
 		`穿着：${formatOutfit(state.outfit)}`,
+		...(outfitDetails !== '' ? [`穿着细节：${outfitDetails}`] : []),
 		`属性：${formatAttributes(state.attributes)}`,
 		`今日日程：${summarizeSchedule(state.schedule)}`,
 		`【已知地点】${formatPlaces(state.places)}`,

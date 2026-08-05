@@ -85,6 +85,17 @@ describe('buildSummaryRequest', () => {
 		expect(request[1]!.content).not.toContain('【已有摘要】');
 	});
 
+	it('带世界时间的消息在角色标签同行标注时间', () => {
+		const withTime = [
+			{
+				...message('b', 'user', '新消息'),
+				worldTime: { day: 0, hour: 9, minute: 0 }
+			}
+		];
+		const request = buildSummaryRequest(null, withTime, false);
+		expect(request[1]!.content).toContain('[user]（周一 09:00） 新消息');
+	});
+
 	it('已有摘要为空串时跳过 previous 块', () => {
 		const request = buildSummaryRequest({ summary: '   ', boundaryId: 'b' }, messages, true);
 		expect(request[1]!.content).not.toContain('【已有摘要】');

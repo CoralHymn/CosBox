@@ -53,6 +53,34 @@ describe('ChatService', () => {
 		).rejects.toThrow('模型挂了');
 	});
 
+	it('清洗模型回复中误输出的时间标注', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({
+				content: '【世界时间：周一 12:00】\n我们到了',
+				toolCalls: []
+			}))
+		};
+		const service = new ChatService(client);
+		const { reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config
+		);
+		expect(reply).toBe('我们到了');
+	});
+
+	it('透传客户端的 finishReason 供空正文诊断', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: '', toolCalls: [], finishReason: 'length' }))
+		};
+		const service = new ChatService(client);
+		const { reply, finishReason } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config
+		);
+		expect(reply).toBe('');
+		expect(finishReason).toBe('length');
+	});
+
 	it('agent 循环：工具执行后携带结果继续请求，最终返回文本', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '不应走到纯文本路径', toolCalls: [] })),
@@ -116,6 +144,27 @@ describe('ChatService', () => {
 		expect(reply).toContain('已连续执行多次状态变更');
 		expect(executedTools).toHaveLength(2);
 		expect(vi.mocked(client.chatWithTools!).mock.calls).toHaveLength(2);
+	});
+
+	it('agent 循环：轮次叙事文本同样清洗时间标注', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: '【世界时间：周一 12:00】\n（慌乱地抓起衬衫）',
+					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+				})
+				.mockResolvedValueOnce({ content: '我们到食堂了', toolCalls: [] })
+		};
+		const service = new ChatService(client);
+		const { reply, rounds } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(rounds[0]!.content).toBe('（慌乱地抓起衬衫）');
+		expect(reply).toBe('我们到食堂了');
 	});
 
 	it('agent 循环：工具失败以错误文本回馈模型，循环继续', async () => {
@@ -425,6 +474,16 @@ describe('ChatService', () => {
 		expect(summarize).toHaveBeenCalledTimes(1);
 	});
 
+	it('手动压缩：摘要同样清洗时间标注', async () => {
+		const summarize = vi.fn(async () => ({
+			summary: '【世界时间：周一 12:00】摘要正文',
+			usage: undefined
+		}));
+		const service = new ChatService({ chat: vi.fn(), summarize });
+		const result = await service.compactConversation(makeConversation(25), config);
+		expect(result.state?.summary).toBe('摘要正文');
+	});
+
 	it('手动压缩：已有状态时从边界继续并携带旧摘要', async () => {
 		const summarize = vi.fn(async (request: ChatMessage[], _config: LlmConfig) => {
 			void request;
@@ -597,6 +656,17 @@ describe('serializeDebugPrompt', () => {
 		expect(text).toContain('[user] 你好');
 		expect(text).toContain('[tool_calls]');
 		expect(text).toContain('"name": "goto_location"');
+	});
+
+	it('带世界时间的消息在角色标签同行显示时间标注', () => {
+		const text = serializeDebugPrompt({
+			systemMessage: '系统提示',
+			messages: [
+				{ role: 'user', content: '好了快穿上吧', worldTime: { day: 0, hour: 9, minute: 0 } }
+			]
+		});
+		expect(text).toContain('[user]（周一 09:00） 好了快穿上吧');
+		expect(text).not.toContain('【世界时间：');
 	});
 });
 

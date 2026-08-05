@@ -225,7 +225,10 @@ export class CharacterManager {
 	): Promise<SnapshotNode> {
 		await this.ensureInit();
 		const trimmed = content.trim();
-		if (trimmed === '') {
+		const hasThinking = options.thinking !== undefined && options.thinking.trim() !== '';
+		// 模型可能只输出思考过程、正文为空：此时允许空正文消息保留思考内容；
+		// 其余情况空消息仍视为非法，防止脏数据进快照链。
+		if (trimmed === '' && !hasThinking) {
 			throw new StateValidationError('消息内容不能为空');
 		}
 		const roleLabel = role === 'user' ? '用户消息' : role === 'assistant' ? '角色消息' : '系统消息';

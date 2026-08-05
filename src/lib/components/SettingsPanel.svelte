@@ -41,7 +41,7 @@
 	let apiKey = $state('');
 	let model = $state('');
 	let temperature = $state(0.8);
-	let maxTokens = $state(1024);
+	let maxTokens = $state(4096);
 	let modelContextWindow = $state<number | undefined>(undefined);
 	let autoCompact = $state(true);
 	let compactThreshold = $state(0.8);
@@ -323,7 +323,8 @@
 				<input id="llm-max-tokens" class="input" type="number" bind:value={maxTokens} />
 				<p class="muted" style="margin-top: 2px;">
 					限制一次回复最多生成的 token 数（请求中的 max_tokens），不是上下文总长度；
-					自动压缩时也会预留这么多作为输出预算。
+					自动压缩时也会预留这么多作为输出预算。思考型模型（如 DeepSeek R1）的
+					思考与正文共享该预算：设置过小（如 1024）会导致思考耗尽预算、正文为空， 建议 4096 以上。
 				</p>
 			</div>
 		</div>

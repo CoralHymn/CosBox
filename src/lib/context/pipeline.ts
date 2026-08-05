@@ -67,6 +67,16 @@ export function buildToolGuidance(): string {
 }
 
 /**
+ * 世界时间元数据使用说明：注入系统提示，防止模型把【世界时间：…】标注
+ * 当作台词、旁白而在回复中复述或模仿。
+ */
+export const TIME_MARKER_GUIDANCE =
+	'对话消息中形如【世界时间：周一 09:00】的标注是剧情时间元数据，' +
+	'用于帮助你感知每条消息发生的时刻，不是台词、旁白或输出格式；' +
+	'回复正文中严禁出现【世界时间：…】或（周X HH:MM）等任何时间标注格式，' +
+	'需要表达时刻时用自然叙述（如「已经中午了」），并配合 advance_time 工具推进世界时间。';
+
+/**
  * 组装上下文：
  * 1) 世界信息关键词触发；
  * 2) 状态摘要注入；
@@ -105,10 +115,11 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		input.toolFeedback !== undefined && input.toolFeedback.trim() !== ''
 			? `\n\n${input.toolFeedback.trim()}`
 			: '';
-	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}${toolBlock}${feedbackBlock}`;
+	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}${toolBlock}${feedbackBlock}\n\n${TIME_MARKER_GUIDANCE}`;
 	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
 		role: message.role,
-		content: message.content
+		content: message.content,
+		...(message.worldTime !== undefined ? { worldTime: message.worldTime } : {})
 	}));
 
 	return {

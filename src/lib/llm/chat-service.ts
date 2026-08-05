@@ -18,6 +18,7 @@ import {
 	type StateToolContext,
 	type StateToolDefinition
 } from './state-tools';
+import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
 import type { ChatMessage, LlmClient, LlmConfig, TokenUsage } from './types';
 
 /** 开发者模式下展示的最近一次请求：完整系统消息 + 实际发送的消息数组。 */
@@ -94,6 +95,8 @@ export class ChatService {
 		usage: TokenUsage | undefined;
 		compaction: CompactionState | null;
 		thinking: string | undefined;
+		/** 端点的 finish_reason（stop / length 等）；正文为空时为「输出预算耗尽」排查提供依据。 */
+		finishReason: string | undefined;
 		/** 工具调用轮次（按顺序；每轮含叙事文本与工具反馈，最终回复在 reply）。 */
 		rounds: ReplyRound[];
 	}> {
@@ -159,13 +162,14 @@ export class ChatService {
 					usage = mergeUsage(usage, result.usage);
 					if (result.toolCalls.length === 0) {
 						return {
-							reply: result.content ?? '',
+							reply: sanitizeAssistantText(result.content ?? ''),
 							bundle,
 							executedTools,
 							debug,
 							usage,
 							compaction,
 							thinking: result.thinking,
+							finishReason: result.finishReason,
 							rounds
 						};
 					}
@@ -187,7 +191,7 @@ export class ChatService {
 						});
 					}
 					rounds.push({
-						content: result.content ?? null,
+						content: sanitizeAssistantText(result.content ?? '') || null,
 						thinking: result.thinking,
 						tools: roundTools
 					});
@@ -214,6 +218,7 @@ export class ChatService {
 					usage,
 					compaction,
 					thinking: undefined,
+					finishReason: undefined,
 					rounds
 				};
 			}
@@ -221,13 +226,14 @@ export class ChatService {
 
 		const result = await this.client.chat(messages, config, signal, options.onDelta);
 		return {
-			reply: result.content ?? '',
+			reply: sanitizeAssistantText(result.content ?? ''),
 			bundle,
 			executedTools,
 			debug,
 			usage: mergeUsage(usage, result.usage),
 			compaction,
 			thinking: result.thinking,
+			finishReason: result.finishReason,
 			rounds
 		};
 	}
@@ -285,10 +291,13 @@ export class ChatService {
 		try {
 			if (this.client.summarize) {
 				const result = await this.client.summarize(request, config, signal);
-				return { summary: result.summary.trim(), usage: result.usage };
+				return { summary: sanitizeAssistantText(result.summary.trim()), usage: result.usage };
 			}
 			const result = await this.client.chat(request, config, signal);
-			return { summary: (result.content ?? '').trim(), usage: result.usage };
+			return {
+				summary: sanitizeAssistantText((result.content ?? '').trim()),
+				usage: result.usage
+			};
 		} catch (err) {
 			if (signal?.aborted) {
 				throw err;
@@ -302,7 +311,10 @@ export class ChatService {
 export function serializeDebugPrompt(view: DebugPromptView): string {
 	const parts: string[] = [`[system] ${view.systemMessage}`];
 	for (const message of view.messages) {
-		parts.push(`[${message.role}] ${message.content}`);
+		// 世界时间标注贴在角色标签同一行（如 [user]（周一 09:00）），正文另起一段，
+		// 与发送给模型的结构化角色分隔一致，便于阅读且不与正文混淆。
+		const label = message.worldTime !== undefined ? formatWorldTimeLabel(message.worldTime) : '';
+		parts.push(`[${message.role}]${label} ${message.content}`);
 		if (message.toolCalls !== undefined && message.toolCalls.length > 0) {
 			parts.push(`[tool_calls] ${JSON.stringify(message.toolCalls, null, 2)}`);
 		}

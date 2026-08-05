@@ -3,6 +3,7 @@ import { createInitialState } from '../core/state';
 import {
 	formatAttributes,
 	formatOutfit,
+	formatOutfitDetails,
 	formatPlaces,
 	formatWardrobe,
 	findWardrobeItem,
@@ -64,6 +65,65 @@ describe('formatOutfit', () => {
 		).toBe(
 			'帽子：未穿；上衣：未穿；内衣：未穿；内裤：未穿；下装：未穿；袜子：未穿；鞋：未穿；配饰：未穿'
 		);
+	});
+});
+
+describe('formatOutfitDetails', () => {
+	it('按穿戴顺序输出已穿衣物的衣柜描述，配饰也参与', () => {
+		expect(
+			formatOutfitDetails({
+				headwear: '贝雷帽',
+				top: '白色衬衫',
+				underwear: null,
+				underpants: null,
+				bottom: '深蓝百褶裙',
+				socks: '',
+				shoes: null,
+				accessories: ['蝴蝶结发带'],
+				wardrobe: [
+					{ id: 'a', category: '常服', name: '白色衬衫', description: '领口带细蕾丝' },
+					{ id: 'b', category: '常服', name: '深蓝百褶裙', description: '过膝百褶裙' },
+					{ id: 'c', category: '常服', name: '蝴蝶结发带', description: '缎面发带' },
+					{ id: 'd', category: '常服', name: '贝雷帽', description: '酒红色贝雷帽' }
+				]
+			})
+		).toBe(
+			'贝雷帽：酒红色贝雷帽；白色衬衫：领口带细蕾丝；深蓝百褶裙：过膝百褶裙；蝴蝶结发带：缎面发带'
+		);
+	});
+
+	it('衣柜中无同名条目或无描述的衣物不参与', () => {
+		expect(
+			formatOutfitDetails({
+				headwear: null,
+				top: '白色衬衫',
+				underwear: null,
+				underpants: null,
+				bottom: '自制裙子',
+				socks: null,
+				shoes: null,
+				accessories: [],
+				wardrobe: [
+					{ id: 'a', category: '常服', name: '白色衬衫', description: '领口带细蕾丝' },
+					{ id: 'b', category: '常服', name: '黑裙子', description: '   ' }
+				]
+			})
+		).toBe('白色衬衫：领口带细蕾丝');
+	});
+
+	it('衣柜为空或全部无描述时返回空串', () => {
+		const outfit = {
+			headwear: null,
+			top: '白色衬衫',
+			underwear: null,
+			underpants: null,
+			bottom: null,
+			socks: null,
+			shoes: null,
+			accessories: [],
+			wardrobe: []
+		};
+		expect(formatOutfitDetails(outfit)).toBe('');
 	});
 });
 
@@ -199,5 +259,22 @@ describe('summarizeState', () => {
 		expect(text).toContain('今日日程：周一 08:00-09:00 晨会');
 		expect(text).toContain('【已知地点】学校 > 学院正门（樱花道尽头的校门，晨间常有学生出入）');
 		expect(text).toContain('【衣柜】常服 > 白色衬衫：白色棉质衬衫，领口带细蕾丝，袖口挽起两折');
+	});
+
+	it('穿着细节行紧跟穿着行，使用与衣柜一致的描述', () => {
+		const text = summarizeState(createInitialState());
+		const lines = text.split('\n');
+		const outfitIndex = lines.findIndex((line) => line.startsWith('穿着：'));
+		expect(lines[outfitIndex + 1]).toContain('穿着细节：');
+		expect(lines[outfitIndex + 1]).toContain('白色衬衫：白色棉质衬衫，领口带细蕾丝，袖口挽起两折');
+		expect(lines[outfitIndex + 1]).toContain('深蓝百褶裙：深蓝色及膝百褶裙，走动时裙摆轻轻摆动');
+	});
+
+	it('已穿衣物在衣柜中无描述时不输出穿着细节行', () => {
+		const state = createInitialState();
+		state.outfit.top = '无名外套';
+		state.outfit.wardrobe = [];
+		const text = summarizeState(state);
+		expect(text).not.toContain('穿着细节');
 	});
 });

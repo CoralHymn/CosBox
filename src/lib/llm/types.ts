@@ -1,4 +1,4 @@
-import type { MessageRole } from '../core/types';
+import type { MessageRole, WorldTime } from '../core/types';
 import { DEFAULT_WEB_SEARCH_CONFIG, type WebSearchConfig } from '../search/types';
 import { DEFAULT_COMPACT_THRESHOLD } from './compaction';
 
@@ -42,6 +42,8 @@ export interface ToolCall {
 export interface ChatMessage {
 	role: LlmMessageRole;
 	content: string;
+	/** 消息产生时的世界时间：仅在序列化给模型时注入为元数据标注，正文保持纯净。 */
+	worldTime?: WorldTime;
 	/** assistant 消息携带的模型工具调用（回传给 API 时必须原样保留）。 */
 	toolCalls?: ToolCall[];
 	/** tool 消息指向的 tool_call id。 */
@@ -72,6 +74,8 @@ export interface LlmChatResult {
 	toolCalls: ToolCall[];
 	/** 模型的思考过程（reasoning_content / reasoning）；仅展示，不随请求回传。 */
 	thinking?: string;
+	/** 端点的 finish_reason（stop / length 等）；正文为空且为 length 时用于提示输出预算耗尽。 */
+	finishReason?: string;
 	/** API 返回或本地估算的 token 用量；部分端点不提供时为 undefined。 */
 	usage?: TokenUsage;
 }
@@ -107,7 +111,9 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	apiKey: '',
 	model: 'gpt-4o-mini',
 	temperature: 0.8,
-	maxTokens: 1024,
+	// 思考型模型（DeepSeek R1 等）的思考与正文共享输出预算，1024 太小会导致
+	// 思考耗尽预算、正文为空；默认提到官方常用的 4096。
+	maxTokens: 4096,
 	autoCompact: true,
 	compactThreshold: DEFAULT_COMPACT_THRESHOLD,
 	stream: false,

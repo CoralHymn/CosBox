@@ -1,5 +1,4 @@
 import type { ChatMessageView } from '../core/types';
-import { formatWorldTime } from '../core/state';
 
 /** /help 帮助文本的稳定前缀（内容级兜底，兼容早期未打 skipContext 标记的快照）。 */
 export const HELP_TEXT_PREFIX = '可用 RP 快捷命令';
@@ -58,10 +57,9 @@ export function prepareHistory(
 			truncated += 1;
 			body = `${message.content.slice(0, charLimit)}…`;
 		}
-		// 每条消息标注产生时的世界时间，让模型更好地感知剧情时间流逝。
-		const timeLabel =
-			message.worldTime !== undefined ? `（${formatWorldTime(message.worldTime)}）` : '';
-		return { ...message, content: `${timeLabel}${body}` };
+		// 正文保持纯净：worldTime 原样保留在消息上，由 API 边界序列化时
+		// 注入为元数据标注（见 llm/message-time.ts），避免模型模仿复述。
+		return { ...message, content: body };
 	});
 
 	const compressedCount = Math.max(0, contextMessages.length - kept.length);
