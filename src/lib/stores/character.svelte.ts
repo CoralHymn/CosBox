@@ -28,8 +28,8 @@ export interface CharacterSessionStore {
 	advanceTime: (minutes: number) => Promise<SnapshotNode>;
 	addCheckpoint: (desc: string) => Promise<SnapshotNode>;
 	deleteBranch: (tipId: string) => Promise<number>;
-	/** 批量删除快照（含选中节点的全部后代）。 */
-	deleteSnapshots: (ids: readonly string[]) => Promise<number>;
+	/** 批量删除分支（每个分支只删除其独有快照）。 */
+	deleteBranches: (tipIds: readonly string[]) => Promise<number>;
 	/** 世界配置覆盖（地点库/衣柜/日程条目）：不生成快照、不进版本历史。 */
 	applyConfig: (patch: ConfigPatch) => Promise<void>;
 }
@@ -76,7 +76,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 		advanceTime: (minutes) => manager.advanceTime(minutes),
 		addCheckpoint: (desc) => manager.addCheckpoint(desc),
 		deleteBranch: (tipId) => manager.deleteBranch(tipId),
-		deleteSnapshots: (ids) => manager.deleteSnapshots(ids),
+		deleteBranches: (tipIds) => manager.deleteBranches(tipIds),
 		applyConfig: (patch) => manager.applyConfig(patch)
 	};
 }
