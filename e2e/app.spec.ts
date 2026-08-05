@@ -564,6 +564,68 @@ test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 	await expect(page.getByText('白色连衣裙').first()).toBeVisible();
 });
 
+test('AI 地点：按古代世界观生成、勾选后一键导入', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /地点/ }).click();
+	await page.getByRole('button', { name: 'AI地点' }).click();
+	const modal = page.locator('.ai-modal');
+	await expect(modal).toBeVisible();
+
+	await page.locator('#ai-worldview').selectOption('ancient');
+	await page.locator('#ai-requirements').fill('书院学园');
+	await page.getByRole('button', { name: '生成' }).click();
+
+	// 审查通过后展示生成的条目
+	await expect(modal.getByText(/书院 > 讲堂/)).toBeVisible();
+	await expect(modal.getByText(/集市 > 药铺/)).toBeVisible();
+
+	// 取消一项后一键导入其余
+	await modal.locator('.ai-item').filter({ hasText: '马厩' }).locator('input').uncheck();
+	await page.getByRole('button', { name: /一键导入/ }).click();
+	await expect(modal).not.toBeVisible();
+	await expect(
+		page.locator('#current-place option').filter({ hasText: '书院 > 讲堂' })
+	).toHaveCount(1);
+	// 地点库属于世界配置：导入不生成快照
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+});
+
+test('AI 衣物：性别选项影响生成并批量导入', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /衣柜/ }).click();
+	await page.getByRole('button', { name: 'AI衣物' }).click();
+	const modal = page.locator('.ai-modal');
+	await expect(modal).toBeVisible();
+	await expect(page.locator('#ai-gender')).toBeVisible();
+
+	await page.locator('#ai-gender').selectOption('男');
+	await page.locator('#ai-requirements').fill('日常便服');
+	await page.getByRole('button', { name: '生成' }).click();
+
+	await expect(modal.getByText(/白衬衫/)).toBeVisible();
+	await expect(modal.getByText(/白色连衣裙/)).toHaveCount(0);
+	await page.getByRole('button', { name: /一键导入/ }).click();
+	await expect(modal).not.toBeVisible();
+	await expect(page.locator('#wardrobe-top option[value="白衬衫"]')).toHaveCount(1);
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+});
+
+test('AI 条目：生成日程并批量导入', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /日程/ }).click();
+	await page.getByRole('button', { name: 'AI条目' }).click();
+	const modal = page.locator('.ai-modal');
+	await page.locator('#ai-requirements').fill('一周课程安排');
+	await page.getByRole('button', { name: '生成' }).click();
+
+	await expect(modal.getByText(/武术课/)).toBeVisible();
+	await page.getByRole('button', { name: /一键导入/ }).click();
+	await expect(modal).not.toBeVisible();
+	// 原 3 条 + 导入 4 条
+	await expect(page.locator('.list-row')).toHaveCount(7);
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+});
+
 test('对话后侧栏显示上下文用量、费用估算与压缩状态', async ({ page }) => {
 	await page.goto('/');
 	await page.getByPlaceholder(/输入消息/).fill('早上好');

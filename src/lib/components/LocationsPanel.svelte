@@ -1,7 +1,14 @@
 <script lang="ts">
 	import type { ConfigPatch, LocationDef, LocationState, StatePatch } from '../core/types';
+	import type {
+		GeneratedItem,
+		GenerationRequest,
+		GenerationResult,
+		GeneratorKind
+	} from '../llm/generator';
 	import { groupByCategory } from '../utils/grouping';
 	import { newId } from '../utils/id';
+	import AiGeneratorPanel from './AiGeneratorPanel.svelte';
 
 	interface Props {
 		places: LocationDef[];
@@ -9,9 +16,11 @@
 		onUpdate: (patch: StatePatch, desc: string) => void;
 		/** 地点库条目属于世界配置：编辑不生成快照、不进版本历史。 */
 		onConfig: (patch: ConfigPatch) => void;
+		onAiGenerate: (request: GenerationRequest) => Promise<GenerationResult>;
+		onAiImport: (kind: GeneratorKind, items: GeneratedItem[]) => Promise<void>;
 	}
 
-	let { places, location, onUpdate, onConfig }: Props = $props();
+	let { places, location, onUpdate, onConfig, onAiGenerate, onAiImport }: Props = $props();
 
 	interface PlaceRow {
 		id: string;
@@ -29,6 +38,7 @@
 	let draftCategory = $state('');
 	let draftName = $state('');
 	let draftDescription = $state('');
+	let aiOpen = $state(false);
 
 	const groups = $derived(groupByCategory(rows));
 
@@ -266,6 +276,19 @@
 				/>
 			</div>
 		</div>
-		<button class="btn btn-primary" onclick={addPlace}>添加地点</button>
+		<div class="row-actions">
+			<button class="btn btn-primary" onclick={addPlace}>添加地点</button>
+			<button class="btn" onclick={() => (aiOpen = true)}>AI地点</button>
+		</div>
 	</div>
 </div>
+
+{#if aiOpen}
+	<AiGeneratorPanel
+		kind="locations"
+		existing={places}
+		onClose={() => (aiOpen = false)}
+		onGenerate={onAiGenerate}
+		onImport={(items) => onAiImport('locations', items)}
+	/>
+{/if}

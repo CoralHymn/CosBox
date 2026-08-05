@@ -1,9 +1,22 @@
 <script lang="ts">
 	import { findWardrobeItem } from '../context/state-summary';
 	import { CLOTHING_KINDS } from '../core/state';
-	import type { ClothingKind, ConfigPatch, OutfitSlot, OutfitState, StatePatch } from '../core/types';
+	import type {
+		ClothingKind,
+		ConfigPatch,
+		OutfitSlot,
+		OutfitState,
+		StatePatch
+	} from '../core/types';
+	import type {
+		GeneratedItem,
+		GenerationRequest,
+		GenerationResult,
+		GeneratorKind
+	} from '../llm/generator';
 	import { groupByCategory } from '../utils/grouping';
 	import { newId } from '../utils/id';
+	import AiGeneratorPanel from './AiGeneratorPanel.svelte';
 	import OutfitSlotPicker from './OutfitSlotPicker.svelte';
 
 	interface Props {
@@ -11,9 +24,11 @@
 		onUpdate: (patch: StatePatch, desc: string) => void;
 		/** 衣柜条目属于世界配置：编辑不生成快照、不进版本历史。 */
 		onConfig: (patch: ConfigPatch) => void;
+		onAiGenerate: (request: GenerationRequest) => Promise<GenerationResult>;
+		onAiImport: (kind: GeneratorKind, items: GeneratedItem[]) => Promise<void>;
 	}
 
-	let { outfit, onUpdate, onConfig }: Props = $props();
+	let { outfit, onUpdate, onConfig, onAiGenerate, onAiImport }: Props = $props();
 
 	interface WardrobeRow {
 		id: string;
@@ -53,6 +68,7 @@
 	let draftKind = $state<ClothingKind>('top');
 	let draftName = $state('');
 	let draftDescription = $state('');
+	let aiOpen = $state(false);
 
 	const groups = $derived(groupByCategory(rows));
 	const slotItems = $derived(
@@ -285,6 +301,19 @@
 				/>
 			</div>
 		</div>
-		<button class="btn btn-primary" onclick={addItem}>添加衣物</button>
+		<div class="row-actions">
+			<button class="btn btn-primary" onclick={addItem}>添加衣物</button>
+			<button class="btn" onclick={() => (aiOpen = true)}>AI衣物</button>
+		</div>
 	</div>
 </div>
+
+{#if aiOpen}
+	<AiGeneratorPanel
+		kind="wardrobe"
+		existing={outfit.wardrobe}
+		onClose={() => (aiOpen = false)}
+		onGenerate={onAiGenerate}
+		onImport={(items) => onAiImport('wardrobe', items)}
+	/>
+{/if}

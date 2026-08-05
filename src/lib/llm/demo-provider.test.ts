@@ -4,9 +4,12 @@ import {
 	buildDemoSummary,
 	buildDemoReply,
 	buildDemoToolResult,
+	demoGeneratedItems,
+	detectGenerationKind,
 	extractLine,
 	extractSearchTitle
 } from './demo-provider';
+import { buildGenerationSystemPrompt, buildReviewTool } from './generator';
 import { STATE_TOOLS } from './state-tools';
 import { DEFAULT_LLM_CONFIG, type ChatMessage, type StateToolSchema } from './types';
 
@@ -261,5 +264,103 @@ describe('buildDemoSummary / summarize', () => {
 	it('普通消息不返回思考内容', async () => {
 		const result = await buildDemoToolResult(messages('早上好'), []);
 		expect(result.thinking).toBeUndefined();
+	});
+});
+
+describe('AI 生成演示路径', () => {
+	it('detectGenerationKind 识别三类生成任务，普通系统消息返回 null', () => {
+		expect(detectGenerationKind('【生成任务：地点库】\n...')).toBe('locations');
+		expect(detectGenerationKind('【生成任务：衣柜】\n...')).toBe('wardrobe');
+		expect(detectGenerationKind('【生成任务：日程表】\n...')).toBe('schedule');
+		expect(detectGenerationKind('【当前状态】\n时间：周一 08:00')).toBeNull();
+	});
+
+	it('demoGeneratedItems 按世界观生成地点', () => {
+		expect(
+			demoGeneratedItems('locations', '【世界观：古代】').some((item) => item.name === '讲堂')
+		).toBe(true);
+		expect(
+			demoGeneratedItems('locations', '【世界观：奇幻】').some((item) => item.name === '炼金室')
+		).toBe(true);
+		expect(
+			demoGeneratedItems('locations', '【世界观：现代】').some((item) => item.name === '便利店')
+		).toBe(true);
+	});
+
+	it('demoGeneratedItems 按性别生成衣物', () => {
+		const male = demoGeneratedItems('wardrobe', '角色性别：男');
+		expect(male.some((item) => item.name === '白衬衫')).toBe(true);
+		expect(male.some((item) => item.name === '白色连衣裙')).toBe(false);
+		const female = demoGeneratedItems('wardrobe', '角色性别：女');
+		expect(female.some((item) => item.name === '白色连衣裙')).toBe(true);
+	});
+
+	it('demoGeneratedItems 生成日程条目', () => {
+		const schedule = demoGeneratedItems('schedule', '【生成任务：日程表】');
+		expect(schedule).toHaveLength(4);
+		expect(schedule.some((item) => item.title === '武术课')).toBe(true);
+	});
+
+	it('chatWithTools 完整生成循环：审查通过后输出最终 JSON', async () => {
+		const client = new DemoLlmClient();
+		const system = buildGenerationSystemPrompt({
+			kind: 'locations',
+			worldview: 'ancient',
+			requirements: '书院学园'
+		});
+		const tool = buildReviewTool('locations', 'ancient') as unknown as StateToolSchema;
+		const userMessage: ChatMessage[] = [
+			{ role: 'system', content: system },
+			{ role: 'user', content: '书院学园' }
+		];
+
+		// 第一轮：返回 review_generation 工具调用
+		const first = await client.chatWithTools(userMessage, [tool], DEFAULT_LLM_CONFIG);
+		expect(first.content).toBeNull();
+		expect(first.toolCalls).toHaveLength(1);
+		expect(first.toolCalls[0]!.name).toBe('review_generation');
+		const reviewed = buildReviewTool('locations', 'ancient').execute(first.toolCalls[0]!.arguments);
+		expect(reviewed.issues).toEqual([]);
+
+		// 第二轮：收到审查结果后输出最终 JSON
+		const second = await client.chatWithTools(
+			[
+				...userMessage,
+				{
+					role: 'assistant',
+					content: '',
+					toolCalls: first.toolCalls
+				},
+				{
+					role: 'tool',
+					content: reviewed.output,
+					toolCallId: first.toolCalls[0]!.id,
+					name: 'review_generation'
+				}
+			],
+			[tool],
+			DEFAULT_LLM_CONFIG
+		);
+		expect(second.toolCalls).toEqual([]);
+		const items = JSON.parse(second.content ?? '[]') as Array<{ name: string }>;
+		expect(items.length).toBeGreaterThan(0);
+		expect(items.some((item) => item.name === '讲堂')).toBe(true);
+	});
+
+	it('生成流程在无审查工具或非生成任务时回退普通演示', async () => {
+		const result = buildDemoToolResult(messages('早上好'), STATE_TOOLS);
+		expect(result.toolCalls).toEqual([]);
+		expect(result.content).toContain('演示模式回应');
+	});
+
+	it('有审查工具但系统消息非生成任务时回退普通演示', async () => {
+		const tool: StateToolSchema = {
+			name: 'review_generation',
+			description: 'x',
+			parameters: { type: 'object', properties: {}, required: [] }
+		};
+		const result = buildDemoToolResult(messages('早上好'), [tool]);
+		expect(result.toolCalls).toEqual([]);
+		expect(result.content).toContain('演示模式回应');
 	});
 });
