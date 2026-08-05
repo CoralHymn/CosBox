@@ -268,6 +268,67 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(2);
 	});
 
+	it('agent 循环：思考里提到工具名却漏发调用时，补发调用重试并执行', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '（自然地回应）时间过得真快呢。',
+				toolCalls: [],
+				thinking: '让我用 advance_time 推进一些时间，然后自然地回应。'
+			})
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
+			})
+			.mockResolvedValueOnce({ content: '已经过了一小时啦。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 9, minute: 0 });
+		expect(reply).toBe('已经过了一小时啦。');
+		expect(chatWithTools).toHaveBeenCalledTimes(3);
+		// 补发调用提示出现在第二次请求里
+		const secondMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
+		expect(
+			secondMessages.some(
+				(message) => message.role === 'system' && message.content.includes('没有对应的 tool_calls')
+			)
+		).toBe(true);
+	});
+
+	it('agent 循环：补发调用重试仍不调用时采用重试正文且不执行工具', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '回复正文',
+				toolCalls: [],
+				thinking: '也许应该调用 goto_location，但这次先不切换。'
+			})
+			.mockResolvedValueOnce({ content: '好的，直接回复。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(executedTools).toEqual([]);
+		expect(reply).toBe('好的，直接回复。');
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+	});
+
 	it('调试视图携带本次实际请求参数', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '好的', toolCalls: [] }))

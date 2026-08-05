@@ -194,6 +194,24 @@ export class ChatService {
 							result = { ...result, toolCalls: textCalls };
 						}
 					}
+					// 思考里明确提到工具名却没发出 tool_calls（DeepSeek V4 常见漏调用）：
+					// 追加「补发调用」提示重试一次，避免「正文都写了、工具却没调用」。
+					if (result.toolCalls.length === 0) {
+						const planned = detectPlannedTool(result.thinking);
+						if (planned !== null) {
+							const retried = await this.retryPlannedTool(
+								messages,
+								planned,
+								config,
+								options,
+								signal
+							);
+							usage = mergeUsage(usage, retried?.usage);
+							if (retried !== null) {
+								result = retried;
+							}
+						}
+					}
 					// 思考型模型偶发「只思考、不输出正文」（finish_reason=stop）：
 					// 追加正文必填提示重试一次，重试成功则采用重试结果（可能继续走工具轮）。
 					if (isThinkingOnlyReply(result)) {
@@ -437,6 +455,51 @@ export class ChatService {
 			return null;
 		}
 	}
+
+	/**
+	 * 思考里提到工具名却漏发 tool_calls 时，追加「补发调用」提示重试一次
+	 * （对齐 opencode 等 agent 的「调用失败会重新调用」行为）。
+	 * 重试产出工具调用或正文即采用，否则返回 null 由调用方兜底。
+	 */
+	private async retryPlannedTool(
+		messages: ReadonlyArray<ChatMessage>,
+		tool: string,
+		config: LlmConfig,
+		options: GenerateReplyOptions,
+		signal?: AbortSignal
+	): Promise<LlmChatResult | null> {
+		const retryMessages: ChatMessage[] = [
+			...messages,
+			{
+				role: 'system',
+				content:
+					`【系统提示】你上一轮思考中提到了要调用 ${tool}，但回复里没有对应的 tool_calls。` +
+					`如果你确实需要调用，请立即发出 ${tool} 的 tool_calls（带完整参数）；` +
+					'如果不需要调用，请直接输出正文。'
+			}
+		];
+		try {
+			const result =
+				options.tools !== undefined &&
+				options.tools.length > 0 &&
+				options.toolContext !== undefined &&
+				this.client.chatWithTools !== undefined
+					? await this.client.chatWithTools(
+							retryMessages,
+							options.tools,
+							config,
+							signal,
+							options.onDelta
+						)
+					: await this.client.chat(retryMessages, config, signal, options.onDelta);
+			return result.toolCalls.length > 0 ||
+				(result.content !== null && result.content.trim() !== '')
+				? result
+				: null;
+		} catch {
+			return null;
+		}
+	}
 }
 
 /** 把最近一次请求序列化为纯文本（供调试复制）。 */
@@ -481,6 +544,19 @@ function isThinkingOnlyReply(result: LlmChatResult): boolean {
 		result.thinking !== undefined &&
 		result.thinking.trim() !== ''
 	);
+}
+
+/** 从思考中识别「明确提到要调用」的工具名；未提到返回 null。 */
+function detectPlannedTool(thinking: string | undefined): string | null {
+	if (thinking === undefined || thinking.trim() === '') {
+		return null;
+	}
+	for (const name of ['advance_time', 'goto_location', 'set_outfit', 'set_attribute']) {
+		if (new RegExp(`\\b${name}\\b`).test(thinking)) {
+			return name;
+		}
+	}
+	return null;
 }
 
 /** 生成最近一次响应的诊断摘要（空正文排查用）。 */
