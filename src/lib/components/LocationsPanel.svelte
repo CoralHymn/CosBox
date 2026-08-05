@@ -138,6 +138,9 @@
 	}
 
 	function removePlace(id: string): void {
+		if (!window.confirm('确定删除该地点？此操作会立即保存，无法撤销。')) {
+			return;
+		}
 		rows = rows.filter((row) => row.id !== id);
 		commitPlaces();
 	}

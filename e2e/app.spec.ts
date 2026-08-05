@@ -700,6 +700,47 @@ test('日程表按时间自动排序', async ({ page }) => {
 	);
 });
 
+test('删除地点/衣柜/日程需确认：取消不删除，确认才删除', async ({ page }) => {
+	await page.goto('/');
+
+	// 地点：取消确认 → 条目保留
+	await page.getByRole('button', { name: /地点/ }).click();
+	const schoolGroup = page
+		.locator('div.group')
+		.filter({ has: page.locator('.group-name', { hasText: '学校' }) });
+	let dialog = page.waitForEvent('dialog');
+	const click1 = schoolGroup.locator('button[aria-label="删除地点"]').first().click();
+	await (await dialog).dismiss();
+	await click1;
+	await expect(schoolGroup.locator('input[placeholder="地点名"]').first()).toHaveValue('学院正门');
+
+	// 地点：确认 → 条目删除
+	dialog = page.waitForEvent('dialog');
+	const click2 = schoolGroup.locator('button[aria-label="删除地点"]').first().click();
+	await (await dialog).accept();
+	await click2;
+	await expect(schoolGroup.locator('input[placeholder="地点名"]').first()).toHaveValue('教室 2-B');
+
+	// 衣柜：取消确认 → 条目保留
+	await page.getByRole('button', { name: /衣柜/ }).click();
+	const casualGroup = page
+		.locator('div.group')
+		.filter({ has: page.locator('.group-name', { hasText: '常服' }) });
+	dialog = page.waitForEvent('dialog');
+	const click3 = casualGroup.locator('button[aria-label="删除衣物"]').first().click();
+	await (await dialog).dismiss();
+	await click3;
+	await expect(casualGroup.locator('input[placeholder="衣物名"]').first()).toHaveValue('白色衬衫');
+
+	// 日程：取消确认 → 条目保留
+	await page.getByRole('button', { name: /日程/ }).click();
+	dialog = page.waitForEvent('dialog');
+	const click4 = page.locator('.list-row button[aria-label="删除条目"]').first().click();
+	await (await dialog).dismiss();
+	await click4;
+	await expect(page.locator('.list-row')).toHaveCount(3);
+});
+
 test('地点库导出与导入（JSON 模板）', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /地点/ }).click();
