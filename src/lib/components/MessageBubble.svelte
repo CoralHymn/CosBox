@@ -28,11 +28,34 @@
 	let editing = $state(false);
 	let draft = $state('');
 	let saving = $state(false);
+	let editEl = $state<HTMLDivElement | null>(null);
 
 	/** 进入编辑态，草稿预填当前正文。 */
 	function startEdit(): void {
 		draft = message.content;
 		editing = true;
+	}
+
+	/** 编辑态聚焦编辑区，让用户直接开始打字。 */
+	$effect(() => {
+		if (editing && editEl !== null) {
+			editEl.focus();
+		}
+	});
+
+	/** 从可编辑区同步草稿（contenteditable 无双向绑定，手动读取 textContent）。 */
+	function onEditInput(): void {
+		draft = editEl?.textContent ?? '';
+	}
+
+	/** Esc 取消；Ctrl/Cmd+Enter 保存。 */
+	function onEditKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			editing = false;
+		} else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+			event.preventDefault();
+			void saveEdit();
+		}
 	}
 
 	/** 保存编辑：交给父级落库；失败时保持编辑态供用户修正。 */
@@ -72,21 +95,62 @@
 		</details>
 	{/if}
 	{#if editing}
-		<textarea
+		<!-- 直接在原文上编辑：contenteditable 高度与正文一致，切换编辑态零布局变动。 -->
+		<div
 			class="inline-edit"
-			bind:value={draft}
-			rows={Math.max(3, Math.min(10, draft.split('\n').length + 1))}></textarea>
-		<div class="edit-actions">
-			<button class="btn btn-small" onclick={saveEdit} disabled={saving || draft.trim() === ''}>
-				保存
-			</button>
-			<button class="btn btn-small" onclick={() => (editing = false)}>取消</button>
-		</div>
+			contenteditable="plaintext-only"
+			role="textbox"
+			tabindex="0"
+			aria-label="编辑消息正文"
+			bind:this={editEl}
+			oninput={onEditInput}
+			onkeydown={onEditKeydown}
+		></div>
 	{:else}
 		{message.content}
-		{#if editable}
-			<!-- 悬浮消息时在底部显示操作图标（对齐主流聊天客户端）。 -->
-			<div class="message-actions">
+	{/if}
+	{#if editable}
+		<!-- 悬浮消息时在底部显示操作图标；编辑态常驻显示保存/取消（对齐主流聊天客户端）。 -->
+		<div class="message-actions" class:show={editing}>
+			{#if editing}
+				<button
+					class="icon-btn"
+					title="保存"
+					aria-label="保存"
+					onclick={saveEdit}
+					disabled={saving || draft.trim() === ''}
+				>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M20 6 9 17l-5-5" />
+					</svg>
+				</button>
+				<button class="icon-btn" title="取消" aria-label="取消" onclick={() => (editing = false)}>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M18 6 6 18" />
+						<path d="m6 6 12 12" />
+					</svg>
+				</button>
+			{:else}
 				<button class="icon-btn" title="编辑消息" aria-label="编辑消息" onclick={startEdit}>
 					<svg
 						width="14"
@@ -102,8 +166,8 @@
 						<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
 					</svg>
 				</button>
-			</div>
-		{/if}
+			{/if}
+		</div>
 	{/if}
 </div>
 
@@ -122,7 +186,8 @@
 		transition: opacity 0.12s ease;
 	}
 	.message:hover .message-actions,
-	.message:focus-within .message-actions {
+	.message:focus-within .message-actions,
+	.message-actions.show {
 		opacity: 1;
 		pointer-events: auto;
 	}
@@ -143,6 +208,10 @@
 		color: var(--text);
 		border-color: var(--border);
 	}
+	.icon-btn:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
 	.message.user .icon-btn {
 		color: rgba(14, 16, 22, 0.55);
 	}
@@ -156,20 +225,15 @@
 		font: inherit;
 		line-height: inherit;
 		color: inherit;
-		background: transparent;
-		border: none;
-		padding: 0;
-		resize: vertical;
 		white-space: pre-wrap;
+		word-break: break-word;
+		min-height: 1.55em;
+		outline: none;
+		caret-color: var(--accent);
 	}
 	.inline-edit:focus {
 		outline: 1px solid var(--accent);
 		outline-offset: 3px;
 		border-radius: 6px;
-	}
-	.edit-actions {
-		display: flex;
-		gap: 6px;
-		margin-top: 8px;
 	}
 </style>

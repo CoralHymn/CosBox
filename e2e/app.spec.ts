@@ -45,8 +45,8 @@ test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
 	// 操作图标悬浮才显示：先 hover 再点编辑
 	await bubble.hover();
 	await bubble.getByRole('button', { name: '编辑消息' }).click();
-	const textarea = bubble.locator('textarea');
-	await textarea.fill('（编辑后）新的回应文本');
+	const inlineEdit = bubble.locator('.inline-edit');
+	await inlineEdit.fill('（编辑后）新的回应文本');
 	await bubble.getByRole('button', { name: '保存' }).click();
 
 	await expect(bubble.getByText('（编辑后）新的回应文本')).toBeVisible();
