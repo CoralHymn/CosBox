@@ -518,6 +518,13 @@ export function formatWorldTime(time: WorldTime): string {
 	return `${DAY_NAMES[time.day]} ${pad2(time.hour)}:${pad2(time.minute)}`;
 }
 
+/** 按时间自动排序日程条目：day → start → end → title。 */
+export function sortScheduleEntries(entries: ReadonlyArray<ScheduleEntry>): ScheduleEntry[] {
+	return [...entries].sort(
+		(a, b) => a.day - b.day || a.start - b.start || a.end - b.end || a.title.localeCompare(b.title)
+	);
+}
+
 /** 分钟数 -> 「HH:MM」，如 540 => '09:00'。 */
 export function formatMinutesOfDay(minutes: number): string {
 	const safe = Math.min(1439, Math.max(0, Math.floor(minutes)));

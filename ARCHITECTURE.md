@@ -69,6 +69,9 @@ flowchart LR
   （`applyConfigOverrides`，整体替换 places / outfit.wardrobe / schedule.entries）。
 - 剧情状态不受影响：在面板里「设为当前地点」「更换当前穿着」「推进时间」仍走 `update()`
   生成快照。
+- 排序：地点库 / 衣柜管理在分类内提供 ↑/↓ 手动排序（交换源数组顺序并持久化，
+  同属世界配置）；日程表按 `day → start → end → title` 自动排序（展示与存储都排序，
+  `sortScheduleEntries`）。
 
 ## 状态模型
 
