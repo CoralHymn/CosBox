@@ -705,6 +705,28 @@ DeepSeek 思考模式文档明确：**带工具调用的轮次，`reasoning_cont
 
 - 单元测试：全量 543 个全过；36 条 e2e 全过；build / check / lint 全绿。
 
+## 2026-08-05（续）：思考里“说要推进时间”但 agent 没生效
+
+### 根因
+
+DeepSeek V4 思考模式下，模型有时只在 reasoning_content 里规划工具调用
+（「我要调用 advance_time」），却没有发出结构化的 `tool_calls`；部分代理在
+流式转发时也会丢失 tool_calls。于是思考里说了、状态却没变。
+
+### 修复
+
+- 提示词强化（`buildToolGuidance`）：工具调用必须通过 `tool_calls` 字段发出并带
+  完整参数；思考过程里写「我要调用 xxx」不算数，决定后立即发结构化调用。
+- 新增 `extractTextToolCalls` 兜底解析：结构化 tool_calls 缺失时，从正文/思考中
+  识别明确的「工具名(参数)」调用语法（支持 key=value、位置参数、JSON、中文引号），
+  解析出 advance_time / goto_location / set_outfit / set_attribute 并照常执行；
+  只认明确的调用语法，不误判角色扮演台词。
+
+### 门禁
+
+- 单元测试：全量 552 个全过（新增文本工具解析、文本调用执行用例）；
+  36 条 e2e 全过；build / check / lint 全绿。
+
 ## 2026-08-05（续）：修复编辑态正文消失
 
 ### 原因

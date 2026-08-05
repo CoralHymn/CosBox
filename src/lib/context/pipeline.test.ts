@@ -41,6 +41,8 @@ describe('buildToolGuidance', () => {
 		expect(text).toContain('必须');
 		expect(text).toContain('立即调用');
 		expect(text).toContain('不允许只口头描述');
+		expect(text).toContain('tool_calls 字段');
+		expect(text).toContain('思考过程（reasoning）');
 		expect(text).toContain('goto_location');
 		expect(text).toContain('set_outfit');
 		expect(text).toContain('advance_time');
