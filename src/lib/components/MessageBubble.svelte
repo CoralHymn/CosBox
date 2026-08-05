@@ -64,9 +64,6 @@
 			>
 		{/if}
 		<span>{formatTimestamp(message.timestamp)}</span>
-		{#if editable && !editing}
-			<button class="btn btn-small edit-btn" title="编辑消息" onclick={startEdit}>编辑</button>
-		{/if}
 	</div>
 	{#if message.role === 'assistant' && message.thinking !== undefined && message.thinking.trim() !== ''}
 		<details class="thinking">
@@ -76,10 +73,10 @@
 	{/if}
 	{#if editing}
 		<textarea
-			class="input edit-textarea"
+			class="inline-edit"
 			bind:value={draft}
 			rows={Math.max(3, Math.min(10, draft.split('\n').length + 1))}></textarea>
-		<div class="row-actions edit-actions">
+		<div class="edit-actions">
 			<button class="btn btn-small" onclick={saveEdit} disabled={saving || draft.trim() === ''}>
 				保存
 			</button>
@@ -87,18 +84,92 @@
 		</div>
 	{:else}
 		{message.content}
+		{#if editable}
+			<!-- 悬浮消息时在底部显示操作图标（对齐主流聊天客户端）。 -->
+			<div class="message-actions">
+				<button class="icon-btn" title="编辑消息" aria-label="编辑消息" onclick={startEdit}>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+					</svg>
+				</button>
+			</div>
+		{/if}
 	{/if}
 </div>
 
 <style>
-	.edit-textarea {
+	.message {
+		position: relative;
+	}
+	.message-actions {
+		position: absolute;
+		right: 8px;
+		bottom: 4px;
+		display: flex;
+		gap: 4px;
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 0.12s ease;
+	}
+	.message:hover .message-actions,
+	.message:focus-within .message-actions {
+		opacity: 1;
+		pointer-events: auto;
+	}
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: 24px;
+		width: 24px;
+		border-radius: 6px;
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--text-faint);
+		cursor: pointer;
+	}
+	.icon-btn:hover {
+		background: var(--bg);
+		color: var(--text);
+		border-color: var(--border);
+	}
+	.message.user .icon-btn {
+		color: rgba(14, 16, 22, 0.55);
+	}
+	.message.user .icon-btn:hover {
+		background: rgba(0, 0, 0, 0.08);
+		color: #0e1016;
+		border-color: transparent;
+	}
+	.inline-edit {
 		width: 100%;
-		min-height: 64px;
-		resize: vertical;
 		font: inherit;
+		line-height: inherit;
+		color: inherit;
+		background: transparent;
+		border: none;
+		padding: 0;
+		resize: vertical;
+		white-space: pre-wrap;
+	}
+	.inline-edit:focus {
+		outline: 1px solid var(--accent);
+		outline-offset: 3px;
+		border-radius: 6px;
 	}
 	.edit-actions {
-		margin-top: 6px;
+		display: flex;
 		gap: 6px;
+		margin-top: 8px;
 	}
 </style>

@@ -42,7 +42,9 @@ test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
 	await expect(page.getByText(/演示模式回应/)).toBeVisible();
 
 	const bubble = page.locator('.message.assistant').first();
-	await bubble.getByRole('button', { name: '编辑' }).click();
+	// 操作图标悬浮才显示：先 hover 再点编辑
+	await bubble.hover();
+	await bubble.getByRole('button', { name: '编辑消息' }).click();
 	const textarea = bubble.locator('textarea');
 	await textarea.fill('（编辑后）新的回应文本');
 	await bubble.getByRole('button', { name: '保存' }).click();
