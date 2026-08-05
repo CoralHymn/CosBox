@@ -39,6 +39,8 @@
 	/** 编辑态聚焦编辑区，让用户直接开始打字。 */
 	$effect(() => {
 		if (editing && editEl !== null) {
+			// contenteditable 不会自动带入正文，进入编辑态时先把原文写入编辑区。
+			editEl.textContent = message.content;
 			editEl.focus();
 		}
 	});
