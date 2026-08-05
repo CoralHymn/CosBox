@@ -3,7 +3,12 @@ import { addMinutes, applyStateDelta, createInitialState } from '../core/state';
 import type { ChatMessageView, StatePatch } from '../core/types';
 import type { ContextPipelineInput } from '../context/pipeline';
 import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
-import { ChatService, serializeDebugPrompt, type CompactionOptions } from './chat-service';
+import {
+	ChatService,
+	resolveTimeAdvance,
+	serializeDebugPrompt,
+	type CompactionOptions
+} from './chat-service';
 import { STATE_TOOLS, type StateToolContext } from './state-tools';
 import type { ChatMessage, LlmClient, LlmConfig } from './types';
 
@@ -387,7 +392,11 @@ describe('ChatService', () => {
 	it('agent 循环：时间流逝措辞补调全部失败时，宿主侧推断推进时间并回写反馈', async () => {
 		const chatWithTools = vi
 			.fn()
-			.mockResolvedValueOnce({ content: '已经深夜了。', toolCalls: [] })
+			.mockResolvedValueOnce({
+				content: '已经深夜了，我们该休息了。',
+				toolCalls: [],
+				thinking: '天色已晚，我应该推进时间到深夜，然后提议休息。'
+			})
 			.mockResolvedValueOnce({ content: '嗯。', toolCalls: [] })
 			.mockResolvedValueOnce({ content: '嗯。', toolCalls: [] });
 		const client: LlmClient = {
@@ -403,7 +412,7 @@ describe('ChatService', () => {
 		);
 		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
 		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 23, minute: 0 });
-		expect(reply).toBe('已经深夜了。');
+		expect(reply).toBe('已经深夜了，我们该休息了。');
 		expect(chatWithTools).toHaveBeenCalledTimes(3);
 		expect(rounds[0]!.tools[0]!.output).toContain('时间推进到 周一 23:00');
 	});
@@ -448,6 +457,36 @@ describe('ChatService', () => {
 		expect(reply).toBe('（看了看窗外）时间不早了。');
 		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 8, minute: 0 });
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
+	});
+
+	it('宿主侧推断：思考「推进时间到傍晚，比如18:30」按目标时刻推进', async () => {
+		const thinking =
+			'时间已经推进到17:10之后，用户说又过了一段时间。我应该推进时间到傍晚，然后自然地引导到回家。' +
+			'绫音答应过回家以后给袜子，所以现在应该是傍晚时分，该回家了。让我推进时间到傍晚，比如18:30左右，然后自然地提议回家。';
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '（看向窗外）天快黑了，我们回家吧。',
+				toolCalls: [],
+				thinking
+			})
+			.mockResolvedValueOnce({ content: '好的。', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '好的。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		await ctx.advanceTime(550); // 08:00 -> 17:10
+		const service = new ChatService(client);
+		const { executedTools, rounds } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 18, minute: 30 });
+		expect(rounds[0]!.tools[0]!.output).toContain('时间推进到 周一 18:30');
 	});
 
 	it('agent 循环：正文无时间流逝措辞且未调用工具时，直接返回不补调', async () => {
@@ -1025,6 +1064,33 @@ describe('serializeDebugPrompt', () => {
 		});
 		expect(text).toContain('[user]（周一 09:00） 好了快穿上吧');
 		expect(text).not.toContain('【世界时间：');
+	});
+});
+
+describe('resolveTimeAdvance', () => {
+	const now = { day: 0, hour: 17, minute: 10 };
+
+	it('解析明确时长（中文数字 + 个）', () => {
+		expect(resolveTimeAdvance('已经过去两个小时了', now)).toBe(120);
+		expect(resolveTimeAdvance('过了半小时', now)).toBe(30);
+		expect(resolveTimeAdvance('推进 90 分钟', now)).toBe(90);
+	});
+
+	it('解析目标时刻（推进到 / 比如 / 约）', () => {
+		expect(resolveTimeAdvance('推进到 18:30', now)).toBe(80);
+		expect(resolveTimeAdvance('比如 19:00 左右', now)).toBe(110);
+		expect(resolveTimeAdvance('约 18:00', now)).toBe(50);
+	});
+
+	it('时段推断仅在 allowTodFallback 时启用', () => {
+		expect(resolveTimeAdvance('已经傍晚了', now, false)).toBeNull();
+		expect(resolveTimeAdvance('已经傍晚了', now, true)).toBe(50);
+		expect(resolveTimeAdvance('推进到深夜', now, true)).toBe(350);
+	});
+
+	it('无法确定时不猜测', () => {
+		expect(resolveTimeAdvance('时间不早了', now, true)).toBeNull();
+		expect(resolveTimeAdvance('现在时间是17:10', now, true)).toBeNull();
 	});
 });
 

@@ -261,9 +261,14 @@ export class ChatService {
 							detectTimeClaim(claimSource) ||
 							/\badvance_time\b|推进时间|时间推进/.test(claimSource)
 						) {
+							// 时段推断（傍晚→18:00 等）只在有明确推进意图时启用，
+							// 避免「随口提到傍晚」被误判成必须拨时间。
+							const hasAdvanceIntent =
+								/\badvance_time\b|推进时间|时间推进|推进到|需要推进|该推进/.test(claimSource);
 							const minutes = resolveTimeAdvance(
 								claimSource,
-								options.toolContext.getState().schedule.time
+								options.toolContext.getState().schedule.time,
+								hasAdvanceIntent
 							);
 							if (minutes !== null) {
 								const now = options.toolContext.getState().schedule.time;
@@ -726,10 +731,15 @@ const TIME_OF_DAY_TARGET: Record<string, number> = {
  * 从模型文本中解析可确定的 advance_time 分钟数（宿主侧推断，最后兜底用）：
  * 1) 明确时长（过了两小时 / 半小时 / 90 分钟）；
  * 2) 明确目标时刻（推进到 18:00）；
- * 3) 明确时段目标（推进到傍晚 / 深夜）。
+ * 3) 明确时段目标（推进到傍晚 / 深夜）——仅当 allowTodFallback 为真
+ *    （调用方已确认存在明确推进意图）时启用，降低误判风险。
  * 只返回向前推进且可确定的值；无法确定返回 null（不猜测）。
  */
-export function resolveTimeAdvance(text: string, now: WorldTime): number | null {
+export function resolveTimeAdvance(
+	text: string,
+	now: WorldTime,
+	allowTodFallback = false
+): number | null {
 	const duration = text.match(
 		/(?:过了|已经过去|过去|推进)?\s*(?:(\d+(?:\.\d+)?)|([一二两三四五六七八九十半]+))\s*个?(分钟|小时|钟头)/
 	);
@@ -740,11 +750,19 @@ export function resolveTimeAdvance(text: string, now: WorldTime): number | null 
 			return unit === '分钟' ? Math.round(raw) : Math.round(raw * 60);
 		}
 	}
-	const clock = text.match(/(?:推进到|来到|时间(?:到|来到))\s*(\d{1,2})[:：](\d{2})/);
-	if (clock) {
-		const target = Number(clock[1]) * 60 + Number(clock[2]);
+	// 遍历所有目标时刻匹配，取第一个「正向推进」的目标：
+	// 「推进到17:10」这类陈述当前时间的表述 delta=0 会被跳过，
+	// 避免挡住后面的真正目标（「比如18:30」）。
+	const clockPattern = /(?:推进到|来到|时间(?:到|来到)|比如|约|大概)\s*(\d{1,2})[:：](\d{2})/g;
+	for (const match of text.matchAll(clockPattern)) {
+		const target = Number(match[1]) * 60 + Number(match[2]);
 		const delta = target - minutesSinceMidnight(now);
-		return delta > 0 ? delta : null;
+		if (delta > 0) {
+			return delta;
+		}
+	}
+	if (!allowTodFallback) {
+		return null;
 	}
 	const nowMinutes = minutesSinceMidnight(now);
 	for (const [keyword, hour] of Object.entries(TIME_OF_DAY_TARGET)) {
