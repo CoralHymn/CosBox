@@ -310,6 +310,37 @@ describe('ChatService', () => {
 		).toBe(true);
 	});
 
+	it('agent 循环：补调重试后保留角色原本的叙事文本（不吞消息）', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '（温柔地笑了笑）我们这就走吧。',
+				toolCalls: [],
+				thinking: '用户想去食堂，我应该调用 goto_location'
+			})
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }],
+				thinking: '重试：发出调用'
+			})
+			.mockResolvedValueOnce({ content: '好，我们出发了。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { rounds, reply, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(rounds[0]!.content).toBe('（温柔地笑了笑）我们这就走吧。');
+		expect(rounds[0]!.tools[0]!.name).toBe('goto_location');
+		expect(rounds[0]!.thinking).toBe('用户想去食堂，我应该调用 goto_location');
+		expect(executedTools.map((tool) => tool.name)).toEqual(['goto_location']);
+		expect(reply).toBe('好，我们出发了。');
+	});
+
 	it('agent 循环：补发调用两档重试仍不调用时保留原正文且不执行工具', async () => {
 		const chatWithTools = vi
 			.fn()

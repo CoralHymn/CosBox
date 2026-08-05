@@ -189,6 +189,11 @@ export class ChatService {
 						options.onDelta
 					);
 					usage = mergeUsage(usage, result.usage);
+					// 记录本轮模型最先说出的叙事文本与思考：补调重试可能覆盖 result，
+					// 角色原本的消息不能因此丢失（否则会出现「工具调用前的话被吞掉」）。
+					const roundNarrative =
+						result.content !== null && result.content.trim() !== '' ? result.content : '';
+					const roundThinking = result.thinking;
 					// 结构化 tool_calls 缺失时，尝试从正文/思考中解析文本形式的工具调用
 					// （DeepSeek 等思考模型有时把调用写进 reasoning 而不发 tool_calls）。
 					if (result.toolCalls.length === 0) {
@@ -315,8 +320,11 @@ export class ChatService {
 						});
 					}
 					rounds.push({
-						content: sanitizeAssistantText(result.content ?? '') || null,
-						thinking: result.thinking,
+						content:
+							sanitizeAssistantText(
+								roundNarrative !== '' ? roundNarrative : (result.content ?? '')
+							) || null,
+						thinking: roundThinking ?? result.thinking,
 						tools: roundTools
 					});
 					messages = [

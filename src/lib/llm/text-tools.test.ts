@@ -47,4 +47,10 @@ describe('extractTextToolCalls', () => {
 	it('普通角色扮演文本不误判', () => {
 		expect(extractTextToolCalls('（她看了看表，喃喃自语）时间过得真快啊。')).toEqual([]);
 	});
+
+	it('工具名后换行再接括号正文时不误判为调用', () => {
+		expect(extractTextToolCalls('我应该调用 goto_location\n（温柔地笑了笑）我们走吧。')).toEqual(
+			[]
+		);
+	});
 });
