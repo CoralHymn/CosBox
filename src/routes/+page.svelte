@@ -228,10 +228,15 @@
 			} else if (thinking !== undefined && thinking.trim() !== '') {
 				// 模型只输出了思考过程、正文为空：保留思考（对话气泡可展开），正文留空。
 				await session.addMessage('assistant', '', { thinking });
-				if (budgetExhausted) {
+				if (finishReason === 'length') {
 					toasts.push(
 						'info',
 						'思考耗尽了 Max Tokens 预算，正文被截断。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
+					);
+				} else if (finishReason === 'stop') {
+					toasts.push(
+						'info',
+						'模型只输出思考、未生成正文就结束了（finish_reason=stop）。这通常是模型/端点的思考模式异常：可尝试关闭模型的思考模式、检查代理是否正确转发正文，或换用 DeepSeek 官方端点。'
 					);
 				}
 			} else {
@@ -327,7 +332,13 @@
 			kind: 'prompt',
 			debug: {
 				systemMessage: bundle.systemMessage,
-				messages: [{ role: 'system', content: bundle.systemMessage }, ...bundle.messages]
+				messages: [{ role: 'system', content: bundle.systemMessage }, ...bundle.messages],
+				request: {
+					model: settings.config.model,
+					maxTokens: settings.config.maxTokens,
+					stream: settings.config.stream === true,
+					toolsEnabled: settings.config.allowAiStateTools === true
+				}
 			},
 			note: notes.join('\n')
 		};

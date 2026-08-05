@@ -574,6 +574,29 @@ D43 上线后模型仍会在回复正文输出 `【世界时间：周一 12:00�
 - 单元测试：全量 528 个全过（新增 formatOutfitDetails 与穿着细节行用例）；
   35 条 e2e 全过；build / check / lint 全绿。
 
+## 2026-08-05（续）：排查「Max Tokens 16000 仍只有思考无正文」
+
+### 根因（联网核对 DeepSeek 官方文档）
+
+DeepSeek 思考模式文档明确：**带工具调用的轮次，`reasoning_content` 必须在后续请求中
+原样回传**，否则端点返回 400 或续答异常（模型只思考、不输出正文）。CosBox 的工具
+循环在回放 assistant（含 tool_calls）消息时把思考内容丢弃了——开启「允许 AI 状态
+工具」+ DeepSeek 思考模型时必然踩中。
+
+### 修复
+
+- `ChatMessage` 新增 `reasoning` 字段；agent 循环回放带 tool_calls 的 assistant 消息时
+  把本轮的 `thinking` 一并带上，`serializeMessage` 序列化为 `reasoning_content`。
+- 开发者调试视图新增「请求参数」行（model / max_tokens / stream / 状态工具），
+  可直接核对 16000 是否真的发出。
+- 空正文提示按 finish_reason 区分：`length` → 调大 Max Tokens；`stop` → 提示
+  「模型只输出思考就结束」，建议关闭思考模式 / 检查代理转发 / 换官方端点。
+
+### 门禁
+
+- 单元测试：全量 532 个全过（新增 reasoning_content 回传、调试请求参数用例）；
+  35 条 e2e 全过；build / check / lint 全绿。
+
 ## 2026-08-05（续）：AI 思考展示 + 穿着槽位标签化 + 开发者输入预览
 
 ### 需求

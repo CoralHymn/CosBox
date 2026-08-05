@@ -426,6 +426,10 @@ function serializeMessage(message: ChatMessage): Record<string, unknown> {
 			function: { name: call.name, arguments: JSON.stringify(call.arguments) }
 		}));
 	}
+	// DeepSeek 思考模式：带工具调用的 assistant 消息必须原样回传 reasoning_content。
+	if (message.role === 'assistant' && message.reasoning !== undefined && message.reasoning !== '') {
+		serialized.reasoning_content = message.reasoning;
+	}
 	if (message.role === 'tool') {
 		serialized.tool_call_id = message.toolCallId ?? '';
 	}

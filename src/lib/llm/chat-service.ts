@@ -21,10 +21,20 @@ import {
 import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
 import type { ChatMessage, LlmClient, LlmConfig, TokenUsage } from './types';
 
-/** 开发者模式下展示的最近一次请求：完整系统消息 + 实际发送的消息数组。 */
+/** 开发者模式下展示的请求参数：用于排查 max_tokens / stream 等是否真正生效。 */
+export interface DebugRequestInfo {
+	model: string;
+	maxTokens: number;
+	stream: boolean;
+	/** 是否启用了状态工具（agent 循环）。 */
+	toolsEnabled: boolean;
+}
+
+/** 开发者模式下展示的最近一次请求：完整系统消息 + 实际发送的消息数组 + 请求参数。 */
 export interface DebugPromptView {
 	systemMessage: string;
 	messages: ChatMessage[];
+	request?: DebugRequestInfo;
 }
 
 /** 开发者输入预览结果：完整提示词，或提示性说明（斜杠命令/空输入）。 */
@@ -143,7 +153,7 @@ export class ChatService {
 			{ role: 'system', content: bundle.systemMessage },
 			...bundle.messages
 		];
-		let debug: DebugPromptView = { systemMessage: bundle.systemMessage, messages };
+		let debug: DebugPromptView = buildDebugView(bundle.systemMessage, messages, config, options);
 		const executedTools: ExecutedToolCall[] = [];
 		const rounds: ReplyRound[] = [];
 
@@ -151,7 +161,7 @@ export class ChatService {
 			if (this.client.chatWithTools) {
 				const maxTurns = options.maxToolTurns ?? DEFAULT_MAX_TOOL_TURNS;
 				for (let turn = 0; turn < maxTurns; turn += 1) {
-					debug = { systemMessage: messages[0]!.content, messages };
+					debug = buildDebugView(messages[0]!.content, messages, config, options);
 					const result = await this.client.chatWithTools(
 						messages,
 						options.tools,
@@ -197,7 +207,14 @@ export class ChatService {
 					});
 					messages = [
 						...messages,
-						{ role: 'assistant', content: result.content ?? '', toolCalls: result.toolCalls },
+						{
+							role: 'assistant',
+							content: result.content ?? '',
+							toolCalls: result.toolCalls,
+							// DeepSeek 思考模式要求工具轮次的 reasoning_content 原样回传，
+							// 否则续答时模型可能只思考、不输出正文（或端点直接 400）。
+							reasoning: result.thinking
+						},
 						...toolMessages
 					];
 					// 状态工具已产生新快照，重新生成状态摘要，让模型感知最新状态。
@@ -320,6 +337,25 @@ export function serializeDebugPrompt(view: DebugPromptView): string {
 		}
 	}
 	return parts.join('\n\n');
+}
+
+/** 组装开发者视图：系统消息 + 消息数组 + 本次实际请求参数。 */
+function buildDebugView(
+	systemMessage: string,
+	messages: ChatMessage[],
+	config: LlmConfig,
+	options: GenerateReplyOptions
+): DebugPromptView {
+	return {
+		systemMessage,
+		messages,
+		request: {
+			model: config.model,
+			maxTokens: config.maxTokens,
+			stream: config.stream === true,
+			toolsEnabled: (options.tools?.length ?? 0) > 0
+		}
+	};
 }
 
 /** 把工具参数格式化为紧凑文本，如「slot=上衣, item=白色衬衫」。 */

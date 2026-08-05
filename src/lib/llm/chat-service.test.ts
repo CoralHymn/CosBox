@@ -127,6 +127,51 @@ describe('ChatService', () => {
 		).toBe(true);
 	});
 
+	it('agent 循环：工具轮次的思考内容回传到下一轮 assistant 消息', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: null,
+					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }],
+					thinking: '用户想去食堂，我需要切换地点'
+				})
+				.mockResolvedValueOnce({ content: '我们到食堂了', toolCalls: [] })
+		};
+		const service = new ChatService(client);
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		const calls = vi.mocked(client.chatWithTools!).mock.calls;
+		expect(calls).toHaveLength(2);
+		const secondMessages = calls[1]![0] as ChatMessage[];
+		const assistantToolMsg = secondMessages.find(
+			(message) => message.role === 'assistant' && message.toolCalls !== undefined
+		);
+		expect(assistantToolMsg?.reasoning).toBe('用户想去食堂，我需要切换地点');
+	});
+
+	it('调试视图携带本次实际请求参数', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: '好的', toolCalls: [] }))
+		};
+		const service = new ChatService(client);
+		const { debug } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(debug.request).toEqual({
+			model: 'demo',
+			maxTokens: 100,
+			stream: false,
+			toolsEnabled: true
+		});
+	});
+
 	it('agent 循环：超过最大轮数后以提示文本收尾', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
