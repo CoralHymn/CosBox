@@ -159,6 +159,9 @@
 	}
 
 	function removeItem(id: string): void {
+		if (!window.confirm('确定删除这件衣物？此操作会立即保存，无法撤销。')) {
+			return;
+		}
 		rows = rows.filter((row) => row.id !== id);
 		commitWardrobe();
 	}

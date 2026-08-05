@@ -83,6 +83,9 @@
 	}
 
 	function removeEntry(id: string): void {
+		if (!window.confirm('确定删除该日程条目？此操作会立即保存，无法撤销。')) {
+			return;
+		}
 		onConfig({
 			scheduleEntries: sortScheduleEntries(schedule.entries.filter((entry) => entry.id !== id))
 		});
