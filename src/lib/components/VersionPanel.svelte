@@ -170,79 +170,65 @@
 					onclick={deleteSelected}>删除所选（{selectedBranches.size}）</button
 				>
 			</div>
-			<div class="branch-chain">
-				{#each branchRows as row (row.branch.tipId)}
-					<div class="version-row">
-						<input
-							type="checkbox"
-							class="checkbox"
-							checked={selectedBranches.has(row.branch.tipId)}
-							onchange={() => toggleSelected(row.branch.tipId)}
-						/>
+		{/if}
+		{#if branchRows.length === 0}
+			<p class="empty-hint">暂无分支</p>
+		{:else}
+			{#each branchRows as row (row.branch.tipId)}
+				<div class="branch-card" class:current={row.branch.tipId === headId}>
+					<div class="branch-header">
+						{#if batchMode}
+							<input
+								type="checkbox"
+								class="checkbox"
+								checked={selectedBranches.has(row.branch.tipId)}
+								onchange={() => toggleSelected(row.branch.tipId)}
+							/>
+						{/if}
 						<span class="badge {row.branch.type}">{typeLabel[row.branch.type]}</span>
 						<span class="version-desc" title={row.branch.desc}>{row.branch.desc}</span>
-						<span class="muted">{row.uniqueCount} 个独有快照</span>
+						<span class="muted">{row.chain.length - 1} 个快照</span>
 						{#if row.branch.tipId === headId}
 							<span class="badge current">当前</span>
 						{/if}
-					</div>
-				{/each}
-			</div>
-			<p class="muted" style="margin: 8px 0 0;">
-				删除分支只移除该分支独有的快照，分支点与共享历史保留；只剩一个分支时不可删除；当前所在分支被删时会自动回退到分叉点。
-			</p>
-		{:else}
-			{#if branchRows.length === 0}
-				<p class="empty-hint">暂无分支</p>
-			{:else}
-				{#each branchRows as row (row.branch.tipId)}
-					<div class="branch-card" class:current={row.branch.tipId === headId}>
-						<div class="branch-header">
-							<span class="badge {row.branch.type}">{typeLabel[row.branch.type]}</span>
-							<span class="version-desc" title={row.branch.desc}>{row.branch.desc}</span>
-							<span class="muted">{row.chain.length - 1} 个快照</span>
-							{#if row.branch.tipId === headId}
-								<span class="badge current">当前</span>
-							{/if}
-							<button class="btn btn-small" onclick={() => toggleExpanded(row.branch.tipId)}>
-								{expanded.has(row.branch.tipId) ? '收起' : '展开'}
-							</button>
-							{#if row.branch.tipId !== headId}
-								<button class="btn btn-small" onclick={() => onCheckout(row.branch.tipId)}
-									>切换</button
-								>
-							{/if}
+						<button class="btn btn-small" onclick={() => toggleExpanded(row.branch.tipId)}>
+							{expanded.has(row.branch.tipId) ? '收起' : '展开'}
+						</button>
+						{#if row.branch.tipId !== headId}
+							<button class="btn btn-small" onclick={() => onCheckout(row.branch.tipId)}
+								>切换</button
+							>
+						{/if}
+						{#if !batchMode}
 							<button
 								class="btn btn-small btn-danger"
 								disabled={branches.length <= 1}
 								title={branches.length <= 1 ? '只剩一个分支时不能删除' : '删除该分支独有的快照'}
 								onclick={() => onDeleteBranch(row.branch.tipId)}>删除</button
 							>
-						</div>
-						{#if row.forkDesc !== null}
-							<p class="muted" style="margin: 0 0 4px;">分叉自：「{row.forkDesc}」</p>
-						{/if}
-						{#if expanded.has(row.branch.tipId)}
-							<div class="branch-chain">
-								{#each [...row.chain].reverse() as node (node.id)}
-									<div class="version-row" class:shared={row.sharedIds.has(node.id)}>
-										<span class="badge {node.metadata.type}">{typeLabel[node.metadata.type]}</span>
-										<span class="version-desc" title={node.metadata.desc}>{node.metadata.desc}</span
-										>
-										<span class="muted">{formatDateTime(node.timestamp)}</span>
-										{#if node.id === headId}
-											<span class="badge current">当前</span>
-										{:else}
-											<button class="btn btn-small" onclick={() => onCheckout(node.id)}>切换</button
-											>
-										{/if}
-									</div>
-								{/each}
-							</div>
 						{/if}
 					</div>
-				{/each}
-			{/if}
+					{#if row.forkDesc !== null}
+						<p class="muted" style="margin: 0 0 4px;">分叉自：「{row.forkDesc}」</p>
+					{/if}
+					{#if expanded.has(row.branch.tipId)}
+						<div class="branch-chain">
+							{#each [...row.chain].reverse() as node (node.id)}
+								<div class="version-row" class:shared={row.sharedIds.has(node.id)}>
+									<span class="badge {node.metadata.type}">{typeLabel[node.metadata.type]}</span>
+									<span class="version-desc" title={node.metadata.desc}>{node.metadata.desc}</span>
+									<span class="muted">{formatDateTime(node.timestamp)}</span>
+									{#if node.id === headId}
+										<span class="badge current">当前</span>
+									{:else}
+										<button class="btn btn-small" onclick={() => onCheckout(node.id)}>切换</button>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/each}
 		{/if}
 	</div>
 

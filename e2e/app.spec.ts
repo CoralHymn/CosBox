@@ -159,10 +159,7 @@ test('版本页批量删除：勾选分支后删除所选分支', async ({ page 
 
 	// 勾选一条分支并接受确认框
 	page.once('dialog', (dialog) => void dialog.accept());
-	await page
-		.locator('.batch-bar ~ .branch-chain .version-row input[type="checkbox"]')
-		.first()
-		.check();
+	await page.locator('.branch-card .branch-header input[type="checkbox"]').first().check();
 	await page.getByRole('button', { name: /删除所选/ }).click();
 
 	await expect(page.locator('.batch-bar')).not.toBeVisible();
