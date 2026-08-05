@@ -46,6 +46,8 @@ test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
 	await bubble.hover();
 	await bubble.getByRole('button', { name: '编辑消息' }).click();
 	const inlineEdit = bubble.locator('.inline-edit');
+	// 编辑区应保留原文，而不是清空
+	await expect(inlineEdit).toHaveText(/演示模式回应/);
 	await inlineEdit.fill('（编辑后）新的回应文本');
 	await bubble.getByRole('button', { name: '保存' }).click();
 
