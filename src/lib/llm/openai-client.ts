@@ -1,4 +1,5 @@
 import { LlmError } from '../core/errors';
+import { annotateWorldTime } from './message-time';
 import type {
 	ChatMessage,
 	LlmChatResult,
@@ -100,17 +101,28 @@ function buildChatResult(data: unknown): LlmChatResult {
 	const toolCalls = extractToolCalls(data);
 	const usage = extractUsage(data);
 	const thinking = extractThinking(data);
+	const finishReason = extractFinishReason(data);
 	if (toolCalls.length > 0) {
-		return { content, toolCalls, usage, thinking };
+		return { content, toolCalls, usage, thinking, finishReason };
 	}
 	if (content !== null) {
 		const inline = extractInlineToolCall(content);
 		if (inline.length > 0) {
-			return { content: null, toolCalls: inline, usage, thinking };
+			return { content: null, toolCalls: inline, usage, thinking, finishReason };
 		}
-		return { content, toolCalls: [], usage, thinking };
+		return { content, toolCalls: [], usage, thinking, finishReason };
 	}
-	throw new LlmError('模型响应缺少 choices[0].message.content');
+	// content 为 null/缺失但响应结构里有 choices[0].message：这是合法的「空回复」
+	// （仅思考过程 / 命中长度上限 / 模型没说话），按空正文处理，不再误报协议错误。
+	if (hasInvalidContentType(data)) {
+		throw new LlmError(
+			`模型响应缺少 choices[0].message.content（类型异常）：${summarizeResponse(data)}`
+		);
+	}
+	if (hasMessageRecord(data)) {
+		return { content: '', toolCalls: [], usage, thinking, finishReason };
+	}
+	throw new LlmError(`模型响应缺少 choices[0].message：${summarizeResponse(data)}`);
 }
 
 /**
@@ -125,8 +137,10 @@ async function parseStreamedResult(
 	let content = '';
 	const thinkingParts: string[] = [];
 	let usage: TokenUsage | undefined;
+	let finishReason: string | undefined;
 	const toolMap = new Map<number, { id: string; name: string; argumentsRaw: string }>();
 	let sawEvent = false;
+	let sawMeaningfulEvent = false;
 	let rawText = '';
 	try {
 		const result = await readSse(response.body, (payload) => {
@@ -138,6 +152,14 @@ async function parseStreamedResult(
 				return;
 			}
 			const delta = extractStreamDelta(data);
+			if (
+				delta.content !== undefined ||
+				delta.thinking !== undefined ||
+				delta.toolCalls !== undefined ||
+				delta.usage !== undefined
+			) {
+				sawMeaningfulEvent = true;
+			}
 			if (delta.content !== undefined && delta.content !== '') {
 				content += delta.content;
 				onDelta?.(delta.content);
@@ -150,6 +172,9 @@ async function parseStreamedResult(
 			}
 			if (delta.usage !== undefined) {
 				usage = delta.usage;
+			}
+			if (delta.finishReason !== undefined) {
+				finishReason = delta.finishReason;
 			}
 		});
 		rawText = result.rawText;
@@ -185,12 +210,25 @@ async function parseStreamedResult(
 		.filter((call): call is ToolCall => call !== null);
 	const thinking = thinkingParts.join('').trim() || undefined;
 	if (toolCalls.length > 0) {
-		return { content: content === '' ? null : content, toolCalls, usage, thinking };
+		return {
+			content: content === '' ? null : content,
+			toolCalls,
+			usage,
+			thinking,
+			finishReason
+		};
 	}
 	if (content !== '') {
-		return { content, toolCalls: [], usage, thinking };
+		return { content, toolCalls: [], usage, thinking, finishReason };
 	}
-	throw new LlmError('模型响应缺少 choices[0].message.content');
+	// 流中收到过有效数据块（思考/用量等）但最终没有正文：按空回复处理，
+	// 避免「模型只思考不开口」被误判为协议错误。
+	if (sawMeaningfulEvent) {
+		return { content: '', toolCalls: [], usage, thinking, finishReason };
+	}
+	throw new LlmError(
+		`模型响应缺少 choices[0].message（无有效内容块）：${summarizeResponse(rawText)}`
+	);
 }
 
 /** 逐行读取 SSE 流，回调每个 data: 载荷；返回是否收到事件与原始文本。 */
@@ -243,6 +281,7 @@ function extractStreamDelta(data: unknown): {
 	thinking?: string;
 	toolCalls?: unknown[];
 	usage?: TokenUsage;
+	finishReason?: string;
 } {
 	if (!isRecord(data)) {
 		return {};
@@ -257,9 +296,29 @@ function extractStreamDelta(data: unknown): {
 	if (!isRecord(delta)) {
 		return {};
 	}
-	const result: { content?: string; thinking?: string; toolCalls?: unknown[] } = {};
+	const result: {
+		content?: string;
+		thinking?: string;
+		toolCalls?: unknown[];
+		finishReason?: string;
+	} = {};
+	if (typeof choices[0].finish_reason === 'string') {
+		result.finishReason = choices[0].finish_reason;
+	}
 	if (typeof delta.content === 'string') {
 		result.content = delta.content;
+	} else if (Array.isArray(delta.content)) {
+		// 部分端点把 content 作为多段数组流式下发，兼容提取 text 片段。
+		const parts = delta.content
+			.filter(
+				(part): part is Record<string, unknown> =>
+					isRecord(part) && (part.type === 'text' || part.type === 'input_text')
+			)
+			.map((part) => (typeof part.text === 'string' ? part.text : ''))
+			.join('');
+		if (parts !== '') {
+			result.content = parts;
+		}
 	}
 	const thinking = delta.reasoning_content ?? delta.reasoning;
 	if (typeof thinking === 'string') {
@@ -318,6 +377,18 @@ function extractThinking(data: unknown): string | undefined {
 	return trimmed === '' ? undefined : trimmed;
 }
 
+/** 从响应中提取 finish_reason（stop / length 等）；缺失或非法返回 undefined。 */
+function extractFinishReason(data: unknown): string | undefined {
+	if (!isRecord(data) || !Array.isArray(data.choices) || data.choices.length === 0) {
+		return undefined;
+	}
+	const choice = data.choices[0];
+	if (!isRecord(choice)) {
+		return undefined;
+	}
+	return typeof choice.finish_reason === 'string' ? choice.finish_reason : undefined;
+}
+
 /** 组装请求体：基础字段 + 可选 tools 声明。 */
 function buildRequestBody(
 	messages: ChatMessage[],
@@ -342,7 +413,12 @@ function buildRequestBody(
 
 /** 把内部消息结构序列化为 OpenAI-compatible 消息。 */
 function serializeMessage(message: ChatMessage): Record<string, unknown> {
-	const serialized: Record<string, unknown> = { role: message.role, content: message.content };
+	// 世界时间只在「序列化给模型」这一步注入为元数据行，消息正文始终纯净。
+	const content =
+		message.worldTime !== undefined
+			? annotateWorldTime(message.content, message.worldTime)
+			: message.content;
+	const serialized: Record<string, unknown> = { role: message.role, content };
 	if (message.toolCalls !== undefined && message.toolCalls.length > 0) {
 		serialized.tool_calls = message.toolCalls.map((call) => ({
 			id: call.id,
@@ -368,7 +444,11 @@ function serializeTool(tool: StateToolSchema): Record<string, unknown> {
 	};
 }
 
-/** 从 Chat Completions 响应中提取文本内容；格式不符返回 null。 */
+/**
+ * 从 Chat Completions 响应中提取文本内容。
+ * 兼容 content 为字符串与多段数组（[{type:'text',text:'…'}]）两种形态；
+ * 缺失 / null / 无文本片段返回 null。
+ */
 function extractContent(data: unknown): string | null {
 	if (!isRecord(data) || !Array.isArray(data.choices) || data.choices.length === 0) {
 		return null;
@@ -376,9 +456,65 @@ function extractContent(data: unknown): string | null {
 	if (!isRecord(data.choices[0]) || !isRecord(data.choices[0].message)) {
 		return null;
 	}
-	return typeof data.choices[0].message.content === 'string'
-		? data.choices[0].message.content
-		: null;
+	return extractMessageText(data.choices[0].message.content);
+}
+
+/** 提取消息文本：字符串原样返回；数组取全部 text / input_text 片段拼接。 */
+function extractMessageText(content: unknown): string | null {
+	if (typeof content === 'string') {
+		return content;
+	}
+	if (Array.isArray(content)) {
+		const parts = content
+			.filter(
+				(part): part is Record<string, unknown> =>
+					isRecord(part) && (part.type === 'text' || part.type === 'input_text')
+			)
+			.map((part) => (typeof part.text === 'string' ? part.text : ''))
+			.join('');
+		return parts === '' ? null : parts;
+	}
+	return null;
+}
+
+/** choices[0].message 是否为合法对象（结构完整，正文可为空）。 */
+function hasMessageRecord(data: unknown): boolean {
+	return (
+		isRecord(data) &&
+		Array.isArray(data.choices) &&
+		data.choices.length > 0 &&
+		isRecord(data.choices[0]) &&
+		isRecord(data.choices[0].message)
+	);
+}
+
+/** content 字段存在但类型非法（非 string / 数组 / null），属于畸形响应。 */
+function hasInvalidContentType(data: unknown): boolean {
+	if (!isRecord(data) || !Array.isArray(data.choices) || data.choices.length === 0) {
+		return false;
+	}
+	const message = isRecord(data.choices[0]) ? data.choices[0].message : undefined;
+	if (!isRecord(message)) {
+		return false;
+	}
+	const content = message.content;
+	return (
+		content !== null &&
+		content !== undefined &&
+		typeof content !== 'string' &&
+		!Array.isArray(content)
+	);
+}
+
+/** 生成可诊断的响应摘要（截断，避免报错刷屏）。 */
+function summarizeResponse(data: unknown): string {
+	let text = '';
+	try {
+		text = typeof data === 'string' ? data : JSON.stringify(data);
+	} catch {
+		text = String(data);
+	}
+	return text.slice(0, 200);
 }
 
 /** 从响应中提取标准 tool_calls；格式不符返回空数组。 */

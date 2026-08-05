@@ -137,6 +137,14 @@ describe('CharacterManager', () => {
 		await expect(manager.addMessage('user', '   ')).rejects.toThrow(StateValidationError);
 	});
 
+	it('addMessage 空正文但带 thinking 时允许（仅思考的回复）', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '   ', { thinking: '让我想想' });
+		expect(manager.getConversation()[0]!.content).toBe('');
+		expect(manager.getConversation()[0]!.thinking).toBe('让我想想');
+	});
+
 	it('addMessage 支持 system 角色', async () => {
 		const manager = createManager();
 		await manager.init();

@@ -515,8 +515,9 @@ test('开发者预览：展示输入框内容点击发送将发送给 AI 的完�
 	await expect(previewModal).toBeVisible();
 	await expect(previewModal.getByText('【当前状态】').first()).toBeVisible();
 	await expect(previewModal.getByText('[user]')).toBeVisible();
-	// 待发送消息带有当前世界时间标注，帮助 AI 感知剧情时间
-	await expect(previewModal.getByText('（周一 08:00）早上好，我们什么时候去食堂？')).toBeVisible();
+	// 待发送消息带当前世界时间标注（贴在角色标签同行），正文保持纯净不掺入时间
+	await expect(previewModal.getByText('[user]（周一 08:00）')).toBeVisible();
+	await expect(previewModal.getByText('早上好，我们什么时候去食堂？')).toBeVisible();
 	await expect(page.locator('.message.user')).toHaveCount(0);
 	await previewModal.getByRole('button', { name: '关闭' }).click();
 

@@ -441,6 +441,139 @@ estimateMessagesTokens`、`sumUsage`、`findModelInfo`（上下文窗口 + 三�
 - 单元测试：全量 389 个；覆盖率 100% 语句/行/函数（分支 94.57%）；18 条 e2e 全过；
   build/check/lint 全绿。
 
+## 2026-08-05（续）：消息时间标注防幻觉重构（对齐 Chatbox 调研）
+
+### 需求
+
+1. 每条消息的时间 `（周一 09:00）` 被拼进正文前缀后，AI 会把前缀当旁白模仿，
+   在回复里幻觉输出 `（周一 12:00）`；用户提出「时间加在 [user]/[assistant] 同一行
+   而不是正文里」是否可行。
+2. 联网调研 Chatbox（chatboxai/chatbox）如何处理消息时间。
+
+### 调研结论
+
+- Chatbox 的消息时间存在 `Message.createdAt`，仅由 `showMessageTimestamp` 设置控制
+  纯 UI 展示；上下文构建（`shared/context/builder.ts`）发送给 API 的 messages
+  只含 role/content/附件/工具调用，从不注入时间戳。
+- 结构化 Chat Completions API 中 `[user]` 标签只是 `role` 字段，并不出现在文本里，
+  因此「把时间挪到 ] 后面」对模型不可见；幻觉的真正根因是时间混在正文中可被模仿。
+
+### 实现
+
+- 新增 `llm/message-time.ts`：`annotateWorldTime`（`【世界时间：周一 09:00】` 独占一行）
+  与 `formatWorldTimeLabel`（`（周一 09:00）`）。
+- `ChatMessage` 增加可选 `worldTime`；`buildContext` 映射消息时透传，正文保持纯净
+  （`prepareHistory` 不再前缀改写）。
+- `openai-client.serializeMessage` 在 API 载荷边界注入元数据行；摘要请求
+  （`buildSummaryRequest`）以 `[user]（周一 09:00）` 文本形式附带时间。
+- 系统提示固定注入 `TIME_MARKER_GUIDANCE`：标注是剧情时间元数据、不是台词，
+  回复严禁输出/复述/模仿。
+- 调试弹窗与复制（`serializeDebugPrompt`）改为角色标签同行显示 `[user]（周一 09:00）`，
+  正文另起一行；对话气泡 meta 区显示该消息的剧情时间。
+
+### 门禁
+
+- 单元测试：全量 504 个全过（新增 message-time、worldTime 透传、载荷注入、
+  调试序列化、摘要标注等用例）；35 条 e2e 全过；build / check / lint 全绿。
+
+## 2026-08-05（续）：时间标注幻觉加输出侧硬性清洗
+
+### 需求
+
+D43 上线后模型仍会在回复正文输出 `【世界时间：周一 12:00】`——部分模型不遵守
+「禁止复述」指令，且标注紧贴每条用户消息、格式模仿吸引力强。
+
+### 实现
+
+- `sanitizeAssistantText`：统一剔除回复中的 `【世界时间：…】`（独占行整行删除、
+  内联只删标注保留上下文），并去掉回复开头的旧式 `（周X HH:MM）` 前缀；
+  正则要求闭合 `】`，避免流式半截标注误删同行正文。
+- 清洗点覆盖：ChatService 最终回复、agent 循环每轮叙事文本、上下文压缩摘要；
+  流式草稿在 UI 侧每收到 delta 即清洗，边生成边展示也是干净的。
+- 系统提示 `TIME_MARKER_GUIDANCE` 加强：需要表达时刻用自然叙述
+  （如「已经中午了」）并配合 advance_time 工具，不给模型可抄的格式。
+
+### 门禁
+
+- 单元测试：全量 514 个全过（新增清洗函数、回复/轮次/摘要清洗用例）；
+  35 条 e2e 全过；build / check / lint 全绿。
+
+## 2026-08-05（续）：排查「模型响应缺少 choices[0].message.content」偶发报错
+
+### 根因
+
+报错来自 `openai-client.ts` 两处「没有文本内容」的硬抛错：
+
+1. 思考型模型（DeepSeek R1 系等）可能只返回 `reasoning_content`、正文为
+   `null`/缺失（尤其 max_tokens 在思考阶段耗尽）；流式只下发了思考与 usage 块。
+2. 部分兼容端点把 `content` 返回为多段数组（`[{type:'text',text:'…'}]`），
+   旧解析只认字符串，一律判为「缺少 content」。
+3. 模型合法地「没说话」（空回复 / 命中长度上限）也被当成协议错误中断对话。
+
+### 修复
+
+- `extractContent` 兼容 content 字符串与多段数组（拼接 text/input_text 片段），
+  流式 `extractStreamDelta` 同样支持数组块。
+- `buildChatResult` / `parseStreamedResult`：响应结构完整（存在 `choices[0].message`）
+  但正文为空时按空回复处理，不再抛错；流式只有思考/usage 时同样按空回复返回并保留思考。
+- 仅当结构畸形（缺 choices/message、content 类型非法、流里无任何有效数据块）才报错，
+  且报错附带 200 字响应摘要，便于定位。
+- 空回复落库：`addMessage` 允许「空正文 + thinking」的 assistant 消息（快照照常，
+  气泡可展开思考）；正文与思考都为空时提示「模型返回了空回复」而不追加脏消息。
+
+### 门禁
+
+- 单元测试：全量 521 个全过（新增 content 数组、null/缺失 content、仅思考流、
+  仅 usage 流、空正文+thinking 等用例）；35 条 e2e 全过；build / check / lint 全绿。
+
+## 2026-08-05（续）：定位「只输出思考、无正文」根因 + Max Tokens 诊断
+
+### 根因（联网调研确认）
+
+1. **输出预算共享**：DeepSeek R1 等思考型模型的 `reasoning_content`（思考）与 `content`
+   （正文）共享 `max_tokens` 预算。CosBox 默认 Max Tokens 只有 1024，思考一长（尤其
+   复杂剧情）就把预算耗尽，正文被截断为 0，只剩思考。官方/社区推荐 ≥4096
+   （DeepSeek R1 官方默认 4K；部分新思考模型建议 16K+）。
+2. **API 字段混淆/代理映射**：部分兼容端点（阿里云百炼、LiteLLM 转 Anthropic 格式等）
+   把思考放 `reasoning_content`、正文放 `content`，转换丢字段时就会出现「只有思考没有
+   正文」；OpenRouter 等则把思考塞进 `<think>` 标签拼在 content 里，行为各不相同。
+
+### 修复
+
+- `finish_reason` 全链路透传：非流式与流式解析都提取，`LlmChatResult.finishReason`
+  经 `ChatService` 传到发送层。
+- 空正文 + `finish_reason === 'length'` 时，前端 toast 明确提示「思考耗尽了 Max Tokens
+  预算，正文被截断，请在设置里调大 Max Tokens（建议 4096 以上）」，不再只是模糊的
+  「空回复」。
+- 默认 Max Tokens 从 1024 提升到 4096（思考型模型官方常用值）；设置页 Max Tokens
+  文案补充思考/正文共享预算的说明。
+
+### 门禁
+
+- 单元测试：全量 523 个全过（新增 finishReason 透传、length 截断诊断用例）；
+  35 条 e2e 全过；build / check / lint 全绿。
+
+## 2026-08-05（续）：状态提示词补充「穿着细节」行
+
+### 需求
+
+【当前状态】的「穿着：…」行后需要紧跟一行「穿着细节：…」，描述当前已穿衣物
+穿上后的样子——与衣柜里每条衣物的「穿着细节」描述完全一致，让 AI 无需在
+【衣柜】里自行对照即可精确还原穿着。
+
+### 实现
+
+- 新增 `formatOutfitDetails`：按穿戴顺序（帽子→上衣→内衣→内裤→下装→袜子→鞋→配饰）
+  收集当前已穿衣物名，逐件到衣柜按名称查找并输出 `名称：描述`；衣柜中无同名条目、
+  条目无描述的衣物不参与，全部无描述时不输出该行。
+- `summarizeState` 在「穿着」行后插入「穿着细节」行；实时状态预览不展示
+  （与「预览不含衣柜/地点库」的既有约定一致）。
+
+### 门禁
+
+- 单元测试：全量 528 个全过（新增 formatOutfitDetails 与穿着细节行用例）；
+  35 条 e2e 全过；build / check / lint 全绿。
+
 ## 2026-08-05（续）：AI 思考展示 + 穿着槽位标签化 + 开发者输入预览
 
 ### 需求

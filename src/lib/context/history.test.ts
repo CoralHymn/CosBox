@@ -58,7 +58,7 @@ describe('prepareHistory', () => {
 		expect(result.compressedCount).toBe(0);
 	});
 
-	it('带世界时间的消息在发送内容前标注（周一 09:00）', () => {
+	it('带世界时间的消息正文保持纯净并保留 worldTime', () => {
 		const conversation: ChatMessageView[] = [
 			{
 				id: '1',
@@ -69,7 +69,8 @@ describe('prepareHistory', () => {
 			}
 		];
 		const result = prepareHistory(conversation, { maxMessages: 10 });
-		expect(result.messages[0]!.content).toBe('（周一 09:00）好了快穿上吧');
+		expect(result.messages[0]!.content).toBe('好了快穿上吧');
+		expect(result.messages[0]!.worldTime).toEqual({ day: 0, hour: 9, minute: 0 });
 	});
 
 	it('无世界时间的消息不标注时间', () => {

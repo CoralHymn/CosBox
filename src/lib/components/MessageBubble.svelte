@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ChatMessageView } from '../core/types';
+	import { formatWorldTime } from '../core/state';
 	import { formatTimestamp } from '../utils/format';
 
 	interface Props {
@@ -21,6 +22,11 @@
 >
 	<div class="message-meta">
 		<span>{roleLabel[message.role]}</span>
+		{#if message.worldTime !== undefined}
+			<span class="world-time" title="该消息发生时的剧情时间"
+				>{formatWorldTime(message.worldTime)}</span
+			>
+		{/if}
 		<span>{formatTimestamp(message.timestamp)}</span>
 	</div>
 	{#if message.role === 'assistant' && message.thinking !== undefined && message.thinking.trim() !== ''}

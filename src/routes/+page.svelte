@@ -45,6 +45,7 @@
 		type GeneratorKind
 	} from '../lib/llm/generator';
 	import { resolveContextWindow } from '../lib/llm/model-info';
+	import { sanitizeAssistantText } from '../lib/llm/message-time';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
@@ -191,10 +192,11 @@
 						}
 					: undefined;
 			streamingDraft = '';
-			const { reply, debug, bundle, usage, compaction, thinking, rounds } =
+			const { reply, debug, bundle, usage, compaction, thinking, finishReason, rounds } =
 				await service.generateReply(input, settings.config, {
 					onDelta: (delta) => {
-						streamingDraft = `${streamingDraft ?? ''}${delta}`;
+						// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
+						streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
 					},
 					tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 					toolContext: {
@@ -220,7 +222,26 @@
 					await session.addMessage('system', `【工具调用】${tool.name}：${tool.output}`);
 				}
 			}
-			await session.addMessage('assistant', reply, { thinking });
+			const budgetExhausted = finishReason === 'length';
+			if (reply.trim() !== '') {
+				await session.addMessage('assistant', reply, { thinking });
+			} else if (thinking !== undefined && thinking.trim() !== '') {
+				// 模型只输出了思考过程、正文为空：保留思考（对话气泡可展开），正文留空。
+				await session.addMessage('assistant', '', { thinking });
+				if (budgetExhausted) {
+					toasts.push(
+						'info',
+						'思考耗尽了 Max Tokens 预算，正文被截断。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
+					);
+				}
+			} else {
+				toasts.push(
+					'info',
+					budgetExhausted
+						? '模型输出被 Max Tokens 上限截断，正文为空。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
+						: '模型返回了空回复，本轮未追加消息，请重试或换一种说法。'
+				);
+			}
 		} catch (err) {
 			toasts.error(err);
 		} finally {

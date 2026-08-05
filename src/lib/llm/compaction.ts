@@ -1,5 +1,6 @@
 import type { ChatMessageView } from '../core/types';
 import { truncate } from '../utils/format';
+import { formatWorldTimeLabel } from './message-time';
 import type { ChatMessage } from './types';
 
 /** 默认保留的最近消息条数：摘要之外原样发送。 */
@@ -79,7 +80,14 @@ export function buildSummaryRequest(
 		{
 			role: 'user',
 			content:
-				previous + messages.map((message) => `[${message.role}] ${message.content}`).join('\n')
+				previous +
+				messages
+					.map((message) => {
+						const label =
+							message.worldTime !== undefined ? formatWorldTimeLabel(message.worldTime) : '';
+						return `[${message.role}]${label} ${message.content}`;
+					})
+					.join('\n')
 		}
 	];
 }
@@ -120,5 +128,10 @@ export function fallbackSummary(messages: ReadonlyArray<ChatMessageView>): strin
 
 /** 把摘要请求消息序列化为纯文本（供复制/调试）。 */
 export function serializeSummaryRequest(messages: ReadonlyArray<ChatMessage>): string {
-	return messages.map((message) => `[${message.role}] ${message.content}`).join('\n\n');
+	return messages
+		.map((message) => {
+			const label = message.worldTime !== undefined ? formatWorldTimeLabel(message.worldTime) : '';
+			return `[${message.role}]${label} ${message.content}`;
+		})
+		.join('\n\n');
 }

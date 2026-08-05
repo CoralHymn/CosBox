@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState } from '../core/state';
 import type { ChatMessageView, WorldInfoEntry } from '../core/types';
-import { buildContext, buildToolGuidance, defaultSystemPrompt } from './pipeline';
+import {
+	buildContext,
+	buildToolGuidance,
+	defaultSystemPrompt,
+	TIME_MARKER_GUIDANCE
+} from './pipeline';
 
 function history(): ChatMessageView[] {
 	return [
@@ -201,6 +206,35 @@ describe('buildContext', () => {
 		});
 		expect(bundle.systemMessage).toContain('【工具执行反馈】');
 		expect(bundle.systemMessage).toContain('set_outfit(slot=上衣, item=白色衬衫)');
+	});
+
+	it('系统提示注入时间元数据防复述规则', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: []
+		});
+		expect(bundle.systemMessage).toContain(TIME_MARKER_GUIDANCE);
+		expect(bundle.systemMessage).toContain('【世界时间：');
+	});
+
+	it('带世界时间的消息正文保持纯净并透传 worldTime', () => {
+		const conversation: ChatMessageView[] = [
+			{
+				id: '1',
+				role: 'user',
+				content: '好了快穿上吧',
+				timestamp: 1,
+				worldTime: { day: 0, hour: 9, minute: 0 }
+			}
+		];
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: []
+		});
+		expect(bundle.messages[0]!.content).toBe('好了快穿上吧');
+		expect(bundle.messages[0]!.worldTime).toEqual({ day: 0, hour: 9, minute: 0 });
 	});
 
 	it('工具执行反馈为空时不注入', () => {
