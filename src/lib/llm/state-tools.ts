@@ -164,7 +164,7 @@ export const advanceTimeTool: StateToolDefinition = {
 export const setOutfitTool: StateToolDefinition = {
 	name: 'set_outfit',
 	description:
-		'更换角色穿着。slot 为槽位（headwear/top/underwear/underpants/bottom/socks/shoes，也可用中文：帽子/上衣/内衣/内裤/下装/袜子/鞋），item 必须是衣柜中已存在的衣物名称（精确名称，如「白色衬衫」），或用 null / 「无」表示脱掉。',
+		'更换角色穿着。slot 为槽位（headwear/top/underwear/underpants/bottom/socks/shoes，也可用中文：帽子/上衣/内衣/内裤/下装/袜子/鞋）；slot 可省略——提供衣柜中已存在的衣物名称时会自动识别槽位。item 必须是衣柜中已存在的衣物名称（精确名称，如「白色衬衫」），或用 null / 「无」表示脱掉。',
 	parameters: {
 		type: 'object',
 		properties: {
@@ -179,19 +179,37 @@ export const setOutfitTool: StateToolDefinition = {
 	},
 	async execute(args, ctx) {
 		const rawSlot = typeof args.slot === 'string' ? args.slot.trim().toLowerCase() : '';
-		const slot =
+		let slot =
 			SLOT_ALIASES[rawSlot] ??
 			(OUTFIT_SLOTS.includes(rawSlot as OutfitSlot) ? (rawSlot as OutfitSlot) : undefined);
-		if (slot === undefined) {
-			throw new Error(`未知槽位：${String(args.slot)}，可用：帽子/上衣/内衣/内裤/下装/袜子/鞋`);
-		}
 		const item = args.item;
 		if (item !== null && typeof item !== 'string') {
 			throw new Error('set_outfit 的 item 必须是衣物名称或 null');
 		}
-		const slotKey = slot;
 		const rawValue = item === null ? '' : item.trim();
 		const value = rawValue === '' || REMOVE_TOKENS.has(rawValue.toLowerCase()) ? null : rawValue;
+		// 槽位缺失/非法时，按衣柜中该衣物的 kind 自动推断（模型常漏传 slot）。
+		if (slot === undefined && value !== null) {
+			const wardrobe = ctx.getState().outfit.wardrobe;
+			const exact = wardrobe.find((entry) => entry.name === value);
+			const fuzzy = wardrobe.filter((entry) =>
+				entry.name.toLowerCase().includes(value.toLowerCase())
+			);
+			const entry = exact ?? (fuzzy.length === 1 ? fuzzy[0] : undefined);
+			if (
+				entry?.kind !== undefined &&
+				entry.kind !== 'any' &&
+				OUTFIT_SLOTS.includes(entry.kind as OutfitSlot)
+			) {
+				slot = entry.kind as OutfitSlot;
+			}
+		}
+		if (slot === undefined) {
+			throw new Error(
+				`未知槽位：${String(args.slot ?? '')}，可用：帽子/上衣/内衣/内裤/下装/袜子/鞋`
+			);
+		}
+		const slotKey = slot;
 		if (value !== null) {
 			const wardrobe = ctx.getState().outfit.wardrobe;
 			const exact = wardrobe.find((entry) => entry.name === value);
