@@ -173,6 +173,39 @@ describe('OpenAiCompatibleClient', () => {
 		expect(body.messages[0].content).toBe('早上好');
 	});
 
+	it('assistant 消息携带 reasoning 时序列化为 reasoning_content（DeepSeek 工具轮回传）', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chatWithTools(
+			[
+				{
+					role: 'assistant',
+					content: '',
+					toolCalls: [{ id: 'c1', name: 'set_outfit', arguments: { slot: 'top', item: '衬衫' } }],
+					reasoning: '用户要换装，我先调用工具'
+				}
+			],
+			TOOL_SCHEMAS,
+			config
+		);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.messages[0].reasoning_content).toBe('用户要换装，我先调用工具');
+	});
+
+	it('非 assistant 消息不序列化 reasoning_content', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chat([{ role: 'user', content: 'hi', reasoning: 'x' }], config);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.messages[0]).not.toHaveProperty('reasoning_content');
+	});
+
 	it('无 apiKey 时不带 Authorization 头', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(okResponse('x'));

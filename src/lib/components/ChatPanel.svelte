@@ -197,6 +197,14 @@
 						</div>
 						<div class="prompt-modal-body">
 							{#if 'view' in modal}
+								{#if modal.view.request !== undefined}
+									<p class="muted" style="margin: 0 0 4px;">
+										请求参数：model={modal.view.request.model}，max_tokens=
+										{modal.view.request.maxTokens}，stream={modal.view.request.stream
+											? '开'
+											: '关'}，状态工具={modal.view.request.toolsEnabled ? '开' : '关'}
+									</p>
+								{/if}
 								<p class="muted" style="margin: 0 0 4px;">system</p>
 								<pre>{modal.view.systemMessage}</pre>
 								{#each modal.view.messages as message, i (i)}

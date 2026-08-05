@@ -476,6 +476,26 @@ Chatbox 的消息时间只存在 `Message.createdAt` 并纯 UI 展示（`showMes
    **代价**：默认 4096 增加单次回复的 token 上限（成本上限略升，通常无害）；
    若用户已保存过旧配置，需手动在设置里调大。
 
+## D47：DeepSeek 思考模式工具轮回传 reasoning_content
+
+**问题**：用户 Max Tokens 已调到 16000，仍出现「只有思考、无正文」。
+联网核对 DeepSeek 官方文档（thinking mode / tool calls）：带工具调用的轮次，
+`reasoning_content` 必须在后续请求中原样回传，否则 400 或续答异常；
+不带工具调用的轮次回传会被忽略（可不传）。CosBox 工具循环恰好把思考丢弃了。
+**选择**：
+
+1. `ChatMessage.reasoning` 承载工具轮次思维链；agent 循环回放带 tool_calls 的
+   assistant 消息时携带，`serializeMessage` 输出 `reasoning_content`（仅 assistant）。
+2. 开发者调试视图增加「请求参数」行（model / max_tokens / stream / 状态工具），
+   让用户直接核对 16000 是否真的随请求发出。
+3. 空正文提示按 finish_reason 分流：`length` 提示调大预算；
+   `stop` 提示「思考型模型只输出思考就结束」的端点/模型侧排查路径。
+   **理由**：修复确定性客户端 bug（丢 reasoning_content），并提供可操作的诊断
+   信息；`stop` 且仅思考属于部分模型/代理的行为怪癖（Kimi/Qwen 等），客户端
+   只能提示无法根治。
+   **代价**：向 API 回传 reasoning_content 增加少量请求体积；非 DeepSeek 端点
+   通常忽略该字段，无副作用。
+
 ## D43：地点大类按区域规划
 
 **问题**：地点生成的「大类」容易变成场所类型（奶茶店、咖啡厅、超市、电影院各占一个

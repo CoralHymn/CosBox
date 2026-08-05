@@ -46,6 +46,12 @@ export interface ChatMessage {
 	worldTime?: WorldTime;
 	/** assistant 消息携带的模型工具调用（回传给 API 时必须原样保留）。 */
 	toolCalls?: ToolCall[];
+	/**
+	 * 思考型模型（DeepSeek 等）工具调用轮次产出的思维链。
+	 * DeepSeek 官方要求带 tool_calls 的 assistant 消息在后续请求中原样回传
+	 * reasoning_content，否则返回 400 或续答异常（只思考无正文）。
+	 */
+	reasoning?: string;
 	/** tool 消息指向的 tool_call id。 */
 	toolCallId?: string;
 	/** tool 消息对应的工具名。 */
