@@ -714,6 +714,41 @@ AI 现在会调用工具了，但深度思考中仍觉得自己「没有调用�
 - 单元测试：全量 463 个；覆盖率 100% 语句/行/函数（分支 93.48%）；30 条 e2e 全过；
   build/check/lint 全绿。
 
+## 2026-08-05（续）：拖拽排序 + 配置段导入导出 + .cbox 工作区
+
+### 需求
+
+1. 排序改为拖拽（替代 ↑/↓ 按钮）。
+2. 地点库 / 衣柜 / 日程表增加导出、导入（迁移数据与分享模板）。
+3. 设置中支持导出/导入工作区：包含除模型配置外的全部数据（对话、配置），
+   打包为 ZIP、后缀 .cbox，不能泄露 Key。
+
+### 实现
+
+**拖拽排序**
+
+- 地点/衣柜条目行可拖拽（`moveItemToTarget` 纯函数在分类内重排源数组并持久化，
+  同属世界配置、不生成快照）；e2e 用 dragTo 验证。
+
+**配置段导入导出**
+
+- `import-export/config-transfer`：导出 `{ kind, version, items }` JSON 模板；
+  导入按名称去重合并（复用 `buildImportPatch`），toast 报告实际新增数。
+
+**工作区 .cbox**
+
+- 自研零依赖 ZIP 读写（`utils/zip`：store 方式 + CRC32 + UTF-8 文件名）；
+  `workspace` 模块序列化/解析：manifest、profile、developer、world-info、config、
+  snapshots（含 headId）。
+- 导出为 `cosbox-YYYYMMDD-HHmm.cbox`；导入前校验快照链可重建，清库写入后
+  `restoreWorkspace` 整体重载；**不含模型配置，API Key 不泄露**。
+- e2e：地点/衣柜/日程三段模板导入导出 + 「导出 → 清空会话 → 导入恢复」全链路。
+
+### 门禁
+
+- 单元测试：全量 494 个；覆盖率 100% 语句/行/函数（分支 93.66%）；34 条 e2e 全过；
+  build/check/lint 全绿。
+
 ## 2026-08-05（续）：模型输入改为可点击下拉 + Max Tokens 说明
 
 ### 需求

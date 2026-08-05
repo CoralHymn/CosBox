@@ -527,6 +527,31 @@ describe('CharacterManager', () => {
 		expect(manager.getState().schedule.entries).toHaveLength(3);
 	});
 
+	it('restoreWorkspace 写入配置覆盖与 head 并整体重载', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '你好');
+		await manager.applyConfig({
+			places: [{ id: 'p1', category: '学校', name: '食堂', description: 'x' }]
+		});
+		const headId = manager.getHeadId()!;
+		const config = {
+			places: [{ id: 'p2', category: '郊外', name: '海边', description: 'y' }]
+		};
+		await manager.restoreWorkspace(config, headId);
+		expect(manager.getHeadId()).toBe(headId);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['你好']);
+		expect(manager.getState().places.map((p) => p.name)).toEqual(['海边']);
+	});
+
+	it('restoreWorkspace headId 为 null 时回退到最新 tip', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', 'hi');
+		await manager.restoreWorkspace({}, null);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['hi']);
+	});
+
 	it('applyConfig 的覆盖在重新初始化后仍生效', async () => {
 		const manager = createManager();
 		await manager.init();

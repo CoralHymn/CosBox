@@ -97,6 +97,24 @@ export class SnapshotRepository {
 		}
 	}
 
+	/** 清空全部快照（工作区导入前重置）。 */
+	async clearAll(): Promise<void> {
+		try {
+			await this.database.snapshots.clear();
+		} catch (err) {
+			throw new StorageError('清空快照失败', { cause: err });
+		}
+	}
+
+	/** 批量写入快照节点（工作区导入，保留原始 id）。 */
+	async bulkAdd(nodes: readonly SnapshotNode[]): Promise<void> {
+		try {
+			await this.database.snapshots.bulkAdd([...nodes]);
+		} catch (err) {
+			throw new StorageError('导入快照失败', { cause: err });
+		}
+	}
+
 	/** 计算当前全部分支 tip。 */
 	async getBranches(): Promise<BranchSummary[]> {
 		// getAll 已把底层异常翻译为 StorageError，这里不再重复包装。

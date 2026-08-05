@@ -17,6 +17,12 @@
 		parseCharaCard,
 		serializeCharaCard
 	} from '../lib/import-export/chara-card-v3';
+	import { parseConfigPart, serializeConfigPart } from '../lib/import-export/config-transfer';
+	import {
+		parseWorkspace,
+		serializeWorkspace,
+		type WorkspaceData
+	} from '../lib/import-export/workspace';
 	import {
 		ChatService,
 		type DebugPromptView,
@@ -31,6 +37,7 @@
 	import {
 		buildImportPatch,
 		GeneratorService,
+		itemKeyFor,
 		KIND_LABELS,
 		type GeneratedItem,
 		type GenerationRequest,
@@ -43,6 +50,8 @@
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
 	import { STATE_TOOLS } from '../lib/llm/state-tools';
 	import type { LlmConfig, TokenUsage } from '../lib/llm/types';
+	import { rebuildFromNodes } from '../lib/core/snapshot';
+	import { createInitialState } from '../lib/core/state';
 	import type { SearchResult } from '../lib/search/types';
 	import { WebSearchClient } from '../lib/search/search-client';
 	import type { AppProfile } from '../lib/stores/settings.svelte';
@@ -52,7 +61,7 @@
 	import { createSettingsStore } from '../lib/stores/settings.svelte';
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
-	import { downloadTextFile } from '../lib/utils/download';
+	import { downloadBytes, downloadTextFile } from '../lib/utils/download';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
 	import LocationsPanel from '../lib/components/LocationsPanel.svelte';
@@ -66,8 +75,9 @@
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
 
 	const db = getDb();
+	const snapshotRepo = new SnapshotRepository(db);
 	const manager = new CharacterManager({
-		snapshots: new SnapshotRepository(db),
+		snapshots: snapshotRepo,
 		kv: new KvRepository(db)
 	});
 	const session = createCharacterSession(manager);
@@ -496,6 +506,78 @@
 		toasts.success(`已导入 ${items.length} 项到${KIND_LABELS[kind]}`);
 	}
 
+	/** 导出单个配置段（地点/衣柜/日程）为 JSON 模板。 */
+	function handleExportConfig(kind: GeneratorKind, items: GeneratedItem[]): void {
+		downloadTextFile(`${KIND_LABELS[kind]}-${stamp()}.json`, serializeConfigPart(kind, items));
+		toasts.success(`已导出${KIND_LABELS[kind]}`);
+	}
+
+	/** 导入单个配置段：解析、去重合并进世界配置。 */
+	async function handleImportConfig(kind: GeneratorKind, raw: string): Promise<void> {
+		const parsed = parseConfigPart(kind, raw);
+		if (parsed.issues.length > 0) {
+			toasts.error(parsed.issues.join('；'));
+			return;
+		}
+		const existing: GeneratedItem[] =
+			kind === 'locations'
+				? session.state.places
+				: kind === 'wardrobe'
+					? session.state.outfit.wardrobe
+					: session.state.schedule.entries;
+		const names = new Set(existing.map((item) => itemKeyFor(kind, item)));
+		const freshCount = parsed.items.filter((item) => !names.has(itemKeyFor(kind, item))).length;
+		await session.applyConfig(buildImportPatch(kind, parsed.items, existing));
+		toasts.success(`已导入 ${freshCount} 项到${KIND_LABELS[kind]}`);
+	}
+
+	/** 导出工作区：除模型配置外的全部数据打包为 .cbox。 */
+	function handleExportWorkspace(): void {
+		const data: WorkspaceData = {
+			profile: settings.profile,
+			developerMode: settings.developerMode,
+			worldInfo: worldInfo.entries,
+			config: {
+				places: session.state.places,
+				wardrobe: session.state.outfit.wardrobe,
+				scheduleEntries: session.state.schedule.entries
+			},
+			headId: session.headId,
+			snapshots: session.snapshots
+		};
+		downloadBytes(`cosbox-${stamp()}.cbox`, serializeWorkspace(data));
+		toasts.success('工作区已导出');
+	}
+
+	/** 导入工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
+	async function handleImportWorkspace(file: File): Promise<void> {
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		const data = parseWorkspace(bytes);
+		// 导入前校验快照链可重建，避免写入损坏数据。
+		if (data.headId !== null) {
+			rebuildFromNodes(
+				new Map(data.snapshots.map((node) => [node.id, node])),
+				data.headId,
+				createInitialState()
+			);
+		}
+		await snapshotRepo.clearAll();
+		await snapshotRepo.bulkAdd(data.snapshots);
+		await worldInfo.clear();
+		await worldInfo.importEntries(data.worldInfo);
+		await settings.saveProfile(data.profile);
+		await settings.saveDeveloperMode(data.developerMode);
+		await manager.restoreWorkspace(data.config, data.headId);
+		toasts.success('工作区已导入');
+	}
+
+	/** 生成文件名时间戳：YYYYMMDD-HHmm。 */
+	function stamp(): string {
+		const now = new Date();
+		const pad = (value: number): string => String(value).padStart(2, '0');
+		return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+	}
+
 	function handleExport(): void {
 		try {
 			const attributes = session.state.attributes;
@@ -585,6 +667,8 @@
 					onConfig={handleConfigUpdate}
 					onAiGenerate={handleAiGenerate}
 					onAiImport={handleAiImport}
+					onExportConfig={handleExportConfig}
+					onImportConfig={handleImportConfig}
 				/>
 			{:else if tab === 'wardrobe'}
 				<WardrobePanel
@@ -593,6 +677,8 @@
 					onConfig={handleConfigUpdate}
 					onAiGenerate={handleAiGenerate}
 					onAiImport={handleAiImport}
+					onExportConfig={handleExportConfig}
+					onImportConfig={handleImportConfig}
 				/>
 			{:else if tab === 'schedule'}
 				<SchedulePanel
@@ -601,6 +687,8 @@
 					onConfig={handleConfigUpdate}
 					onAiGenerate={handleAiGenerate}
 					onAiImport={handleAiImport}
+					onExportConfig={handleExportConfig}
+					onImportConfig={handleImportConfig}
 				/>
 			{:else if tab === 'versions'}
 				<VersionPanel
@@ -630,6 +718,8 @@
 					onSaveDeveloperMode={handleSaveDeveloperMode}
 					onFetchModels={handleFetchModels}
 					onTestConnection={handleTestConnection}
+					onExportWorkspace={handleExportWorkspace}
+					onImportWorkspace={handleImportWorkspace}
 				/>
 			{/if}
 		</main>

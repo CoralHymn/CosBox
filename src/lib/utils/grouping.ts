@@ -30,3 +30,24 @@ export function groupByCategory<T extends { category: string }>(
 function categoryRank(category: string): number {
 	return category === '' ? 1 : 0;
 }
+
+/**
+ * 拖拽排序：把 dragId 条目移动到 targetId 条目所在位置（同分类内部使用）。
+ * 向下拖拽时落在目标之后，向上拖拽时落在目标之前；未找到或相同返回原数组副本。
+ */
+export function moveItemToTarget<T extends { id: string }>(
+	rows: readonly T[],
+	dragId: string,
+	targetId: string
+): T[] {
+	const from = rows.findIndex((row) => row.id === dragId);
+	const to = rows.findIndex((row) => row.id === targetId);
+	if (from === -1 || to === -1 || from === to) {
+		return [...rows];
+	}
+	const next = [...rows];
+	const moved = next[from]!;
+	next.splice(from, 1);
+	next.splice(to, 0, moved);
+	return next;
+}

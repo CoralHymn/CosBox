@@ -22,9 +22,19 @@
 		onConfig: (patch: ConfigPatch) => void;
 		onAiGenerate: (request: GenerationRequest) => Promise<GenerationResult>;
 		onAiImport: (kind: GeneratorKind, items: GeneratedItem[]) => Promise<void>;
+		onExportConfig: (kind: GeneratorKind, items: GeneratedItem[]) => void;
+		onImportConfig: (kind: GeneratorKind, raw: string) => Promise<void>;
 	}
 
-	let { schedule, onAdvance, onConfig, onAiGenerate, onAiImport }: Props = $props();
+	let {
+		schedule,
+		onAdvance,
+		onConfig,
+		onAiGenerate,
+		onAiImport,
+		onExportConfig,
+		onImportConfig
+	}: Props = $props();
 
 	let draftTitle = $state('');
 	let draftDay = $state(0);
@@ -32,6 +42,7 @@
 	let draftEnd = $state('09:00');
 	let draftLocation = $state('');
 	let aiOpen = $state(false);
+	let importInput = $state<HTMLInputElement | null>(null);
 
 	/** 按时间自动排序的展示视图。 */
 	const sortedEntries = $derived(sortScheduleEntries(schedule.entries));
@@ -75,6 +86,23 @@
 		onConfig({
 			scheduleEntries: sortScheduleEntries(schedule.entries.filter((entry) => entry.id !== id))
 		});
+	}
+
+	function exportConfig(): void {
+		onExportConfig('schedule', schedule.entries);
+	}
+
+	async function onImportFile(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (file === undefined) {
+			return;
+		}
+		try {
+			await onImportConfig('schedule', await file.text());
+		} finally {
+			input.value = '';
+		}
 	}
 </script>
 
@@ -188,6 +216,15 @@
 		<div class="row-actions">
 			<button class="btn btn-primary" onclick={addEntry}>添加条目</button>
 			<button class="btn" onclick={() => (aiOpen = true)}>AI条目</button>
+			<button class="btn" onclick={exportConfig}>导出</button>
+			<button class="btn" onclick={() => importInput?.click()}>导入</button>
+			<input
+				bind:this={importInput}
+				type="file"
+				accept="application/json,.json"
+				style="display: none;"
+				onchange={onImportFile}
+			/>
 		</div>
 	</div>
 </div>
