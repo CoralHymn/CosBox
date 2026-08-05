@@ -9,7 +9,9 @@ import type { ToolCall } from './types';
 export function extractTextToolCalls(text: string): ToolCall[] {
 	const calls: ToolCall[] = [];
 	for (const name of TOOL_NAMES) {
-		const pattern = new RegExp(`\\b${name}\\s*[（(]\\s*([^）)]*)[）)]`, 'g');
+		// 工具名与括号之间只允许空格/制表符（不允许换行），避免思考结尾的
+		// 「goto_location」接上正文里的「（……）」被误拼成一次调用。
+		const pattern = new RegExp(`\\b${name}[ \\t]*[（(]\\s*([^）)]*)[）)]`, 'g');
 		for (const match of text.matchAll(pattern)) {
 			const args = parseCallArgs(match[1] ?? '');
 			if (args === null) {
