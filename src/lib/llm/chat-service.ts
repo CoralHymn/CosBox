@@ -190,6 +190,14 @@ export class ChatService {
 						usage = mergeUsage(usage, retried?.usage);
 						if (retried !== null) {
 							result = retried;
+						} else {
+							// 带工具的重试仍失败：去掉工具声明、改非流式再试，
+							// 规避 DeepSeek V4 思考模式在工具声明下的「只思考不产出」问题。
+							const plain = await this.retryPlainText(messages, config, signal);
+							usage = mergeUsage(usage, plain?.usage);
+							if (plain !== null) {
+								result = plain;
+							}
 						}
 					}
 					if (result.toolCalls.length === 0) {
@@ -271,6 +279,12 @@ export class ChatService {
 			usage = mergeUsage(usage, retried?.usage);
 			if (retried !== null) {
 				result = retried;
+			} else {
+				const plain = await this.retryPlainText(messages, config, signal);
+				usage = mergeUsage(usage, plain?.usage);
+				if (plain !== null) {
+					result = plain;
+				}
 			}
 		}
 		debug = { ...debug, lastResponse: buildLastResponse(result) };
@@ -387,6 +401,27 @@ export class ChatService {
 				(result.content !== null && result.content.trim() !== '')
 				? result
 				: null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * 思考型空回复的最后一档兜底：去掉工具声明并以非流式重新请求，
+	 * 让模型只输出正文（DeepSeek V4 思考模式在工具声明下偶发「思考完就收工」）。
+	 */
+	private async retryPlainText(
+		messages: ReadonlyArray<ChatMessage>,
+		config: LlmConfig,
+		signal?: AbortSignal
+	): Promise<LlmChatResult | null> {
+		const retryMessages: ChatMessage[] = [
+			...messages,
+			{ role: 'system', content: THINKING_ONLY_NUDGE }
+		];
+		try {
+			const result = await this.client.chat(retryMessages, { ...config, stream: false }, signal);
+			return result.content !== null && result.content.trim() !== '' ? result : null;
 		} catch {
 			return null;
 		}
