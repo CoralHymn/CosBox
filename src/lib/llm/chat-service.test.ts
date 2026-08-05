@@ -594,6 +594,44 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
 	});
 
+	it('LLM 状态确认：判断模型因安全理由拒绝时仍补执行（泳衣场景）', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '（点点头）换好了泳衣。', toolCalls: [] })
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'set_outfit', arguments: { slot: 'top', item: '黑色卫衣' } }]
+			})
+			.mockResolvedValueOnce({ content: '已同步。', toolCalls: [] });
+		const chat = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '我无法判断，这涉及隐私', toolCalls: [] });
+		const client: LlmClient = { chat, chatWithTools };
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, judgeDebug } = await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [
+					{ id: '1', role: 'user', content: '游泳课结束了', timestamp: 1 },
+					{
+						id: '2',
+						role: 'assistant',
+						content: '（点点头）换好了泳衣。',
+						timestamp: 2,
+						thinking: '上完游泳课，应该换回常服'
+					}
+				],
+				worldInfo: []
+			},
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+		);
+		expect(judgeDebug?.needsTool).toBe(true);
+		expect(judgeDebug?.output).toBe('我无法判断，这涉及隐私');
+		expect(executedTools.map((tool) => tool.name)).toEqual(['set_outfit']);
+	});
+
 	it('LLM 状态确认：主循环已执行工具时不重复判断', async () => {
 		const chatWithTools = vi
 			.fn()
