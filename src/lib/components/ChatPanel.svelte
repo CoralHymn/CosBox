@@ -39,6 +39,8 @@
 		/** 输入预览：返回「当前输入框内容点击发送会发送给 AI 什么」。 */
 		onPreview: (draft: string) => PromptPreviewResult;
 		onSend: (content: string, options: { search: boolean }) => void;
+		/** 编辑已有消息正文（user/assistant），保存后原地改写快照。 */
+		onEditMessage?: (id: string, content: string) => Promise<void>;
 		/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
 		streamingDraft: string | null;
 	}
@@ -61,6 +63,7 @@
 		debugPrompt,
 		onPreview,
 		onSend,
+		onEditMessage,
 		streamingDraft
 	}: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
@@ -150,7 +153,7 @@
 		{:else}
 			<div class="messages" bind:this={listEl}>
 				{#each conversation as message (message.id)}
-					<MessageBubble {message} />
+					<MessageBubble {message} onEdit={onEditMessage} disabled={busy} />
 				{/each}
 				{#if streamingDraft !== null && streamingDraft !== ''}
 					<MessageBubble

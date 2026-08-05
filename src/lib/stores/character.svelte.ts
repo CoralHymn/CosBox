@@ -22,6 +22,8 @@ export interface CharacterSessionStore {
 		content: string,
 		options?: { skipContext?: boolean; thinking?: string }
 	) => Promise<SnapshotNode>;
+	/** 原地编辑一条消息快照的正文（不新增快照）。 */
+	editMessage: (id: string, content: string) => Promise<void>;
 	checkout: (targetId: string) => Promise<void>;
 	advanceTime: (minutes: number) => Promise<SnapshotNode>;
 	addCheckpoint: (desc: string) => Promise<SnapshotNode>;
@@ -67,6 +69,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 		},
 		update: (patch, metadata) => manager.update(patch, metadata),
 		addMessage: (role, content, options) => manager.addMessage(role, content, options),
+		editMessage: (id, content) => manager.editMessage(id, content),
 		checkout: (targetId) => manager.checkout(targetId),
 		advanceTime: (minutes) => manager.advanceTime(minutes),
 		addCheckpoint: (desc) => manager.addCheckpoint(desc),

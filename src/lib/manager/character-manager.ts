@@ -254,6 +254,36 @@ export class CharacterManager {
 	}
 
 	/**
+	 * 原地编辑一条消息快照的正文（类似 git commit --amend，不新增快照）。
+	 * 只允许编辑消息类快照；正文不能为空；worldTime / thinking / skipContext 原样保留。
+	 */
+	editMessage(id: string, content: string): Promise<void> {
+		return this.enqueue(() => this.doEditMessage(id, content));
+	}
+
+	private async doEditMessage(id: string, content: string): Promise<void> {
+		await this.ensureInit();
+		const trimmed = content.trim();
+		if (trimmed === '') {
+			throw new StateValidationError('消息内容不能为空');
+		}
+		const node = await this.deps.snapshots.getNode(id);
+		if (node === undefined) {
+			throw new SnapshotError(`快照不存在：${id}`);
+		}
+		if (node.delta === null || node.delta.kind !== 'message') {
+			throw new SnapshotError('只能编辑消息快照');
+		}
+		const updated: SnapshotNode = {
+			...node,
+			metadata: { ...node.metadata, desc: '编辑消息' },
+			delta: { ...node.delta, content: trimmed }
+		};
+		await this.deps.snapshots.updateNode(updated);
+		await this.refresh();
+	}
+
+	/**
 	 * checkout：切换到任意快照并重建状态与消息。
 	 * 纯读操作，不写快照表——分支切换无副作用。
 	 */

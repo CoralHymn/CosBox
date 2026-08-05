@@ -376,6 +376,17 @@
 		}
 	}
 
+	/** 编辑已有消息正文：原地改写该消息快照（不新增快照）。失败时上抛保持编辑态。 */
+	async function handleEditMessage(id: string, content: string): Promise<void> {
+		try {
+			await session.editMessage(id, content);
+			toasts.success('消息已更新');
+		} catch (err) {
+			toasts.error(err);
+			throw err;
+		}
+	}
+
 	/** 世界配置覆盖（地点库/衣柜/日程条目）：不生成快照。 */
 	async function handleConfigUpdate(patch: ConfigPatch): Promise<void> {
 		try {
@@ -687,6 +698,7 @@
 					{debugPrompt}
 					onPreview={handlePreview}
 					onSend={handleSend}
+					onEditMessage={handleEditMessage}
 					{streamingDraft}
 				/>
 			{:else if tab === 'state'}

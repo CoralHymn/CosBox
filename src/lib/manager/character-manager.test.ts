@@ -145,6 +145,63 @@ describe('CharacterManager', () => {
 		expect(manager.getConversation()[0]!.thinking).toBe('让我想想');
 	});
 
+	it('editMessage 原地改写正文并保留 thinking 与 worldTime', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '你好');
+		await manager.addMessage('assistant', '原回复', { thinking: '思考过程' });
+		const id = manager.getHeadId()!;
+		await manager.editMessage(id, '改后的回复');
+		const conversation = manager.getConversation();
+		expect(conversation[1]!.content).toBe('改后的回复');
+		expect(conversation[1]!.thinking).toBe('思考过程');
+		expect(conversation[1]!.worldTime).toEqual({ day: 0, hour: 8, minute: 0 });
+	});
+
+	it('editMessage 的修改在重载后保留', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '你好');
+		await manager.addMessage('assistant', '原回复');
+		const id = manager.getHeadId()!;
+		await manager.editMessage(id, '改后的回复');
+		const reloaded = createManager();
+		await reloaded.init();
+		expect(reloaded.getConversation()[1]!.content).toBe('改后的回复');
+	});
+
+	it('editMessage 空正文抛错且不改动原内容', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '回复');
+		const id = manager.getHeadId()!;
+		await expect(manager.editMessage(id, '   ')).rejects.toThrow(StateValidationError);
+		expect(manager.getConversation()[0]!.content).toBe('回复');
+	});
+
+	it('editMessage 只能编辑消息快照', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.update({ outfit: { top: '外套' } }, { desc: '换装' });
+		const stateId = manager.getHeadId()!;
+		await expect(manager.editMessage(stateId, '新内容')).rejects.toThrow('只能编辑消息快照');
+	});
+
+	it('editMessage 编辑中间消息后，后续重建引用新正文', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '问题');
+		await manager.addMessage('assistant', '回答一');
+		const assistantId = manager.getHeadId()!;
+		await manager.addMessage('user', '追问');
+		await manager.editMessage(assistantId, '回答一（改）');
+		expect(manager.getConversation().map((message) => message.content)).toEqual([
+			'问题',
+			'回答一（改）',
+			'追问'
+		]);
+	});
+
 	it('addMessage 支持 system 角色', async () => {
 		const manager = createManager();
 		await manager.init();
