@@ -82,6 +82,8 @@ describe('buildJudgeSystemPrompt / buildJudgeUserPayload', () => {
 		expect(prompt).toContain('最高优先级指令');
 		expect(prompt).toContain('泳衣');
 		expect(prompt).toContain('tool_calls');
+		expect(prompt).toContain('严禁输出剧情正文');
+		expect(prompt).toContain('不要重复生成');
 	});
 });
 
