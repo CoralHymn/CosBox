@@ -687,6 +687,24 @@ DeepSeek 思考模式文档明确：**带工具调用的轮次，`reasoning_cont
 - 单元测试：全量 543 个全过；36 条 e2e 全过（编辑用例改为先 hover 再点图标）；
   build / check / lint 全绿。
 
+## 2026-08-05（续）：编辑态零布局变动——textarea 换成 contenteditable
+
+### 需求
+
+点击编辑图标后，textarea 的固定行数让气泡高度瞬间缩减，UI 抖动。
+
+### 实现
+
+- 编辑区从 textarea 改为 **contenteditable（plaintext-only）div**：高度由内容自然
+  撑开，与消息正文逐字同高（同字体/行高/换行/颜色），进入编辑态**零布局变动**。
+- 保存/取消从文内按钮移到底部操作条：编辑态常驻显示 ✓ / ✕ 图标（绝对定位，
+  不占布局）；Esc 取消、Ctrl/Cmd+Enter 保存。
+- e2e 同步改为对 `.inline-edit` 直接 fill。
+
+### 门禁
+
+- 单元测试：全量 543 个全过；36 条 e2e 全过；build / check / lint 全绿。
+
 ## 2026-08-05（续）：AI 思考展示 + 穿着槽位标签化 + 开发者输入预览
 
 ### 需求
