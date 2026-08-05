@@ -7,6 +7,7 @@
 		GeneratorKind
 	} from '../llm/generator';
 	import { groupByCategory } from '../utils/grouping';
+	import { moveItemToTarget } from '../utils/grouping';
 	import { newId } from '../utils/id';
 	import AiGeneratorPanel from './AiGeneratorPanel.svelte';
 
@@ -18,9 +19,20 @@
 		onConfig: (patch: ConfigPatch) => void;
 		onAiGenerate: (request: GenerationRequest) => Promise<GenerationResult>;
 		onAiImport: (kind: GeneratorKind, items: GeneratedItem[]) => Promise<void>;
+		onExportConfig: (kind: GeneratorKind, items: GeneratedItem[]) => void;
+		onImportConfig: (kind: GeneratorKind, raw: string) => Promise<void>;
 	}
 
-	let { places, location, onUpdate, onConfig, onAiGenerate, onAiImport }: Props = $props();
+	let {
+		places,
+		location,
+		onUpdate,
+		onConfig,
+		onAiGenerate,
+		onAiImport,
+		onExportConfig,
+		onImportConfig
+	}: Props = $props();
 
 	interface PlaceRow {
 		id: string;
@@ -39,6 +51,8 @@
 	let draftName = $state('');
 	let draftDescription = $state('');
 	let aiOpen = $state(false);
+	let dragId = $state<string | null>(null);
+	let importInput = $state<HTMLInputElement | null>(null);
 
 	const groups = $derived(groupByCategory(rows));
 
@@ -128,23 +142,42 @@
 		commitPlaces();
 	}
 
-	/** 在同分类内上移/下移地点（交换源数组位置并持久化）。 */
-	function movePlace(id: string, delta: number): void {
-		const group = groups.find((g) => g.items.some((item) => item.id === id));
-		if (group === undefined) {
+	/** 拖拽排序：把 dragId 地点放到目标地点位置（仅同分类内），并持久化。 */
+	function onDrop(targetId: string): void {
+		if (dragId === null || dragId === targetId) {
+			dragId = null;
 			return;
 		}
-		const index = group.items.findIndex((item) => item.id === id);
-		const target = index + delta;
-		if (target < 0 || target >= group.items.length) {
+		const dragRow = rows.find((row) => row.id === dragId);
+		const targetRow = rows.find((row) => row.id === targetId);
+		if (
+			dragRow === undefined ||
+			targetRow === undefined ||
+			dragRow.category !== targetRow.category
+		) {
+			dragId = null;
 			return;
 		}
-		const from = rows.findIndex((row) => row.id === id);
-		const to = rows.findIndex((row) => row.id === group.items[target]!.id);
-		const next = [...rows];
-		[next[from]!, next[to]!] = [next[to]!, next[from]!];
-		rows = next;
+		rows = moveItemToTarget(rows, dragId, targetId);
+		dragId = null;
 		commitPlaces();
+	}
+
+	function exportConfig(): void {
+		onExportConfig('locations', rows);
+	}
+
+	async function onImportFile(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (file === undefined) {
+			return;
+		}
+		try {
+			await onImportConfig('locations', await file.text());
+		} finally {
+			input.value = '';
+		}
 	}
 </script>
 
@@ -224,7 +257,21 @@
 					</button>
 					{#if !collapsed[group.category]}
 						{#each group.items as row (row.id)}
-							<div class="list-row">
+							<div
+								class="list-row"
+								class:dragging={dragId === row.id}
+								role="button"
+								tabindex="-1"
+								draggable="true"
+								ondragstart={() => (dragId = row.id)}
+								ondragover={(event) => event.preventDefault()}
+								ondrop={(event) => {
+									event.preventDefault();
+									onDrop(row.id);
+								}}
+								ondragend={() => (dragId = null)}
+							>
+								<span class="drag-handle" title="拖拽排序">⠿</span>
 								<input
 									class="input"
 									style="width: 110px;"
@@ -246,18 +293,6 @@
 									onchange={commitPlaces}
 									placeholder="描述"
 								/>
-								<div class="row-actions" style="flex: none;">
-									<button
-										class="btn btn-small"
-										onclick={() => movePlace(row.id, -1)}
-										aria-label="上移">↑</button
-									>
-									<button
-										class="btn btn-small"
-										onclick={() => movePlace(row.id, 1)}
-										aria-label="下移">↓</button
-									>
-								</div>
 								<button
 									class="btn btn-danger btn-small"
 									onclick={() => removePlace(row.id)}
@@ -310,6 +345,15 @@
 		<div class="row-actions">
 			<button class="btn btn-primary" onclick={addPlace}>添加地点</button>
 			<button class="btn" onclick={() => (aiOpen = true)}>AI地点</button>
+			<button class="btn" onclick={exportConfig}>导出</button>
+			<button class="btn" onclick={() => importInput?.click()}>导入</button>
+			<input
+				bind:this={importInput}
+				type="file"
+				accept="application/json,.json"
+				style="display: none;"
+				onchange={onImportFile}
+			/>
 		</div>
 	</div>
 </div>

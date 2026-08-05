@@ -901,6 +901,22 @@ button:disabled {
 	border-bottom: 1px solid var(--border);
 }
 
+.list-row.dragging {
+	opacity: 0.45;
+}
+
+.drag-handle {
+	cursor: grab;
+	color: var(--text-faint);
+	font-size: 14px;
+	user-select: none;
+	flex: none;
+}
+
+.drag-handle:active {
+	cursor: grabbing;
+}
+
 .list-row:last-child {
 	border-bottom: none;
 }

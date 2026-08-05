@@ -17,6 +17,8 @@
 		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
 		onFetchModels: (draft: LlmConfig) => Promise<FetchedModel[]>;
 		onTestConnection: (draft: LlmConfig) => Promise<void>;
+		onExportWorkspace: () => void;
+		onImportWorkspace: (file: File) => Promise<void>;
 	}
 
 	let {
@@ -28,7 +30,9 @@
 		onResetProfile,
 		onSaveDeveloperMode,
 		onFetchModels,
-		onTestConnection
+		onTestConnection,
+		onExportWorkspace,
+		onImportWorkspace
 	}: Props = $props();
 
 	/** 服务商选择：'demo' | 预设 id | CUSTOM_PROVIDER_ID。 */
@@ -49,6 +53,7 @@
 	let saving = $state(false);
 	let fetchingModels = $state(false);
 	let testingConnection = $state(false);
+	let workspaceInput = $state<HTMLInputElement | null>(null);
 	/** 「获取模型列表」拉取到的模型 id 与上下文窗口。 */
 	let availableModels = $state<string[]>([]);
 	let modelContexts = $state<Record<string, number>>({});
@@ -188,6 +193,19 @@
 			await onTestConnection(buildConfig());
 		} finally {
 			testingConnection = false;
+		}
+	}
+
+	async function onImportFile(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (file === undefined) {
+			return;
+		}
+		try {
+			await onImportWorkspace(file);
+		} finally {
+			input.value = '';
 		}
 	}
 
@@ -432,6 +450,25 @@
 		<p class="muted" style="margin: 0;">
 			开启后，在对话页可展开查看最近一次实际发送给 AI 的完整提示词（系统消息 + 全部消息）。
 		</p>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">工作区</h3>
+		<p class="muted" style="margin: 0 0 10px;">
+			导出全部数据（对话快照、地点库/衣柜/日程、世界书、角色档案等）， 以 .cbox
+			压缩包保存；导入会整体恢复。不含模型配置，API Key 不会泄露。
+		</p>
+		<div class="row-actions">
+			<button class="btn" onclick={onExportWorkspace}>导出工作区</button>
+			<button class="btn" onclick={() => workspaceInput?.click()}>导入工作区</button>
+			<input
+				bind:this={workspaceInput}
+				type="file"
+				accept=".cbox"
+				style="display: none;"
+				onchange={onImportFile}
+			/>
+		</div>
 	</div>
 
 	<button class="btn btn-primary" onclick={save} disabled={saving}>保存设置</button>

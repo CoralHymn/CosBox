@@ -300,6 +300,24 @@ export class CharacterManager {
 		this.emit();
 	}
 
+	/**
+	 * 工作区导入：写入配置覆盖与 head，然后整体重载（从数据库重建状态与会话）。
+	 * 不触碰模型配置（settings.llm），因此不会暴露 API Key。
+	 */
+	async restoreWorkspace(config: ConfigOverrides, headId: string | null): Promise<void> {
+		return this.enqueue(async () => {
+			await this.deps.kv.set(CONFIG_OVERRIDES_KEY, config);
+			if (headId === null) {
+				await this.deps.kv.remove(LAST_HEAD_KEY);
+			} else {
+				await this.deps.kv.set(LAST_HEAD_KEY, headId);
+			}
+			this.initialized = false;
+			this.initPromise = null;
+			await this.init();
+		});
+	}
+
 	private async doAdvanceTime(minutes: number): Promise<SnapshotNode> {
 		await this.ensureInit();
 		if (!Number.isFinite(minutes)) {

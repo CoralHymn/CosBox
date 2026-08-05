@@ -626,34 +626,34 @@ test('AI 条目：生成日程并批量导入', async ({ page }) => {
 	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
 });
 
-test('地点库支持手动排序（上移/下移）', async ({ page }) => {
+test('地点库支持拖拽排序', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /地点/ }).click();
 	const schoolGroup = page
 		.locator('div.group')
 		.filter({ has: page.locator('.group-name', { hasText: '学校' }) });
-	await expect(schoolGroup.locator('input[placeholder="地点名"]').first()).toHaveValue('学院正门');
+	const rows = schoolGroup.locator('.list-row');
+	await expect(rows.locator('input[placeholder="地点名"]').first()).toHaveValue('学院正门');
 
-	// 下移第一项 → 教室 2-B 移到最前
-	await schoolGroup.locator('button[aria-label="下移"]').first().click();
-	await expect(schoolGroup.locator('input[placeholder="地点名"]').first()).toHaveValue('教室 2-B');
+	// 把第一项拖到第三项 → 教室 2-B 移到最前
+	await rows.nth(0).dragTo(rows.nth(2));
+	await expect(rows.locator('input[placeholder="地点名"]').first()).toHaveValue('教室 2-B');
 	// 排序属于配置编辑：不生成快照
 	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
 });
 
-test('衣柜支持手动排序（上移/下移）', async ({ page }) => {
+test('衣柜支持拖拽排序', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /衣柜/ }).click();
 	const casualGroup = page
 		.locator('div.group')
 		.filter({ has: page.locator('.group-name', { hasText: '常服' }) });
-	await expect(casualGroup.locator('input[placeholder="衣物名"]').first()).toHaveValue('白色衬衫');
+	const rows = casualGroup.locator('.list-row');
+	await expect(rows.locator('input[placeholder="衣物名"]').first()).toHaveValue('白色衬衫');
 
-	// 下移第一件 → 深蓝百褶裙移到最前
-	await casualGroup.locator('button[aria-label="下移"]').first().click();
-	await expect(casualGroup.locator('input[placeholder="衣物名"]').first()).toHaveValue(
-		'深蓝百褶裙'
-	);
+	// 把第一件拖到第三件 → 深蓝百褶裙移到最前
+	await rows.nth(0).dragTo(rows.nth(2));
+	await expect(rows.locator('input[placeholder="衣物名"]').first()).toHaveValue('深蓝百褶裙');
 	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
 });
 
@@ -698,6 +698,124 @@ test('日程表按时间自动排序', async ({ page }) => {
 	await expect(page.locator('.list-row').nth(3).locator('input[type="time"]').first()).toHaveValue(
 		'13:00'
 	);
+});
+
+test('地点库导出与导入（JSON 模板）', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /地点/ }).click();
+
+	const [download] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByRole('button', { name: '导出', exact: true }).click()
+	]);
+	expect(download.suggestedFilename()).toMatch(/地点库-\d{8}-\d{4}\.json/);
+
+	// 导入模板：新增地点并去重合并
+	const template = JSON.stringify({
+		kind: 'locations',
+		version: 1,
+		items: [
+			{ category: '测试', name: '测试地点', description: '来自模板' },
+			{ category: '学校', name: '食堂', description: '已存在，应去重' }
+		]
+	});
+	await page.locator('input[type="file"]').setInputFiles({
+		name: 'places.json',
+		mimeType: 'application/json',
+		buffer: Buffer.from(template, 'utf8')
+	});
+	await expect(page.getByText(/已导入 1 项到地点库/)).toBeVisible();
+	await expect(
+		page.locator('#current-place option').filter({ hasText: '测试 > 测试地点' })
+	).toHaveCount(1);
+});
+
+test('衣柜导出与导入（JSON 模板）', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /衣柜/ }).click();
+
+	const [download] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByRole('button', { name: '导出', exact: true }).click()
+	]);
+	expect(download.suggestedFilename()).toMatch(/衣柜-\d{8}-\d{4}\.json/);
+
+	const template = JSON.stringify({
+		kind: 'wardrobe',
+		version: 1,
+		items: [{ category: '测试', kind: 'top', name: '测试衬衫', description: '来自模板' }]
+	});
+	await page.locator('input[type="file"]').setInputFiles({
+		name: 'wardrobe.json',
+		mimeType: 'application/json',
+		buffer: Buffer.from(template, 'utf8')
+	});
+	await expect(page.getByText(/已导入 1 项到衣柜/)).toBeVisible();
+	await expect(page.locator('#wardrobe-top option[value="测试衬衫"]')).toHaveCount(1);
+});
+
+test('日程表导出与导入（JSON 模板）', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /日程/ }).click();
+
+	const [download] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByRole('button', { name: '导出', exact: true }).click()
+	]);
+	expect(download.suggestedFilename()).toMatch(/日程表-\d{8}-\d{4}\.json/);
+
+	const template = JSON.stringify({
+		kind: 'schedule',
+		version: 1,
+		items: [{ day: 3, title: '夜跑', start: '23:00', end: '23:30' }]
+	});
+	await page.locator('input[type="file"]').setInputFiles({
+		name: 'schedule.json',
+		mimeType: 'application/json',
+		buffer: Buffer.from(template, 'utf8')
+	});
+	await expect(page.getByText(/已导入 1 项到日程表/)).toBeVisible();
+	await expect(page.locator('.list-row').last().locator('input[type="time"]').first()).toHaveValue(
+		'23:00'
+	);
+});
+
+test('工作区导出与导入（.cbox 恢复对话与配置）', async ({ page }) => {
+	await page.goto('/');
+	// 造数据：一条消息 + 一个新地点
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await page.getByRole('button', { name: /地点/ }).click();
+	await page.locator('#new-place-name').fill('备份地点');
+	await page.locator('#new-place-desc').fill('来自备份');
+	await page.getByRole('button', { name: '添加地点' }).click();
+
+	// 导出 .cbox
+	await page.getByRole('button', { name: /设置/ }).click();
+	const [download] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByRole('button', { name: '导出工作区' }).click()
+	]);
+	expect(download.suggestedFilename()).toMatch(/^cosbox-\d{8}-\d{4}\.cbox$/);
+	const path = await download.path();
+
+	// 切回根清空会话，再导入工作区恢复
+	await page.getByRole('button', { name: /版本/ }).click();
+	await page.getByRole('button', { name: '展开' }).first().click();
+	await page
+		.locator('.branch-chain .version-row')
+		.locator('button', { hasText: '切换' })
+		.last()
+		.click();
+	await page.getByRole('button', { name: /对话/ }).click();
+	await expect(page.getByText(/演示模式回应/)).not.toBeVisible();
+
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('input[type="file"][accept=".cbox"]').setInputFiles(path!);
+	await expect(page.getByText('工作区已导入')).toBeVisible();
+	await page.getByRole('button', { name: /对话/ }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
 });
 
 test('对话后侧栏显示上下文用量、费用估算与压缩状态', async ({ page }) => {

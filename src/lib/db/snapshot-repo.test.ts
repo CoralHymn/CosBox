@@ -93,6 +93,44 @@ describe('SnapshotRepository', () => {
 		await expect(repo.removeMany(['x'])).rejects.toThrow(StorageError);
 	});
 
+	it('clearAll 清空全部快照', async () => {
+		await repo.addSnapshot({
+			parentId: null,
+			metadata: { type: 'root', desc: 'r' },
+			delta: null
+		});
+		await repo.clearAll();
+		expect(await repo.count()).toBe(0);
+	});
+
+	it('bulkAdd 保留原始 id 批量写入', async () => {
+		const imported = [
+			{
+				id: 'imp-root',
+				timestamp: 1,
+				parentId: null,
+				metadata: { type: 'root' as const, desc: '初始状态' },
+				delta: null
+			},
+			{
+				id: 'imp-msg',
+				timestamp: 2,
+				parentId: 'imp-root',
+				metadata: { type: 'message' as const, desc: '用户消息' },
+				delta: { kind: 'message' as const, role: 'user' as const, content: '你好' }
+			}
+		];
+		await repo.bulkAdd(imported);
+		expect(await repo.count()).toBe(2);
+		expect(await repo.getNode('imp-msg')).toEqual(imported[1]);
+	});
+
+	it('clearAll 与 bulkAdd 数据库关闭后抛 StorageError', async () => {
+		await db.close();
+		await expect(repo.clearAll()).rejects.toThrow(StorageError);
+		await expect(repo.bulkAdd([])).rejects.toThrow(StorageError);
+	});
+
 	it('rebuildState 在 100+ 次 delta 后重建正确', async () => {
 		const root = await repo.addSnapshot({
 			parentId: null,
