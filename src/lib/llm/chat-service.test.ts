@@ -621,6 +621,63 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
 	});
 
+	it('LLM 状态确认：判断输入使用本次回复而非上一条历史回复', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '（点点头）好的。', toolCalls: [] })
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
+			})
+			.mockResolvedValueOnce({ content: '完成', toolCalls: [] });
+		let judgeMessages: ChatMessage[] | undefined;
+		const chat = vi.fn(async (messages: ChatMessage[]) => {
+			judgeMessages = messages;
+			return { content: 'True', toolCalls: [] };
+		});
+		const client: LlmClient = { chat, chatWithTools };
+		const service = new ChatService(client);
+		await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [
+					{ id: '1', role: 'user', content: '过了一段时间', timestamp: 1 },
+					{ id: '2', role: 'assistant', content: '（历史）早前回复', timestamp: 2 }
+				],
+				worldInfo: []
+			},
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableStateJudge: true }
+		);
+		const payload = judgeMessages?.[1]?.content ?? '';
+		expect(payload).toContain('（点点头）好的。');
+		expect(payload).not.toContain('早前回复');
+	});
+
+	it('LLM 状态确认：原生 AI 已调用工具后，后续发言不再触发判断（两段都保留）', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '（第一段）先推进时间。',
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
+			})
+			.mockResolvedValueOnce({ content: '（第二段）时间过去了。', toolCalls: [] });
+		const chat = vi.fn();
+		const client: LlmClient = { chat, chatWithTools };
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, rounds, reply, judgeDebug } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(rounds[0]!.content).toBe('（第一段）先推进时间。');
+		expect(reply).toBe('（第二段）时间过去了。');
+		expect(judgeDebug).toBeNull();
+		expect(chat).not.toHaveBeenCalled();
+	});
+
 	it('LLM 状态确认：判断模型因安全理由拒绝时仍补执行（泳衣场景）', async () => {
 		const chatWithTools = vi
 			.fn()

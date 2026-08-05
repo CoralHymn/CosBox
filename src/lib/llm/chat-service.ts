@@ -296,7 +296,7 @@ export class ChatService {
 					}
 					if (result.toolCalls.length === 0) {
 						if (options.enableStateJudge === true && executedTools.length === 0) {
-							const judge = await this.maybeRunStateJudge(input, config, options, signal);
+							const judge = await this.maybeRunStateJudge(input, config, options, signal, result);
 							executedTools.push(...judge.executed);
 							rounds.push(...judge.rounds);
 							judgeDebug = judge.debug;
@@ -394,7 +394,7 @@ export class ChatService {
 		}
 		debug = { ...debug, lastResponse: buildLastResponse(result) };
 		if (options.enableStateJudge === true && executedTools.length === 0) {
-			const judge = await this.maybeRunStateJudge(input, config, options, signal);
+			const judge = await this.maybeRunStateJudge(input, config, options, signal, result);
 			executedTools.push(...judge.executed);
 			rounds.push(...judge.rounds);
 			judgeDebug = judge.debug;
@@ -654,7 +654,8 @@ export class ChatService {
 		input: ContextPipelineInput,
 		config: LlmConfig,
 		options: GenerateReplyOptions,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		currentResult?: LlmChatResult
 	): Promise<{
 		executed: ExecutedToolCall[];
 		rounds: ReplyRound[];
@@ -671,13 +672,24 @@ export class ChatService {
 		}
 		const conversation = input.conversation;
 		const lastUser = [...conversation].reverse().find((message) => message.role === 'user');
-		const lastAssistant = [...conversation]
-			.reverse()
-			.find((message) => message.role === 'assistant');
+		// 判断/确认必须基于「本次刚生成的回复」，而不是会话里上一条历史回复
+		// （否则会出现【角色最近回复】是上一轮内容、导致误判/重复执行）。
+		const currentAssistant: ChatMessageView | undefined =
+			currentResult === undefined
+				? undefined
+				: {
+						id: 'current-reply',
+						role: 'assistant',
+						content: currentResult.content ?? '',
+						timestamp: Date.now(),
+						...(currentResult.thinking !== undefined && currentResult.thinking.trim() !== ''
+							? { thinking: currentResult.thinking }
+							: {})
+					};
 		const judge = await runStateJudge({
 			state: input.state,
 			lastUser,
-			lastAssistant,
+			lastAssistant: currentAssistant,
 			client: this.client,
 			config,
 			signal
@@ -688,7 +700,7 @@ export class ChatService {
 		const confirmation = await runStateConfirmation({
 			state: input.state,
 			lastUser,
-			lastAssistant,
+			lastAssistant: currentAssistant,
 			client: this.client,
 			config,
 			tools: options.tools,
