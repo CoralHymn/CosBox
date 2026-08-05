@@ -149,6 +149,25 @@
 		rows = rows.filter((row) => row.id !== id);
 		commitWardrobe();
 	}
+
+	/** 在同分类内上移/下移衣物（交换源数组位置并持久化）。 */
+	function moveItem(id: string, delta: number): void {
+		const group = groups.find((g) => g.items.some((item) => item.id === id));
+		if (group === undefined) {
+			return;
+		}
+		const index = group.items.findIndex((item) => item.id === id);
+		const target = index + delta;
+		if (target < 0 || target >= group.items.length) {
+			return;
+		}
+		const from = rows.findIndex((row) => row.id === id);
+		const to = rows.findIndex((row) => row.id === group.items[target]!.id);
+		const next = [...rows];
+		[next[from]!, next[to]!] = [next[to]!, next[from]!];
+		rows = next;
+		commitWardrobe();
+	}
 </script>
 
 <div class="panel">
@@ -249,6 +268,18 @@
 									onchange={commitWardrobe}
 									placeholder="穿后描述，如：白色棉质衬衫，领口带细蕾丝"
 								/>
+								<div class="row-actions" style="flex: none;">
+									<button
+										class="btn btn-small"
+										onclick={() => moveItem(row.id, -1)}
+										aria-label="上移">↑</button
+									>
+									<button
+										class="btn btn-small"
+										onclick={() => moveItem(row.id, 1)}
+										aria-label="下移">↓</button
+									>
+								</div>
 								<button
 									class="btn btn-danger btn-small"
 									onclick={() => removeItem(row.id)}

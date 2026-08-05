@@ -1,4 +1,9 @@
-import { describeCurrentActivity, formatMinutesOfDay, formatWorldTime } from '../core/state';
+import {
+	describeCurrentActivity,
+	formatMinutesOfDay,
+	formatWorldTime,
+	sortScheduleEntries
+} from '../core/state';
 import type {
 	CharacterState,
 	ClothingItem,
@@ -82,9 +87,7 @@ export function wardrobeItemsForSlot(wardrobe: ClothingItem[], slot: ClothingKin
  * 渲染今日日程：按时段排序的条目列表，如「周一 08:00-09:00 晨会」。
  */
 export function summarizeSchedule(schedule: ScheduleState): string {
-	const sorted = [...schedule.entries].sort(
-		(a, b) => a.day - b.day || a.start - b.start || a.title.localeCompare(b.title)
-	);
+	const sorted = sortScheduleEntries(schedule.entries);
 	if (sorted.length === 0) {
 		return '今日无安排';
 	}

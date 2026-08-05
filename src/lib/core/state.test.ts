@@ -13,6 +13,7 @@ import {
 	isValidWorldTime,
 	minutesSinceMidnight,
 	normalizeWorldTime,
+	sortScheduleEntries,
 	validateCharacterState
 } from './state';
 import type { ScheduleEntry, WorldTime } from './types';
@@ -545,7 +546,15 @@ describe('applyConfigOverrides', () => {
 		const state = createInitialState();
 		const overrides = {
 			places: [{ id: 'sea', category: '校外', name: '海边', description: '浪很大' }],
-			wardrobe: [{ id: 'w1', category: '常服', kind: 'top' as const, name: '红色风衣', description: '修身款' }],
+			wardrobe: [
+				{
+					id: 'w1',
+					category: '常服',
+					kind: 'top' as const,
+					name: '红色风衣',
+					description: '修身款'
+				}
+			],
 			scheduleEntries: [{ id: 's1', day: 1, start: 540, end: 600, title: '游泳课' }]
 		};
 		const next = applyConfigOverrides(state, overrides);
@@ -573,5 +582,23 @@ describe('applyConfigOverrides', () => {
 			})
 		).toThrow(StateValidationError);
 		expect(state.schedule.entries.length).toBe(3);
+	});
+});
+
+describe('sortScheduleEntries', () => {
+	it('按 day → start → end → title 排序且不修改原数组', () => {
+		const entries = [
+			{ id: 'a', day: 1, start: 600, end: 660, title: '社团' },
+			{ id: 'b', day: 0, start: 720, end: 780, title: '午休' },
+			{ id: 'c', day: 0, start: 480, end: 540, title: '晨会' },
+			{ id: 'd', day: 0, start: 480, end: 600, title: '早读' }
+		];
+		const sorted = sortScheduleEntries(entries);
+		expect(sorted.map((entry) => entry.id)).toEqual(['c', 'd', 'b', 'a']);
+		expect(entries.map((entry) => entry.id)).toEqual(['a', 'b', 'c', 'd']);
+	});
+
+	it('空数组安全返回', () => {
+		expect(sortScheduleEntries([])).toEqual([]);
 	});
 });

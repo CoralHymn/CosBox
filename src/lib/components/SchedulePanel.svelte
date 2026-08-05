@@ -1,5 +1,10 @@
 <script lang="ts">
-	import { DAY_NAMES, formatMinutesOfDay, formatWorldTime } from '../core/state';
+	import {
+		DAY_NAMES,
+		formatMinutesOfDay,
+		formatWorldTime,
+		sortScheduleEntries
+	} from '../core/state';
 	import type { ConfigPatch, ScheduleEntry, ScheduleState } from '../core/types';
 	import type {
 		GeneratedItem,
@@ -28,6 +33,9 @@
 	let draftLocation = $state('');
 	let aiOpen = $state(false);
 
+	/** 按时间自动排序的展示视图。 */
+	const sortedEntries = $derived(sortScheduleEntries(schedule.entries));
+
 	function timeToMinutes(value: string): number {
 		const [hours, minutes] = value.split(':').map(Number);
 		return (hours ?? 0) * 60 + (minutes ?? 0);
@@ -51,20 +59,22 @@
 			title,
 			...(draftLocation.trim() !== '' ? { locationId: draftLocation.trim() } : {})
 		};
-		onConfig({ scheduleEntries: [...schedule.entries, entry] });
+		onConfig({ scheduleEntries: sortScheduleEntries([...schedule.entries, entry]) });
 		draftTitle = '';
 	}
 
 	function updateEntry(id: string, patch: Partial<ScheduleEntry>): void {
 		onConfig({
-			scheduleEntries: schedule.entries.map((entry) =>
-				entry.id === id ? { ...entry, ...patch } : entry
+			scheduleEntries: sortScheduleEntries(
+				schedule.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry))
 			)
 		});
 	}
 
 	function removeEntry(id: string): void {
-		onConfig({ scheduleEntries: schedule.entries.filter((entry) => entry.id !== id) });
+		onConfig({
+			scheduleEntries: sortScheduleEntries(schedule.entries.filter((entry) => entry.id !== id))
+		});
 	}
 </script>
 
@@ -90,7 +100,7 @@
 		{#if schedule.entries.length === 0}
 			<p class="empty-hint">暂无日程条目</p>
 		{:else}
-			{#each schedule.entries as entry (entry.id)}
+			{#each sortedEntries as entry (entry.id)}
 				<div class="list-row">
 					<select
 						class="select"

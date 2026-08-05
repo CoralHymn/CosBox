@@ -152,9 +152,9 @@ test('日程：条目编辑属于配置，不生成版本快照', async ({ page 
 	await page.goto('/');
 	await page.getByRole('button', { name: /日程/ }).click();
 
-	// 修改第一条的星期：状态更新但不生成快照
-	await page.locator('.list-row select').first().selectOption('1');
-	await expect(page.locator('.list-row select').first()).toHaveValue('1');
+	// 修改最后一条（午休）的星期：自动排序后仍在末尾，状态更新但不生成快照
+	await page.locator('.list-row select').last().selectOption('6');
+	await expect(page.locator('.list-row select').last()).toHaveValue('6');
 	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
 
 	// 新增条目：行出现但快照数不变
@@ -624,6 +624,80 @@ test('AI 条目：生成日程并批量导入', async ({ page }) => {
 	// 原 3 条 + 导入 4 条
 	await expect(page.locator('.list-row')).toHaveCount(7);
 	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+});
+
+test('地点库支持手动排序（上移/下移）', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /地点/ }).click();
+	const schoolGroup = page
+		.locator('div.group')
+		.filter({ has: page.locator('.group-name', { hasText: '学校' }) });
+	await expect(schoolGroup.locator('input[placeholder="地点名"]').first()).toHaveValue('学院正门');
+
+	// 下移第一项 → 教室 2-B 移到最前
+	await schoolGroup.locator('button[aria-label="下移"]').first().click();
+	await expect(schoolGroup.locator('input[placeholder="地点名"]').first()).toHaveValue('教室 2-B');
+	// 排序属于配置编辑：不生成快照
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+});
+
+test('衣柜支持手动排序（上移/下移）', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /衣柜/ }).click();
+	const casualGroup = page
+		.locator('div.group')
+		.filter({ has: page.locator('.group-name', { hasText: '常服' }) });
+	await expect(casualGroup.locator('input[placeholder="衣物名"]').first()).toHaveValue('白色衬衫');
+
+	// 下移第一件 → 深蓝百褶裙移到最前
+	await casualGroup.locator('button[aria-label="下移"]').first().click();
+	await expect(casualGroup.locator('input[placeholder="衣物名"]').first()).toHaveValue(
+		'深蓝百褶裙'
+	);
+	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/1 快照/);
+});
+
+test('日程表按时间自动排序', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /日程/ }).click();
+
+	// 初始顺序：晨会 08:00、国文课 09:00、午休 12:00
+	await expect(page.locator('.list-row').nth(0).locator('input[type="time"]').first()).toHaveValue(
+		'08:00'
+	);
+	await expect(page.locator('.list-row').nth(2).locator('input[type="time"]').first()).toHaveValue(
+		'12:00'
+	);
+
+	// 新增 11:00 的条目 → 自动插入到国文课与午休之间
+	await page.locator('#entry-title').fill('午读');
+	await page.locator('#entry-start').fill('11:00');
+	await page.locator('#entry-end').fill('11:30');
+	await page.getByRole('button', { name: '添加条目' }).click();
+	await expect(page.locator('.list-row')).toHaveCount(4);
+	await expect(page.locator('.list-row').nth(2).locator('input[type="time"]').first()).toHaveValue(
+		'11:00'
+	);
+
+	// 修改午读时间到 13:00-13:30 → 自动移到午休之后
+	const readingRow = page.locator('.list-row').nth(2);
+	await readingRow
+		.locator('input[type="time"]')
+		.nth(1)
+		.evaluate((el) => {
+			(el as HTMLInputElement).value = '13:30';
+			el.dispatchEvent(new Event('change', { bubbles: true }));
+		});
+	await readingRow
+		.locator('input[type="time"]')
+		.first()
+		.evaluate((el) => {
+			(el as HTMLInputElement).value = '13:00';
+			el.dispatchEvent(new Event('change', { bubbles: true }));
+		});
+	await expect(page.locator('.list-row').nth(3).locator('input[type="time"]').first()).toHaveValue(
+		'13:00'
+	);
 });
 
 test('对话后侧栏显示上下文用量、费用估算与压缩状态', async ({ page }) => {

@@ -127,6 +127,25 @@
 		rows = rows.filter((row) => row.id !== id);
 		commitPlaces();
 	}
+
+	/** 在同分类内上移/下移地点（交换源数组位置并持久化）。 */
+	function movePlace(id: string, delta: number): void {
+		const group = groups.find((g) => g.items.some((item) => item.id === id));
+		if (group === undefined) {
+			return;
+		}
+		const index = group.items.findIndex((item) => item.id === id);
+		const target = index + delta;
+		if (target < 0 || target >= group.items.length) {
+			return;
+		}
+		const from = rows.findIndex((row) => row.id === id);
+		const to = rows.findIndex((row) => row.id === group.items[target]!.id);
+		const next = [...rows];
+		[next[from]!, next[to]!] = [next[to]!, next[from]!];
+		rows = next;
+		commitPlaces();
+	}
 </script>
 
 <div class="panel">
@@ -227,6 +246,18 @@
 									onchange={commitPlaces}
 									placeholder="描述"
 								/>
+								<div class="row-actions" style="flex: none;">
+									<button
+										class="btn btn-small"
+										onclick={() => movePlace(row.id, -1)}
+										aria-label="上移">↑</button
+									>
+									<button
+										class="btn btn-small"
+										onclick={() => movePlace(row.id, 1)}
+										aria-label="下移">↓</button
+									>
+								</div>
 								<button
 									class="btn btn-danger btn-small"
 									onclick={() => removePlace(row.id)}
