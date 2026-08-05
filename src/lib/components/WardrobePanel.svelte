@@ -82,6 +82,7 @@
 	let aiOpen = $state(false);
 	let dragId = $state<string | null>(null);
 	let importInput = $state<HTMLInputElement | null>(null);
+	let sortingEnabled = $state(false);
 
 	const groups = $derived(groupByCategory(rows));
 	const slotItems = $derived(
@@ -252,7 +253,19 @@
 	</div>
 
 	<div class="card">
-		<h3 class="card-title">衣柜管理</h3>
+		<div class="row-actions" style="justify-content: space-between; margin-bottom: 10px;">
+			<h3 class="card-title" style="margin: 0;">衣柜管理</h3>
+			<button
+				class="btn btn-small"
+				class:active={sortingEnabled}
+				onclick={() => (sortingEnabled = !sortingEnabled)}
+			>
+				编辑排序
+			</button>
+		</div>
+		{#if sortingEnabled}
+			<p class="muted" style="margin: 0 0 6px;">拖动条目行可调整分类内的顺序。</p>
+		{/if}
 		{#if groups.length === 0}
 			<p class="empty-hint">衣柜是空的，添加第一件衣物吧</p>
 		{:else}
@@ -270,7 +283,7 @@
 								class:dragging={dragId === row.id}
 								role="button"
 								tabindex="-1"
-								draggable="true"
+								draggable={sortingEnabled}
 								style="align-items: flex-start;"
 								ondragstart={() => (dragId = row.id)}
 								ondragover={(event) => event.preventDefault()}
@@ -280,7 +293,9 @@
 								}}
 								ondragend={() => (dragId = null)}
 							>
-								<span class="drag-handle" title="拖拽排序" style="margin-top: 9px;">⠿</span>
+								{#if sortingEnabled}
+									<span class="drag-handle" title="拖拽排序" style="margin-top: 9px;">⠿</span>
+								{/if}
 								<div style="width: 90px; flex: none;">
 									<input
 										class="input"
