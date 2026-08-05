@@ -717,6 +717,30 @@ button:disabled {
 	margin: 0;
 }
 
+.ai-modal {
+	width: min(720px, 94vw);
+}
+
+.ai-item {
+	cursor: pointer;
+	gap: 10px;
+	align-items: center;
+}
+
+.ai-item input[type='checkbox'] {
+	accent-color: var(--accent);
+	flex: none;
+}
+
+.ai-item-list {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 4px 10px;
+	margin-top: 4px;
+	max-height: 300px;
+	overflow-y: auto;
+}
+
 /* ---------- 版本与分支 ---------- */
 
 .branch-card {

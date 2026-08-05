@@ -1,22 +1,32 @@
 <script lang="ts">
 	import { DAY_NAMES, formatMinutesOfDay, formatWorldTime } from '../core/state';
 	import type { ConfigPatch, ScheduleEntry, ScheduleState } from '../core/types';
+	import type {
+		GeneratedItem,
+		GenerationRequest,
+		GenerationResult,
+		GeneratorKind
+	} from '../llm/generator';
 	import { newId } from '../utils/id';
+	import AiGeneratorPanel from './AiGeneratorPanel.svelte';
 
 	interface Props {
 		schedule: ScheduleState;
 		onAdvance: (minutes: number) => void;
 		/** 日程条目属于世界配置：编辑不生成快照、不进版本历史。 */
 		onConfig: (patch: ConfigPatch) => void;
+		onAiGenerate: (request: GenerationRequest) => Promise<GenerationResult>;
+		onAiImport: (kind: GeneratorKind, items: GeneratedItem[]) => Promise<void>;
 	}
 
-	let { schedule, onAdvance, onConfig }: Props = $props();
+	let { schedule, onAdvance, onConfig, onAiGenerate, onAiImport }: Props = $props();
 
 	let draftTitle = $state('');
 	let draftDay = $state(0);
 	let draftStart = $state('08:00');
 	let draftEnd = $state('09:00');
 	let draftLocation = $state('');
+	let aiOpen = $state(false);
 
 	function timeToMinutes(value: string): number {
 		const [hours, minutes] = value.split(':').map(Number);
@@ -46,13 +56,11 @@
 	}
 
 	function updateEntry(id: string, patch: Partial<ScheduleEntry>): void {
-		onConfig(
-			{
-				scheduleEntries: schedule.entries.map((entry) =>
-					entry.id === id ? { ...entry, ...patch } : entry
-				)
-			}
-		);
+		onConfig({
+			scheduleEntries: schedule.entries.map((entry) =>
+				entry.id === id ? { ...entry, ...patch } : entry
+			)
+		});
 	}
 
 	function removeEntry(id: string): void {
@@ -167,6 +175,19 @@
 				placeholder="如：classroom"
 			/>
 		</div>
-		<button class="btn btn-primary" onclick={addEntry}>添加条目</button>
+		<div class="row-actions">
+			<button class="btn btn-primary" onclick={addEntry}>添加条目</button>
+			<button class="btn" onclick={() => (aiOpen = true)}>AI条目</button>
+		</div>
 	</div>
 </div>
+
+{#if aiOpen}
+	<AiGeneratorPanel
+		kind="schedule"
+		existing={schedule.entries}
+		onClose={() => (aiOpen = false)}
+		onGenerate={onAiGenerate}
+		onImport={(items) => onAiImport('schedule', items)}
+	/>
+{/if}

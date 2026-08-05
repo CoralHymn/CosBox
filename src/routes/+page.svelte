@@ -28,6 +28,15 @@
 		type CompactionState
 	} from '../lib/llm/compaction';
 	import { DemoLlmClient } from '../lib/llm/demo-provider';
+	import {
+		buildImportPatch,
+		GeneratorService,
+		KIND_LABELS,
+		type GeneratedItem,
+		type GenerationRequest,
+		type GenerationResult,
+		type GeneratorKind
+	} from '../lib/llm/generator';
 	import { resolveContextWindow } from '../lib/llm/model-info';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
@@ -466,6 +475,27 @@
 		}
 	}
 
+	/** AI 生成（地点/衣柜/日程）：走当前模型服务 + review_generation 审查循环。 */
+	async function handleAiGenerate(request: GenerationRequest): Promise<GenerationResult> {
+		const service = new GeneratorService(
+			settings.config.provider === 'demo' ? demoClient : openAiClient
+		);
+		return service.generate(request, settings.config);
+	}
+
+	/** AI 生成结果批量导入：合并去重后作为世界配置（不生成快照）。 */
+	async function handleAiImport(kind: GeneratorKind, items: GeneratedItem[]): Promise<void> {
+		const existing: GeneratedItem[] =
+			kind === 'locations'
+				? session.state.places
+				: kind === 'wardrobe'
+					? session.state.outfit.wardrobe
+					: session.state.schedule.entries;
+		const patch = buildImportPatch(kind, items, existing);
+		await session.applyConfig(patch);
+		toasts.success(`已导入 ${items.length} 项到${KIND_LABELS[kind]}`);
+	}
+
 	function handleExport(): void {
 		try {
 			const attributes = session.state.attributes;
@@ -553,18 +583,24 @@
 					location={session.state.location}
 					onUpdate={handleStateUpdate}
 					onConfig={handleConfigUpdate}
+					onAiGenerate={handleAiGenerate}
+					onAiImport={handleAiImport}
 				/>
 			{:else if tab === 'wardrobe'}
 				<WardrobePanel
 					outfit={session.state.outfit}
 					onUpdate={handleStateUpdate}
 					onConfig={handleConfigUpdate}
+					onAiGenerate={handleAiGenerate}
+					onAiImport={handleAiImport}
 				/>
 			{:else if tab === 'schedule'}
 				<SchedulePanel
 					schedule={session.state.schedule}
 					onAdvance={handleAdvance}
 					onConfig={handleConfigUpdate}
+					onAiGenerate={handleAiGenerate}
+					onAiImport={handleAiImport}
 				/>
 			{:else if tab === 'versions'}
 				<VersionPanel

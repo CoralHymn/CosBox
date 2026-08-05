@@ -72,6 +72,11 @@ export function buildDemoToolResult(
 	messages: ChatMessage[],
 	tools: readonly StateToolSchema[]
 ): LlmChatResult {
+	// AI 生成（地点/衣柜/日程）的确定性演示路径。
+	const generation = buildDemoGenerationResult(messages, tools);
+	if (generation !== null) {
+		return generation;
+	}
 	const thinking = demoThinking(messages);
 	const last = messages[messages.length - 1];
 	if (last?.role === 'tool') {
@@ -85,6 +90,107 @@ export function buildDemoToolResult(
 	}
 	const content = buildDemoReply(messages);
 	return { content, toolCalls: [], usage: demoUsage(messages, content), thinking };
+}
+
+/** 从系统提示中识别生成任务类型；非生成任务返回 null。 */
+export function detectGenerationKind(system: string): 'locations' | 'wardrobe' | 'schedule' | null {
+	if (system.includes('【生成任务：地点库】')) {
+		return 'locations';
+	}
+	if (system.includes('【生成任务：衣柜】')) {
+		return 'wardrobe';
+	}
+	if (system.includes('【生成任务：日程表】')) {
+		return 'schedule';
+	}
+	return null;
+}
+
+/** 演示生成流程：先返回 review_generation 工具调用，收到审查结果后输出最终 JSON。 */
+function buildDemoGenerationResult(
+	messages: ChatMessage[],
+	tools: readonly StateToolSchema[]
+): LlmChatResult | null {
+	if (!tools.some((tool) => tool.name === 'review_generation')) {
+		return null;
+	}
+	const system = messages.find((message) => message.role === 'system')?.content ?? '';
+	const kind = detectGenerationKind(system);
+	if (kind === null) {
+		return null;
+	}
+	const items = demoGeneratedItems(kind, system);
+	const last = messages[messages.length - 1];
+	if (last?.role === 'tool') {
+		const content = JSON.stringify(items);
+		return { content, toolCalls: [], usage: demoUsage(messages, content), thinking: undefined };
+	}
+	return {
+		content: null,
+		toolCalls: [{ id: 'call_gen_review', name: 'review_generation', arguments: { items } }],
+		usage: demoUsage(messages, null),
+		thinking: undefined
+	};
+}
+
+/** 按世界观与性别生成确定性的演示条目（无 id，由宿主补全）。 */
+export function demoGeneratedItems(
+	kind: 'locations' | 'wardrobe' | 'schedule',
+	system: string
+): Array<Record<string, unknown>> {
+	if (kind === 'locations') {
+		if (system.includes('【世界观：古代】')) {
+			return [
+				{ category: '书院', name: '讲堂', description: '先生授课的大厅，桌椅整齐排列' },
+				{ category: '集市', name: '药铺', description: '挂着杏林旗的药材铺子，药香扑鼻' },
+				{ category: '马厩', name: '马厩', description: '拴着几匹枣红马，草料味很重' }
+			];
+		}
+		if (system.includes('【世界观：奇幻】')) {
+			return [
+				{ category: '魔法学院', name: '炼金室', description: '坩埚咕嘟作响，架子上摆满药剂瓶' },
+				{ category: '冒险者公会', name: '任务板', description: '贴着悬赏委托的木板，人来人往' },
+				{ category: '精灵森林', name: '树屋', description: '建在巨树枝干上的木屋，藤蔓缠绕' }
+			];
+		}
+		return [
+			{ category: '学校', name: '食堂', description: '午间最热闹的地方，招牌是咖喱饭' },
+			{ category: '学校', name: '图书馆', description: '安静的阅读空间，三楼据说有禁书区' },
+			{ category: '校外', name: '便利店', description: '24 小时营业，关东煮在柜台冒着热气' }
+		];
+	}
+	if (kind === 'wardrobe') {
+		const genderMatch = system.match(/角色性别：([^，\n]+)/);
+		const gender = genderMatch?.[1]?.trim() ?? '女';
+		if (gender.includes('男')) {
+			return [
+				{ category: '常服', kind: 'top', name: '白衬衫', description: '白色棉质衬衫，袖口整齐' },
+				{ category: '常服', kind: 'bottom', name: '西裤', description: '深灰色直筒西裤，垂感很好' },
+				{ category: '鞋', kind: 'shoes', name: '皮鞋', description: '黑色系带皮鞋，擦得发亮' }
+			];
+		}
+		return [
+			{
+				category: '常服',
+				kind: 'top',
+				name: '白色连衣裙',
+				description: '白色碎花连衣裙，及膝，裙摆很轻'
+			},
+			{
+				category: '常服',
+				kind: 'bottom',
+				name: '百褶裙',
+				description: '深蓝色百褶裙，走动时轻轻摆动'
+			},
+			{ category: '鞋', kind: 'shoes', name: '浅口单鞋', description: '米色浅口单鞋，鞋面带蝴蝶结' }
+		];
+	}
+	return [
+		{ day: 0, title: '武术课', start: '08:00', end: '09:30' },
+		{ day: 0, title: '茶道课', start: '10:00', end: '11:00' },
+		{ day: 1, title: '图书馆自习', start: '15:00', end: '16:30' },
+		{ day: 2, title: '社团会议', start: '17:00', end: '18:00' }
+	];
 }
 
 /** 演示思考：仅当用户询问「在想什么/思考」时返回确定性内容，便于 e2e 断言。 */
