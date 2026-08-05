@@ -1,4 +1,5 @@
-import type { ChatMessageView } from '../core/types';
+import { addMinutes, formatWorldTime, minutesSinceMidnight } from '../core/state';
+import type { ChatMessageView, WorldTime } from '../core/types';
 import { buildContext, type ContextBundle, type ContextPipelineInput } from '../context/pipeline';
 import { excludeFromContext } from '../context/history';
 import {
@@ -244,6 +245,36 @@ export class ChatService {
 							usage = mergeUsage(usage, plain?.usage);
 							if (plain !== null) {
 								result = plain;
+							}
+						}
+					}
+					// 终极兜底：补调全部失败且端点始终不发 tool_calls 时，从模型文本中
+					// 解析出可确定的时间推进值（「过了两小时」「推进到傍晚」等），
+					// 由宿主直接执行 advance_time，并回写工具反馈让模型感知状态已同步。
+					if (
+						result.toolCalls.length === 0 &&
+						executedTools.length === 0 &&
+						options.toolContext !== undefined
+					) {
+						const claimSource = `${result.thinking ?? ''}\n${result.content ?? ''}`;
+						if (
+							detectTimeClaim(claimSource) ||
+							/\badvance_time\b|推进时间|时间推进/.test(claimSource)
+						) {
+							const minutes = resolveTimeAdvance(
+								claimSource,
+								options.toolContext.getState().schedule.time
+							);
+							if (minutes !== null) {
+								const now = options.toolContext.getState().schedule.time;
+								await options.toolContext.advanceTime(minutes);
+								const next = addMinutes(now, minutes);
+								const output = `时间推进到 ${formatWorldTime(next)}`;
+								executedTools.push({ id: 'host_infer', name: 'advance_time', output });
+								rounds.push({
+									content: null,
+									tools: [{ name: 'advance_time', output }]
+								});
 							}
 						}
 					}
@@ -496,27 +527,40 @@ export class ChatService {
 					'如果不需要调用，请直接输出正文。'
 			}
 		];
-		try {
-			const result =
-				options.tools !== undefined &&
-				options.tools.length > 0 &&
-				options.toolContext !== undefined &&
-				this.client.chatWithTools !== undefined
-					? await this.client.chatWithTools(
-							retryMessages,
-							options.tools,
-							config,
-							signal,
-							options.onDelta
-						)
-					: await this.client.chat(retryMessages, config, signal, options.onDelta);
-			return result.toolCalls.length > 0 ||
-				(result.content !== null && result.content.trim() !== '')
-				? result
-				: null;
-		} catch {
-			return null;
+		const attempt = async (
+			forceToolCall: boolean,
+			stream: boolean
+		): Promise<LlmChatResult | null> => {
+			if (
+				this.client.chatWithTools === undefined ||
+				options.tools === undefined ||
+				options.tools.length === 0 ||
+				options.toolContext === undefined
+			) {
+				return null;
+			}
+			try {
+				return await this.client.chatWithTools(
+					retryMessages,
+					options.tools,
+					{ ...config, stream },
+					signal,
+					options.onDelta,
+					{ forceToolCall }
+				);
+			} catch {
+				return null;
+			}
+		};
+		// 第一档：提示 + 常规流式；第二档：tool_choice=required + 非流式
+		// （部分代理只在流式转发时丢失 tool_calls，非流式可绕开）。
+		// 只采纳真正发出 tool_calls 的结果，避免「只说不做」的正文被当作成功。
+		const first = await attempt(false, config.stream === true);
+		if (first && first.toolCalls.length > 0) {
+			return first;
 		}
+		const forced = await attempt(true, false);
+		return forced && forced.toolCalls.length > 0 ? forced : null;
 	}
 
 	/**
@@ -535,7 +579,10 @@ export class ChatService {
 			...messages,
 			{ role: 'system', content: TIME_CLAIM_NUDGE }
 		];
-		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
+		const attempt = async (
+			forceToolCall: boolean,
+			stream: boolean
+		): Promise<LlmChatResult | null> => {
 			if (
 				this.client.chatWithTools === undefined ||
 				options.tools === undefined ||
@@ -548,7 +595,7 @@ export class ChatService {
 				return await this.client.chatWithTools(
 					retryMessages,
 					options.tools,
-					config,
+					{ ...config, stream },
 					signal,
 					options.onDelta,
 					{ forceToolCall }
@@ -557,11 +604,11 @@ export class ChatService {
 				return null;
 			}
 		};
-		const first = await attempt(false);
+		const first = await attempt(false, config.stream === true);
 		if (first && first.toolCalls.length > 0) {
 			return first;
 		}
-		const forced = await attempt(true);
+		const forced = await attempt(true, false);
 		return forced && forced.toolCalls.length > 0 ? forced : null;
 	}
 }
@@ -646,6 +693,84 @@ const TIME_CLAIM_PATTERNS: readonly RegExp[] = [
 	/已经(?:是)?\s*\d{1,2}\s*点/,
 	/已经\s*\d{1,2}[:：]\d{2}/
 ];
+
+/** 中文数字 -> 数值（用于时长推断）。 */
+const CN_DIGITS: Record<string, number> = {
+	一: 1,
+	二: 2,
+	两: 2,
+	三: 3,
+	四: 4,
+	五: 5,
+	六: 6,
+	七: 7,
+	八: 8,
+	九: 9,
+	十: 10,
+	半: 0.5
+};
+
+/** 时段 -> 目标小时（用于「推进到傍晚/深夜」的推断）。 */
+const TIME_OF_DAY_TARGET: Record<string, number> = {
+	傍晚: 18,
+	黄昏: 18,
+	天黑: 18,
+	天暗: 18,
+	晚上: 19,
+	入夜: 19,
+	深夜: 23,
+	中午: 12
+};
+
+/**
+ * 从模型文本中解析可确定的 advance_time 分钟数（宿主侧推断，最后兜底用）：
+ * 1) 明确时长（过了两小时 / 半小时 / 90 分钟）；
+ * 2) 明确目标时刻（推进到 18:00）；
+ * 3) 明确时段目标（推进到傍晚 / 深夜）。
+ * 只返回向前推进且可确定的值；无法确定返回 null（不猜测）。
+ */
+export function resolveTimeAdvance(text: string, now: WorldTime): number | null {
+	const duration = text.match(
+		/(?:过了|已经过去|过去|推进)?\s*(?:(\d+(?:\.\d+)?)|([一二两三四五六七八九十半]+))\s*个?(分钟|小时|钟头)/
+	);
+	if (duration) {
+		const raw = duration[1] !== undefined ? Number(duration[1]) : cnToNumber(duration[2] ?? '');
+		if (Number.isFinite(raw) && raw > 0) {
+			const unit = duration[3];
+			return unit === '分钟' ? Math.round(raw) : Math.round(raw * 60);
+		}
+	}
+	const clock = text.match(/(?:推进到|来到|时间(?:到|来到))\s*(\d{1,2})[:：](\d{2})/);
+	if (clock) {
+		const target = Number(clock[1]) * 60 + Number(clock[2]);
+		const delta = target - minutesSinceMidnight(now);
+		return delta > 0 ? delta : null;
+	}
+	const nowMinutes = minutesSinceMidnight(now);
+	for (const [keyword, hour] of Object.entries(TIME_OF_DAY_TARGET)) {
+		if (text.includes(keyword)) {
+			const delta = hour * 60 - nowMinutes;
+			return delta > 0 ? delta : null;
+		}
+	}
+	return null;
+}
+
+/** 中文数字串转数值（仅支持个位、十、半的简单组合）。 */
+function cnToNumber(value: string): number {
+	if (value === '半') {
+		return 0.5;
+	}
+	let total = 0;
+	for (const char of value) {
+		const digit = CN_DIGITS[char];
+		if (digit === undefined) {
+			return NaN;
+		}
+		total += digit;
+	}
+	return total;
+}
 
 /** 生成最近一次响应的诊断摘要（空正文排查用）。 */
 function buildLastResponse(result: LlmChatResult): DebugLastResponse {
