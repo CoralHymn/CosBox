@@ -531,6 +531,22 @@ finish_reason=stop」。这类现象在 Kimi/Qwen/vLLM 部署的思考模型上�
    最能绕开该故障组合的请求形态；思考回传对齐生态共识。
    **代价**：异常路径最多两次重试（正常回复零影响）；去工具兜底轮不执行状态工具。
 
+## D50：消息编辑采用「原地改写快照」（对齐 Chatbox 修改 AI 输出）
+
+**问题**：需要支持直接修改模型输出的文本（Chatbox 同款能力）。
+**选择**：
+
+1. `SnapshotRepository.updateNode` + `CharacterManager.editMessage`：原地改写目标
+   消息快照的 `delta.content`，节点 id / parentId / timestamp 不变，不新增快照
+   （类似 git commit --amend）。`worldTime / thinking / skipContext` 保留；
+   仅允许编辑消息类快照，空正文拒绝。
+2. UI：user / assistant 气泡「编辑」按钮 → textarea 编辑态 → 保存/取消；
+   生成中与流式草稿禁用编辑；保存失败保持编辑态并 toast。
+   **理由**：与 Chatbox 行为一致、实现最简；编辑中间消息时后续快照重建自动
+   引用新正文，分支结构不受影响。
+   **代价**：编辑会改写历史快照（原文本不可从版本链找回）——如需保留原文，
+   建议先建检查点/分支；这是与「快照不可变」理念的刻意权衡。
+
 ## D43：地点大类按区域规划
 
 **问题**：地点生成的「大类」容易变成场所类型（奶茶店、咖啡厅、超市、电影院各占一个

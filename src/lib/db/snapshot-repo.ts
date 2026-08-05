@@ -76,6 +76,18 @@ export class SnapshotRepository {
 	}
 
 	/**
+	 * 原地更新一个已存在的快照节点（消息编辑用，类似 git commit --amend）。
+	 * 节点 id 不变，版本图中位置不变，后续快照重建时会读到新内容。
+	 */
+	async updateNode(node: SnapshotNode): Promise<void> {
+		try {
+			await this.database.snapshots.put(node);
+		} catch (err) {
+			throw new StorageError('更新快照失败', { cause: err });
+		}
+	}
+
+	/**
 	 * 批量删除快照节点。
 	 * 删除前不做完整性校验（逻辑由调用方如 CharacterManager 负责），
 	 * 不存在的 id 会被跳过而不会报错。

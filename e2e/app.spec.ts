@@ -35,6 +35,28 @@ test('发送消息：演示模式回复并追加快照', async ({ page }) => {
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 2));
 });
 
+test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
+	await page.goto('/');
+	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	const bubble = page.locator('.message.assistant').first();
+	await bubble.getByRole('button', { name: '编辑' }).click();
+	const textarea = bubble.locator('textarea');
+	await textarea.fill('（编辑后）新的回应文本');
+	await bubble.getByRole('button', { name: '保存' }).click();
+
+	await expect(bubble.getByText('（编辑后）新的回应文本')).toBeVisible();
+	await expect(bubble.getByText(/演示模式回应/)).not.toBeVisible();
+
+	// 刷新后编辑内容仍保留（快照原地改写）
+	await page.reload();
+	await expect(
+		page.locator('.message.assistant').first().getByText('（编辑后）新的回应文本')
+	).toBeVisible();
+});
+
 test('状态编辑生成快照并在预览中反映', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /状态/ }).click();
