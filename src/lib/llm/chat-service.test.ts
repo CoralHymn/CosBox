@@ -81,6 +81,73 @@ describe('ChatService', () => {
 		expect(finishReason).toBe('length');
 	});
 
+	it('工具路径：只思考无正文时自动重试并采用重试结果', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '只思考' })
+			.mockResolvedValueOnce({ content: '补上的正文', toolCalls: [], thinking: '重试思考' });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { reply, thinking, debug } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('补上的正文');
+		expect(thinking).toBe('重试思考');
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
+		expect(retryMessages.some((message) => message.content.includes('正文必不可少'))).toBe(true);
+		expect(debug.lastResponse?.hasContent).toBe(true);
+	});
+
+	it('工具路径：重试仍只输出思考时保留原空回复，不无限重试', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '第一次思考' })
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '第二次思考' });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { reply, thinking } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('');
+		expect(thinking).toBe('第一次思考');
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+	});
+
+	it('纯文本路径：只思考无正文时自动重试', async () => {
+		const chat = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '想想' })
+			.mockResolvedValueOnce({ content: '正文来了', toolCalls: [] });
+		const service = new ChatService({ chat });
+		const { reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config
+		);
+		expect(reply).toBe('正文来了');
+		expect(chat).toHaveBeenCalledTimes(2);
+	});
+
+	it('正常回复不触发重试', async () => {
+		const chat = vi.fn(async () => ({ content: '正常', toolCalls: [] }));
+		const service = new ChatService({ chat });
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config
+		);
+		expect(chat).toHaveBeenCalledTimes(1);
+	});
+
 	it('agent 循环：工具执行后携带结果继续请求，最终返回文本', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '不应走到纯文本路径', toolCalls: [] })),

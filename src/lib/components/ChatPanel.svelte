@@ -205,6 +205,16 @@
 											: '关'}，状态工具={modal.view.request.toolsEnabled ? '开' : '关'}
 									</p>
 								{/if}
+								{#if modal.view.lastResponse !== undefined}
+									<p class="muted" style="margin: 0 0 4px;">
+										最近响应：finish_reason={modal.view.lastResponse.finishReason ?? '未知'}， 正文={modal
+											.view.lastResponse.hasContent
+											? '有'
+											: '空'}，工具调用=
+										{modal.view.lastResponse.hasToolCalls ? '有' : '无'}，思考=
+										{modal.view.lastResponse.thinkingChars} 字
+									</p>
+								{/if}
 								<p class="muted" style="margin: 0 0 4px;">system</p>
 								<pre>{modal.view.systemMessage}</pre>
 								{#each modal.view.messages as message, i (i)}

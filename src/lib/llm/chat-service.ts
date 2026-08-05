@@ -19,7 +19,7 @@ import {
 	type StateToolDefinition
 } from './state-tools';
 import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
-import type { ChatMessage, LlmClient, LlmConfig, TokenUsage } from './types';
+import type { ChatMessage, LlmChatResult, LlmClient, LlmConfig, TokenUsage } from './types';
 
 /** 开发者模式下展示的请求参数：用于排查 max_tokens / stream 等是否真正生效。 */
 export interface DebugRequestInfo {
@@ -30,11 +30,20 @@ export interface DebugRequestInfo {
 	toolsEnabled: boolean;
 }
 
+/** 最近一次端点响应的摘要（空正文诊断用）。 */
+export interface DebugLastResponse {
+	finishReason?: string;
+	hasContent: boolean;
+	hasToolCalls: boolean;
+	thinkingChars: number;
+}
+
 /** 开发者模式下展示的最近一次请求：完整系统消息 + 实际发送的消息数组 + 请求参数。 */
 export interface DebugPromptView {
 	systemMessage: string;
 	messages: ChatMessage[];
 	request?: DebugRequestInfo;
+	lastResponse?: DebugLastResponse;
 }
 
 /** 开发者输入预览结果：完整提示词，或提示性说明（斜杠命令/空输入）。 */
@@ -82,6 +91,10 @@ export interface GenerateReplyOptions {
 
 /** 默认最大工具轮数：超过后停止并以提示文本收尾。 */
 const DEFAULT_MAX_TOOL_TURNS = 4;
+/** 思考型模型偶发「只思考不输出正文」时的重试提示：正文必填，必要时先调用工具。 */
+const THINKING_ONLY_NUDGE =
+	'【系统提示】你上一轮只输出了思考过程，没有输出正文。请直接输出正文回复，' +
+	'正文必不可少；如果剧情需要调用状态工具，请先正常调用工具，再输出正文。';
 
 /**
  * 对话服务：把「状态 + 历史 + 世界信息」组装为上下文，再调用 LLM。
@@ -162,7 +175,7 @@ export class ChatService {
 				const maxTurns = options.maxToolTurns ?? DEFAULT_MAX_TOOL_TURNS;
 				for (let turn = 0; turn < maxTurns; turn += 1) {
 					debug = buildDebugView(messages[0]!.content, messages, config, options);
-					const result = await this.client.chatWithTools(
+					let result = await this.client.chatWithTools(
 						messages,
 						options.tools,
 						config,
@@ -170,7 +183,17 @@ export class ChatService {
 						options.onDelta
 					);
 					usage = mergeUsage(usage, result.usage);
+					// 思考型模型偶发「只思考、不输出正文」（finish_reason=stop）：
+					// 追加正文必填提示重试一次，重试成功则采用重试结果（可能继续走工具轮）。
+					if (isThinkingOnlyReply(result)) {
+						const retried = await this.retryThinkingOnly(messages, config, options, signal);
+						usage = mergeUsage(usage, retried?.usage);
+						if (retried !== null) {
+							result = retried;
+						}
+					}
 					if (result.toolCalls.length === 0) {
+						debug = { ...debug, lastResponse: buildLastResponse(result) };
 						return {
 							reply: sanitizeAssistantText(result.content ?? ''),
 							bundle,
@@ -241,7 +264,16 @@ export class ChatService {
 			}
 		}
 
-		const result = await this.client.chat(messages, config, signal, options.onDelta);
+		let result = await this.client.chat(messages, config, signal, options.onDelta);
+		// 纯文本路径同样兜底一次「只思考不输出正文」。
+		if (isThinkingOnlyReply(result)) {
+			const retried = await this.retryThinkingOnly(messages, config, options, signal);
+			usage = mergeUsage(usage, retried?.usage);
+			if (retried !== null) {
+				result = retried;
+			}
+		}
+		debug = { ...debug, lastResponse: buildLastResponse(result) };
 		return {
 			reply: sanitizeAssistantText(result.content ?? ''),
 			bundle,
@@ -322,6 +354,43 @@ export class ChatService {
 			return { summary: fallbackSummary(fallbackMessages), usage: undefined };
 		}
 	}
+
+	/**
+	 * 思考型模型只输出思考、无正文时重试一次：追加「正文必填」系统提示后重新请求。
+	 * 重试仍为思考型空回复（或请求失败）时返回 null，由调用方保留原结果。
+	 */
+	private async retryThinkingOnly(
+		messages: ReadonlyArray<ChatMessage>,
+		config: LlmConfig,
+		options: GenerateReplyOptions,
+		signal?: AbortSignal
+	): Promise<LlmChatResult | null> {
+		const retryMessages: ChatMessage[] = [
+			...messages,
+			{ role: 'system', content: THINKING_ONLY_NUDGE }
+		];
+		try {
+			const result =
+				options.tools !== undefined &&
+				options.tools.length > 0 &&
+				options.toolContext !== undefined &&
+				this.client.chatWithTools !== undefined
+					? await this.client.chatWithTools(
+							retryMessages,
+							options.tools,
+							config,
+							signal,
+							options.onDelta
+						)
+					: await this.client.chat(retryMessages, config, signal, options.onDelta);
+			return result.toolCalls.length > 0 ||
+				(result.content !== null && result.content.trim() !== '')
+				? result
+				: null;
+		} catch {
+			return null;
+		}
+	}
 }
 
 /** 把最近一次请求序列化为纯文本（供调试复制）。 */
@@ -355,6 +424,26 @@ function buildDebugView(
 			stream: config.stream === true,
 			toolsEnabled: (options.tools?.length ?? 0) > 0
 		}
+	};
+}
+
+/** 判断是否为「只输出思考、没有正文与工具调用」的空回复。 */
+function isThinkingOnlyReply(result: LlmChatResult): boolean {
+	return (
+		result.toolCalls.length === 0 &&
+		(result.content === null || result.content.trim() === '') &&
+		result.thinking !== undefined &&
+		result.thinking.trim() !== ''
+	);
+}
+
+/** 生成最近一次响应的诊断摘要（空正文排查用）。 */
+function buildLastResponse(result: LlmChatResult): DebugLastResponse {
+	return {
+		finishReason: result.finishReason,
+		hasContent: result.content !== null && result.content.trim() !== '',
+		hasToolCalls: result.toolCalls.length > 0,
+		thinkingChars: result.thinking?.trim().length ?? 0
 	};
 }
 
