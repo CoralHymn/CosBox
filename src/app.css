@@ -995,3 +995,183 @@ button:disabled {
 ::-webkit-scrollbar-track {
 	background: transparent;
 }
+
+/* ---------- 移动端适配（≤768px；桌面端不受影响） ---------- */
+
+@media (max-width: 768px) {
+	/* 应用外壳：头部可换行，高度自适应 */
+	.app {
+		grid-template-rows: auto 1fr;
+		height: 100dvh;
+	}
+
+	.header {
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 6px 10px;
+	}
+
+	.header-spacer {
+		display: none;
+	}
+
+	/* 移动端隐藏服务商徽标，保留时间/快照/忙碌提示 */
+	.chip.ok {
+		display: none;
+	}
+
+	/* 导航栏改为底部横向标签栏 */
+	.body {
+		grid-template-columns: 1fr;
+		grid-template-rows: 1fr auto;
+	}
+
+	.content {
+		order: 1;
+	}
+
+	.nav-rail {
+		order: 2;
+		flex-direction: row;
+		overflow-x: auto;
+		overflow-y: hidden;
+		border-right: none;
+		border-top: 1px solid var(--border);
+		padding: 5px 6px;
+		gap: 2px;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	.nav-item {
+		flex-direction: column;
+		gap: 1px;
+		padding: 5px 12px;
+		font-size: 10.5px;
+		flex: none;
+		min-width: 58px;
+		border-radius: 8px;
+	}
+
+	.nav-icon {
+		font-size: 16px;
+		width: auto;
+	}
+
+	/* 面板与卡片收紧 */
+	.panel {
+		padding: 12px 12px 18px;
+	}
+
+	.panel-sub {
+		margin-bottom: 12px;
+	}
+
+	.card {
+		padding: 11px 12px;
+	}
+
+	.grid-2 {
+		grid-template-columns: 1fr;
+	}
+
+	/* 状态面板键值行：键独占一行，输入与删除按钮同排 */
+	.key-value-row {
+		grid-template-columns: 1fr 34px;
+	}
+
+	.key-value-row .k {
+		grid-column: 1 / -1;
+	}
+
+	/* 列表行与分支头部允许换行，避免溢出 */
+	.list-row,
+	.branch-header {
+		flex-wrap: wrap;
+		row-gap: 6px;
+	}
+
+	.card-title-row {
+		flex-wrap: wrap;
+		row-gap: 6px;
+	}
+
+	/* 聊天：单列布局，实时状态/用量侧栏折叠到下方 */
+	.chat-layout {
+		grid-template-columns: 1fr;
+		grid-template-rows: 1fr auto;
+	}
+
+	.side-preview {
+		border-left: none;
+		border-top: 1px solid var(--border);
+		max-height: 34vh;
+		padding: 12px;
+	}
+
+	.messages {
+		padding: 14px 12px;
+		gap: 12px;
+	}
+
+	.message {
+		max-width: 88%;
+	}
+
+	.empty-chat {
+		padding: 24px 16px;
+	}
+
+	.composer {
+		padding: 8px 10px;
+		gap: 8px;
+	}
+
+	/* 触屏下常显消息操作图标（桌面 hover 在触屏上不可用） */
+	.message .message-actions {
+		opacity: 1 !important;
+		pointer-events: auto !important;
+	}
+
+	/* 开发者提示词弹窗全屏 */
+	.prompt-backdrop {
+		padding: 0;
+	}
+
+	.prompt-modal,
+	.ai-modal {
+		width: 100vw;
+		height: 100dvh;
+		max-width: none;
+		max-height: none;
+		border-radius: 0;
+		border: none;
+	}
+
+	.debug-bar {
+		flex-wrap: wrap;
+		justify-content: flex-start;
+		gap: 6px;
+	}
+
+	/* 提示条占满宽度 */
+	.toasts {
+		left: 12px;
+		right: 12px;
+		bottom: 12px;
+	}
+
+	.toast {
+		max-width: none;
+	}
+
+	/* 输入框与按钮触屏尺寸 */
+	.input,
+	.textarea,
+	.select {
+		font-size: 16px;
+	}
+
+	.btn {
+		min-height: 34px;
+	}
+}
