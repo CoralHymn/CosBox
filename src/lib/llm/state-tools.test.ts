@@ -28,6 +28,22 @@ function makeContext(initial = createInitialState()): StateToolContext {
 	};
 }
 
+/** 构造带额外配饰衣柜条目的上下文（初始已佩戴「蝴蝶结发带」）。 */
+function makeContextWithAccessories(names: string[]): StateToolContext {
+	const state = createInitialState();
+	state.outfit.wardrobe = [
+		...state.outfit.wardrobe,
+		...names.map((name, index) => ({
+			id: `acc-${index}`,
+			category: '饰品',
+			kind: 'accessory' as const,
+			name,
+			description: `${name}的外观描述`
+		}))
+	];
+	return makeContext(state);
+}
+
 function call(name: string, args: Record<string, unknown>): ToolCall {
 	return { id: 'call-1', name, arguments: args };
 }
@@ -169,6 +185,82 @@ describe('setOutfitTool', () => {
 			ctx
 		);
 		expect(ctx.getState().outfit.top).toBe('黑色卫衣');
+	});
+
+	it('配饰支持多件添加（中文别名 slot=配饰）', async () => {
+		const ctx = makeContextWithAccessories(['银质耳环']);
+		const output = await setOutfitTool.execute(
+			call('set_outfit', { slot: '配饰', item: '银质耳环' }).arguments,
+			ctx
+		);
+		expect(output).toContain('已添加配饰');
+		expect(ctx.getState().outfit.accessories).toEqual(['蝴蝶结发带', '银质耳环']);
+	});
+
+	it('配饰可移除指定一件（action=remove）', async () => {
+		const ctx = makeContext();
+		const output = await setOutfitTool.execute(
+			call('set_outfit', { slot: 'accessory', item: '蝴蝶结发带', action: 'remove' }).arguments,
+			ctx
+		);
+		expect(output).toContain('已移除配饰');
+		expect(ctx.getState().outfit.accessories).toEqual([]);
+	});
+
+	it('配饰 item=无 时清空全部', async () => {
+		const ctx = makeContextWithAccessories(['银质耳环']);
+		const output = await setOutfitTool.execute(
+			call('set_outfit', { slot: 'accessory', item: '无' }).arguments,
+			ctx
+		);
+		expect(output).toContain('已清空配饰');
+		expect(ctx.getState().outfit.accessories).toEqual([]);
+	});
+
+	it('配饰 action=clear 时清空全部', async () => {
+		const ctx = makeContextWithAccessories(['银质耳环']);
+		await setOutfitTool.execute(
+			call('set_outfit', { slot: 'accessory', item: null, action: 'clear' }).arguments,
+			ctx
+		);
+		expect(ctx.getState().outfit.accessories).toEqual([]);
+	});
+
+	it('槽位缺失时按 kind=accessory 自动识别为配饰', async () => {
+		const ctx = makeContextWithAccessories(['银质耳环']);
+		await setOutfitTool.execute(call('set_outfit', { item: '银质耳环' }).arguments, ctx);
+		expect(ctx.getState().outfit.accessories).toContain('银质耳环');
+		expect(ctx.getState().outfit.top).toBe('白色衬衫');
+	});
+
+	it('衣柜中没有的配饰抛错并列出可选', async () => {
+		const ctx = makeContext();
+		await expect(
+			setOutfitTool.execute(
+				call('set_outfit', { slot: 'accessory', item: '脑补项链' }).arguments,
+				ctx
+			)
+		).rejects.toThrow('衣柜中没有可用的配饰');
+	});
+
+	it('移除未佩戴但衣柜存在的配饰返回提示', async () => {
+		const ctx = makeContextWithAccessories(['银质耳环']);
+		const output = await setOutfitTool.execute(
+			call('set_outfit', { slot: 'accessory', item: '银质耳环', action: 'remove' }).arguments,
+			ctx
+		);
+		expect(output).toContain('当前配饰中没有');
+		expect(ctx.getState().outfit.accessories).toEqual(['蝴蝶结发带']);
+	});
+
+	it('重复添加已佩戴的配饰返回提示且不重复', async () => {
+		const ctx = makeContext();
+		const output = await setOutfitTool.execute(
+			call('set_outfit', { slot: 'accessory', item: '蝴蝶结发带' }).arguments,
+			ctx
+		);
+		expect(output).toContain('已佩戴配饰');
+		expect(ctx.getState().outfit.accessories).toEqual(['蝴蝶结发带']);
 	});
 
 	it('item 为「无/脱/null/NONE」时脱掉该槽位', async () => {

@@ -2,6 +2,7 @@
 	import { findWardrobeItem } from '../context/state-summary';
 	import { CLOTHING_KINDS } from '../core/state';
 	import type {
+		ClothingItem,
 		ClothingKind,
 		ConfigPatch,
 		OutfitSlot,
@@ -17,6 +18,7 @@
 	import { groupByCategory } from '../utils/grouping';
 	import { moveItemToTarget } from '../utils/grouping';
 	import { newId } from '../utils/id';
+	import AccessoryPicker from './AccessoryPicker.svelte';
 	import AiGeneratorPanel from './AiGeneratorPanel.svelte';
 	import OutfitSlotPicker from './OutfitSlotPicker.svelte';
 
@@ -90,6 +92,11 @@
 			slots.map(({ key }) => [key, findWardrobeItem(outfit.wardrobe, outfit[key] ?? '')])
 		) as Record<OutfitSlot, { name: string; description: string } | undefined>
 	);
+	const accessoryItems = $derived(
+		outfit.accessories
+			.map((name) => findWardrobeItem(outfit.wardrobe, name))
+			.filter((item): item is ClothingItem => item !== undefined)
+	);
 
 	$effect(() => {
 		rows = outfit.wardrobe.map((item) => ({
@@ -109,20 +116,6 @@
 		const patch: Partial<OutfitState> = {};
 		patch[slot] = value;
 		onUpdate({ outfit: patch }, '更新穿着');
-	}
-
-	function commitAccessories(raw: string): void {
-		onUpdate(
-			{
-				outfit: {
-					accessories: raw
-						.split(/[,，]/)
-						.map((part) => part.trim())
-						.filter((part) => part !== '')
-				}
-			},
-			'更新穿着'
-		);
 	}
 
 	function commitWardrobe(): void {
@@ -226,17 +219,15 @@
 					onCommit={(value) => commitSlot(slot.key, value)}
 				/>
 			{/each}
-			<div class="field">
-				<label for="wardrobe-accessories">配饰（逗号分隔）</label>
-				<input
-					id="wardrobe-accessories"
-					class="input"
-					value={outfit.accessories.join('，')}
-					onchange={(event) => commitAccessories(event.currentTarget.value)}
-				/>
-			</div>
+			<AccessoryPicker
+				idPrefix="wardrobe"
+				label="配饰"
+				value={outfit.accessories}
+				wardrobe={outfit.wardrobe}
+				onCommit={(next) => onUpdate({ outfit: { accessories: next } }, '更新穿着')}
+			/>
 		</div>
-		{#if Object.values(slotItems).some((item) => item !== undefined)}
+		{#if Object.values(slotItems).some((item) => item !== undefined) || accessoryItems.length > 0}
 			<div class="card" style="margin: 12px 0 0; background: var(--panel-2);">
 				<h3 class="card-title">穿着细节</h3>
 				{#each slots as slot (slot.key)}
@@ -247,6 +238,13 @@
 							>
 						</p>
 					{/if}
+				{/each}
+				{#each accessoryItems as item (item.name)}
+					<p class="preview-line">
+						<span class="k">配饰</span><span
+							>{item.name}：{item.description}</span
+						>
+					</p>
 				{/each}
 			</div>
 		{/if}

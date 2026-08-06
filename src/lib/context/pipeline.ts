@@ -60,7 +60,7 @@ export function buildToolGuidance(): string {
 		'你必须在剧情中主动调用工具来同步状态，不允许只口头描述或假设状态已变化：',
 		'- 只要剧情暗示时间流逝（排队、等待、赶路、闲聊、用餐、入夜等）→ 立即调用 advance_time 推进到合理时刻；',
 		'- 离开某地或到达新地点 → 立即调用 goto_location（优先从【已知地点】中选择）；',
-		'- 穿上/脱下衣物 → 立即调用 set_outfit（必须从【衣柜】中选择，item 用精确名称；用「无」表示脱掉）；',
+		'- 穿上/脱下衣物 → 立即调用 set_outfit（必须从【衣柜】中选择，item 用精确名称；用「无」表示脱掉；配饰是多件列表，slot=配饰 可逐件添加、action=remove 移除指定一件）；',
 		'- 属性发生变化 → 立即调用 set_attribute。',
 		'- 工具调用必须通过 tool_calls 字段发出并带完整参数（advance_time 给 minutes、goto_location 给地点名、set_outfit 给 slot+item、set_attribute 给 key+value）；',
 		'- 思考过程（reasoning）里写「我要调用 xxx」不算数：决定调用后立即在本次回复中发出结构化的 tool_calls。',
