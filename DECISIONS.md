@@ -1031,3 +1031,27 @@ API Key 绝不能上传。
 **理由**：符合用户对主流聊天客户端交互的预期；图标在深色页面背景上清晰可辨。
 **代价**：每条用户/AI 消息下方预留固定高度的操作条（`.messages` 间距相应收紧），
 聊天整体略宽松。
+
+## D77：消息编辑改用 textarea 双向绑定（修复保存读到旧文本）
+
+**问题**：消息编辑的 e2e 用例偶发失败：保存后气泡仍是旧文本。根因是
+`contenteditable` 没有 Svelte 原生双向绑定——进入编辑态靠 `$effect` 写
+`textContent` 预填原文，保存又读 `editEl.textContent`，两者都存在与
+`$effect`/输入事件/Playwright `fill()` 的毫秒级时序竞态：保存链路中
+conversation 重建会让 `message` prop 变化并重跑 `$effect`，把用户已输入的
+文本覆盖回旧值；`fill()` 对 contenteditable 的 input 事件也并不可靠。
+
+**选择**：编辑区从 `contenteditable` 改为 `<textarea bind:value={draft}>`：
+
+1. `draft` 由 Svelte 原生双向绑定维护，输入即同步，保存只读 JS 变量
+   （`draft.trim()`），彻底消除 DOM 读取与 effect 覆盖的竞态；
+2. `$effect` 只负责聚焦与高度自适应（autoResize），不再写回文本；
+3. textarea 样式与气泡正文一致（透明背景、无边框、`resize:none`、
+   `overflow:hidden`，高度跟随内容）；
+4. e2e 断言改用 `toHaveValue`，Playwright `fill()` 对 textarea 直接设
+   `.value`，100% 可靠。
+
+**理由**：`bind:value` 是 Svelte 处理输入的标准做法，数据单一来源、无 DOM
+时序问题；也顺带消除了真实用户「快速粘贴后立刻保存」的同类风险。
+**代价**：编辑区从可编辑富文本块变为 textarea（本场景本就只需纯文本），
+视觉保持一致。
