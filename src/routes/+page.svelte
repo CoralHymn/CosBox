@@ -91,6 +91,8 @@
 	const searchClient = new WebSearchClient();
 
 	let tab = $state<TabId>('chat');
+	/** 移动端左侧抽屉导航是否打开。 */
+	let mobileNavOpen = $state(false);
 	let busy = $state(false);
 	let searching = $state(false);
 	let ready = $state(false);
@@ -129,6 +131,20 @@
 	const searchSupported = $derived(
 		settings.config.webSearch.enabled && settings.config.webSearch.apiKey.trim() !== ''
 	);
+
+	/** 移动端抽屉打开时支持 Esc 关闭。 */
+	$effect(() => {
+		if (!mobileNavOpen) {
+			return;
+		}
+		const onKeydown = (event: KeyboardEvent): void => {
+			if (event.key === 'Escape') {
+				mobileNavOpen = false;
+			}
+		};
+		window.addEventListener('keydown', onKeydown);
+		return () => window.removeEventListener('keydown', onKeydown);
+	});
 
 	onMount(async () => {
 		try {
@@ -680,8 +696,16 @@
 	}
 </script>
 
-<div class="app">
+<div class="app" class:nav-open={mobileNavOpen}>
 	<header class="header">
+		<button
+			class="mobile-nav-toggle"
+			aria-label="打开菜单"
+			title="菜单"
+			onclick={() => (mobileNavOpen = !mobileNavOpen)}
+		>
+			☰
+		</button>
 		<div class="brand">
 			<span class="brand-mark">C</span>
 			<span>CosBox</span>
@@ -700,7 +724,19 @@
 	</header>
 
 	<div class="body">
-		<NavRail active={tab} onSelect={(next) => (tab = next)} />
+		<div
+			class="nav-backdrop"
+			class:show={mobileNavOpen}
+			role="presentation"
+			onclick={() => (mobileNavOpen = false)}
+		></div>
+		<NavRail
+			active={tab}
+			onSelect={(next) => {
+				tab = next;
+				mobileNavOpen = false;
+			}}
+		/>
 		<main class="content">
 			{#if !ready}
 				<div class="panel">
