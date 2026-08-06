@@ -1575,3 +1575,36 @@ Svelte 5 `$state` 响应式代理对象直接交给 IndexedDB 写入，structure
 ### 门禁
 
 - 单元测试：全量 599 个全过；39 条 e2e 全过；build / check / lint 全绿。
+
+## 2026-08-06（续）：工具调用兼容 DeepSeek V4 + 状态判断改 JSON 输出
+
+### 背景
+
+用户怀疑「AI 不调用工具」主要问题出在 CosBox 代码。核对 DeepSeek 官方文档：
+思考模式中可以调用工具，但 OpenAI 兼容集成 `supportsToolChoice: false`，
+`tool_choice=required` 对 V4 思考模式返回 400。此前「强制补调」第二档恰好固定发送
+`tool_choice=required`，对 DeepSeek 每次都失败并被静默吞掉——代码确实限制了
+模型发挥。另外 LLM 状态确认仅靠提示词要求「输出 True/False」不稳定，DeepSeek
+官方 JSON Output 可保证合法 JSON 对象。
+
+### 修改
+
+- `providers.ts`：新增 `isDeepSeekModel()`（providerId 或模型名含 deepseek，
+  兼容 SiliconFlow 的 `deepseek-ai/DeepSeek-V3`）。
+- `openai-client.ts`：`chat` / `chatWithTools` 透传 `options`；新增 `jsonMode`
+  （请求体带 `response_format: json_object`）；DeepSeek 配置下跳过 `tool_choice`。
+- `state-judge.ts`：状态判断优先使用 JSON Output 模式，提示词改为输出
+  `{"needsTool": true|false}`；`parseJudgeOutput` 兼容 JSON 对象、裸布尔、
+  带引号布尔与 ```json 围栏；不支持 response_format 的端点自动回退普通请求；
+  maxTokens 8→64（容纳 JSON 对象与思考型模型推理消耗）。语义保持
+  「只有明确 False 才跳过」。
+- `chat-service.ts`：`retryPlannedTool` / `retryTimeClaim` 第二档对 DeepSeek
+  退化为「强提示 + 非流式」（不带 tool_choice），其他端点维持
+  `tool_choice=required`。
+- 测试：新增 openai-client（jsonMode 请求体、DeepSeek 不带 tool_choice）、
+  state-judge（JSON 解析、jsonMode 发送、失败回退）、chat-service（DeepSeek
+  补调退化）、providers（isDeepSeekModel）用例。
+
+### 门禁
+
+- 单元测试：全量 610 个全过；check / lint 全绿。

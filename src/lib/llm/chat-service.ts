@@ -13,6 +13,7 @@ import {
 	type CompactionState
 } from './compaction';
 import { estimateMessagesTokens, sumUsage } from './model-info';
+import { isDeepSeekModel } from './providers';
 import {
 	executeStateTool,
 	type ExecutedToolCall,
@@ -602,19 +603,21 @@ export class ChatService {
 		};
 		// 第一档：提示 + 常规流式；第二档：tool_choice=required + 非流式
 		// （部分代理只在流式转发时丢失 tool_calls，非流式可绕开）。
-		// 只采纳真正发出 tool_calls 的结果，避免「只说不做」的正文被当作成功。
+		// DeepSeek V4 思考模式不接受 tool_choice（400），第二档退化为「强提示 + 非流式」，
+		// 仍保留非流式绕过代理丢调用的价值；只采纳真正发出 tool_calls 的结果。
 		const first = await attempt(false, config.stream === true);
 		if (first && first.toolCalls.length > 0) {
 			return first;
 		}
-		const forced = await attempt(true, false);
+		const forced = await attempt(!isDeepSeekModel(config), false);
 		return forced && forced.toolCalls.length > 0 ? forced : null;
 	}
 
 	/**
 	 * 正文描述了时间流逝但未调用 advance_time 时的补调重试：
 	 * 第一档追加「必须调用 advance_time」提示；仍不调用则第二档用
-	 * tool_choice=required 强制模型至少发一个工具调用（端点不支持时自动回退）。
+	 * tool_choice=required 强制模型至少发一个工具调用；DeepSeek V4 思考模式
+	 * 不接受 tool_choice（400），第二档自动退化为「强提示 + 非流式」。
 	 * 只有重试真正发出 tool_calls 才采用，避免采纳“只说不做”的正文。
 	 */
 	private async retryTimeClaim(
@@ -656,7 +659,7 @@ export class ChatService {
 		if (first && first.toolCalls.length > 0) {
 			return first;
 		}
-		const forced = await attempt(true, false);
+		const forced = await attempt(!isDeepSeekModel(config), false);
 		return forced && forced.toolCalls.length > 0 ? forced : null;
 	}
 

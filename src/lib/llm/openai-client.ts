@@ -1,5 +1,6 @@
 import { LlmError } from '../core/errors';
 import { annotateWorldTime } from './message-time';
+import { isDeepSeekModel } from './providers';
 import type {
 	ChatMessage,
 	LlmChatResult,
@@ -21,9 +22,10 @@ export class OpenAiCompatibleClient implements LlmClient {
 		messages: ChatMessage[],
 		config: LlmConfig,
 		signal?: AbortSignal,
-		onDelta?: (delta: string) => void
+		onDelta?: (delta: string) => void,
+		options?: { jsonMode?: boolean }
 	): Promise<LlmChatResult> {
-		return this.chatWithTools(messages, [], config, signal, onDelta);
+		return this.chatWithTools(messages, [], config, signal, onDelta, options);
 	}
 
 	/** 上下文压缩摘要：把摘要请求当普通对话发送，取最终文本。 */
@@ -47,7 +49,7 @@ export class OpenAiCompatibleClient implements LlmClient {
 		config: LlmConfig,
 		signal?: AbortSignal,
 		onDelta?: (delta: string) => void,
-		options?: { forceToolCall?: boolean }
+		options?: { forceToolCall?: boolean; jsonMode?: boolean }
 	): Promise<LlmChatResult> {
 		const baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
 		if (baseUrl === '') {
@@ -63,7 +65,13 @@ export class OpenAiCompatibleClient implements LlmClient {
 					...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
 				},
 				body: JSON.stringify(
-					buildRequestBody(messages, tools, config, options?.forceToolCall === true)
+					buildRequestBody(
+						messages,
+						tools,
+						config,
+						options?.forceToolCall === true,
+						options?.jsonMode === true
+					)
 				),
 				signal
 			});
@@ -397,7 +405,8 @@ function buildRequestBody(
 	messages: ChatMessage[],
 	tools: readonly StateToolSchema[],
 	config: LlmConfig,
-	forceToolCall = false
+	forceToolCall = false,
+	jsonMode = false
 ): Record<string, unknown> {
 	const body: Record<string, unknown> = {
 		model: config.model,
@@ -405,13 +414,18 @@ function buildRequestBody(
 		temperature: config.temperature,
 		max_tokens: config.maxTokens
 	};
+	if (jsonMode) {
+		// DeepSeek JSON Output：要求响应为合法 JSON 对象，提示词中须包含 "json" 字样。
+		body.response_format = { type: 'json_object' };
+	}
 	if (config.stream === true) {
 		body.stream = true;
 		body.stream_options = { include_usage: true };
 	}
 	if (tools.length > 0) {
 		body.tools = tools.map(serializeTool);
-		if (forceToolCall) {
+		// DeepSeek V4 思考模式不接受 tool_choice（400），跳过强制档，靠强提示驱动。
+		if (forceToolCall && !isDeepSeekModel(config)) {
 			// 对齐 openai-agents / AG2：强制模型至少发一个工具调用（部分端点不支持）。
 			body.tool_choice = 'required';
 		}

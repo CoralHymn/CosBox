@@ -21,10 +21,12 @@ export class DemoLlmClient implements LlmClient {
 		messages: ChatMessage[],
 		_config: LlmConfig,
 		signal?: AbortSignal,
-		_onDelta?: (delta: string) => void
+		_onDelta?: (delta: string) => void,
+		_options?: { jsonMode?: boolean }
 	): Promise<LlmChatResult> {
 		await delay(250, signal);
 		void _onDelta;
+		void _options;
 		const content = buildDemoReply(messages);
 		return {
 			content,
@@ -60,9 +62,13 @@ export class DemoLlmClient implements LlmClient {
 		messages: ChatMessage[],
 		tools: readonly StateToolSchema[],
 		_config: LlmConfig,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		_onDelta?: (delta: string) => void,
+		_options?: { forceToolCall?: boolean; jsonMode?: boolean }
 	): Promise<LlmChatResult> {
 		await delay(250, signal);
+		void _onDelta;
+		void _options;
 		return buildDemoToolResult(messages, tools);
 	}
 }
