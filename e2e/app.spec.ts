@@ -974,6 +974,6 @@ test('设置：获取模型列表自动填充上下文窗口，连接测试验�
 	await expect(page.locator('#llm-model')).toHaveValue('mock-model-a');
 	await expect(page.getByText('上下文窗口：64000 tokens')).toBeVisible();
 
-	await page.getByRole('button', { name: '连接测试' }).click();
+	await page.getByRole('button', { name: '连接测试' }).first().click();
 	await expect(page.getByText('连接成功，API 可用')).toBeVisible();
 });

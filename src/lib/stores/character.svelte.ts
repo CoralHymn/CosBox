@@ -30,6 +30,8 @@ export interface CharacterSessionStore {
 	deleteBranch: (tipId: string) => Promise<number>;
 	/** 批量删除分支（每个分支只删除其独有快照）。 */
 	deleteBranches: (tipIds: readonly string[]) => Promise<number>;
+	/** 订阅会话变化（状态/对话/快照变更时触发，供远程同步推送）。 */
+	subscribe: (listener: () => void) => () => void;
 	/** 世界配置覆盖（地点库/衣柜/日程条目）：不生成快照、不进版本历史。 */
 	applyConfig: (patch: ConfigPatch) => Promise<void>;
 }
@@ -77,6 +79,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 		addCheckpoint: (desc) => manager.addCheckpoint(desc),
 		deleteBranch: (tipId) => manager.deleteBranch(tipId),
 		deleteBranches: (tipIds) => manager.deleteBranches(tipIds),
+		subscribe: (listener) => manager.subscribe(listener),
 		applyConfig: (patch) => manager.applyConfig(patch)
 	};
 }

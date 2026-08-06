@@ -52,6 +52,8 @@
 	import type { JudgeDebugView } from '../lib/llm/state-judge';
 	import { STATE_TOOLS } from '../lib/llm/state-tools';
 	import type { LlmConfig, TokenUsage } from '../lib/llm/types';
+	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
+	import type { SyncSettings } from '../lib/sync/types';
 	import { rebuildFromNodes } from '../lib/core/snapshot';
 	import { createInitialState } from '../lib/core/state';
 	import type { SearchResult } from '../lib/search/types';
@@ -79,14 +81,16 @@
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
 
 	const db = getDb();
+	const kv = new KvRepository(db);
 	const snapshotRepo = new SnapshotRepository(db);
 	const manager = new CharacterManager({
 		snapshots: snapshotRepo,
-		kv: new KvRepository(db)
+		kv
 	});
 	const session = createCharacterSession(manager);
-	const settings = createSettingsStore(new KvRepository(db));
+	const settings = createSettingsStore(kv);
 	const worldInfo = createWorldInfoStore(new WorldInfoRepository(db));
+	const syncService = new SyncService(kv);
 	const toasts = createToasts();
 	const demoClient = new DemoLlmClient();
 	const openAiClient = new OpenAiCompatibleClient();
@@ -163,11 +167,26 @@
 		return () => window.removeEventListener('keydown', onKeydown);
 	});
 
+	/** 启动远程同步：读取设置、开始轮询并订阅本地变化。 */
+	function startSync(): void {
+		syncService.start({
+			getSettings: () => settings.sync,
+			collect: collectWorkspaceData,
+			apply: async (data) => applyWorkspaceData(data),
+			onChange: () => syncService.notifyChanged()
+		});
+	}
+
 	onMount(async () => {
 		try {
 			await manager.init();
 			await worldInfo.init();
 			await settings.load();
+			await syncService.load();
+			startSync();
+			session.subscribe(() => syncService.notifyChanged());
+			worldInfo.subscribe(() => syncService.notifyChanged());
+			settings.subscribe(() => syncService.notifyChanged());
 		} catch (err) {
 			toasts.error(err);
 		} finally {
@@ -548,6 +567,31 @@
 		}
 	}
 
+	/** 保存远程同步设置；启用时立即开始轮询同步。 */
+	async function handleSaveSync(next: SyncSettings): Promise<void> {
+		try {
+			await settings.saveSync(next);
+			if (next.enabled) {
+				startSync();
+			} else {
+				syncService.stop();
+			}
+			toasts.success('数据同步设置已保存');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 连接测试：用当前草稿配置验证服务器可用。 */
+	async function handleTestSync(draft: SyncSettings): Promise<SyncResult> {
+		return syncService.testConnection(draft);
+	}
+
+	/** 手动立即同步（先拉远端较新数据，再推送本地）。 */
+	async function handleSyncNow(): Promise<SyncResult> {
+		return syncService.syncNow();
+	}
+
 	/** 获取模型列表（使用设置面板当前草稿配置）。失败返回空列表并由面板显示 toast。 */
 	async function handleFetchModels(draft: LlmConfig): Promise<FetchedModel[]> {
 		try {
@@ -635,8 +679,9 @@
 	}
 
 	/** 导出工作区：除模型配置外的全部数据打包为 .cbox。 */
-	function handleExportWorkspace(): void {
-		const data: WorkspaceData = {
+	/** 收集当前完整工作区数据（不含模型配置与 API Key），供导出与远程同步复用。 */
+	function collectWorkspaceData(): WorkspaceData {
+		return {
 			profile: settings.profile,
 			developerMode: settings.developerMode,
 			worldInfo: worldInfo.entries,
@@ -648,15 +693,10 @@
 			headId: session.headId,
 			snapshots: session.snapshots
 		};
-		downloadBytes(`cosbox-${stamp()}.cbox`, serializeWorkspace(data));
-		toasts.success('工作区已导出');
 	}
 
-	/** 导入工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
-	async function handleImportWorkspace(file: File): Promise<void> {
-		const bytes = new Uint8Array(await file.arrayBuffer());
-		const data = parseWorkspace(bytes);
-		// 导入前校验快照链可重建，避免写入损坏数据。
+	/** 应用工作区数据：校验快照链后整体恢复本地（保留当前模型配置与 Key）。 */
+	async function applyWorkspaceData(data: WorkspaceData): Promise<void> {
 		if (data.headId !== null) {
 			rebuildFromNodes(
 				new Map(data.snapshots.map((node) => [node.id, node])),
@@ -671,6 +711,19 @@
 		await settings.saveProfile(data.profile);
 		await settings.saveDeveloperMode(data.developerMode);
 		await manager.restoreWorkspace(data.config, data.headId);
+	}
+
+	function handleExportWorkspace(): void {
+		const data = collectWorkspaceData();
+		downloadBytes(`cosbox-${stamp()}.cbox`, serializeWorkspace(data));
+		toasts.success('工作区已导出');
+	}
+
+	/** 导入工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
+	async function handleImportWorkspace(file: File): Promise<void> {
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		const data = parseWorkspace(bytes);
+		await applyWorkspaceData(data);
 		toasts.success('工作区已导入');
 	}
 
@@ -878,10 +931,14 @@
 					config={settings.config}
 					profile={settings.profile}
 					developerMode={settings.developerMode}
+					syncSettings={settings.sync}
 					onSaveConfig={handleSaveConfig}
 					onSaveProfile={handleSaveProfile}
 					onResetProfile={handleResetProfile}
 					onSaveDeveloperMode={handleSaveDeveloperMode}
+					onSaveSync={handleSaveSync}
+					onTestSync={handleTestSync}
+					onSyncNow={handleSyncNow}
 					onFetchModels={handleFetchModels}
 					onTestConnection={handleTestConnection}
 					onExportWorkspace={handleExportWorkspace}
