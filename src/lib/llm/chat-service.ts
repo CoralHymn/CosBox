@@ -296,7 +296,14 @@ export class ChatService {
 					}
 					if (result.toolCalls.length === 0) {
 						if (options.enableStateJudge === true && executedTools.length === 0) {
-							const judge = await this.maybeRunStateJudge(input, config, options, signal, result);
+							const judge = await this.maybeRunStateJudge(
+								input,
+								config,
+								options,
+								signal,
+								result,
+								executedTools.length > 0
+							);
 							executedTools.push(...judge.executed);
 							rounds.push(...judge.rounds);
 							judgeDebug = judge.debug;
@@ -394,7 +401,14 @@ export class ChatService {
 		}
 		debug = { ...debug, lastResponse: buildLastResponse(result) };
 		if (options.enableStateJudge === true && executedTools.length === 0) {
-			const judge = await this.maybeRunStateJudge(input, config, options, signal, result);
+			const judge = await this.maybeRunStateJudge(
+				input,
+				config,
+				options,
+				signal,
+				result,
+				executedTools.length > 0
+			);
 			executedTools.push(...judge.executed);
 			rounds.push(...judge.rounds);
 			judgeDebug = judge.debug;
@@ -655,7 +669,8 @@ export class ChatService {
 		config: LlmConfig,
 		options: GenerateReplyOptions,
 		signal?: AbortSignal,
-		currentResult?: LlmChatResult
+		currentResult?: LlmChatResult,
+		nativeToolsExecuted = false
 	): Promise<{
 		executed: ExecutedToolCall[];
 		rounds: ReplyRound[];
@@ -663,6 +678,9 @@ export class ChatService {
 	}> {
 		if (
 			options.enableStateJudge !== true ||
+			// 原生 AI 在本请求中已执行过工具（哪怕只是第一段调用了工具）：
+			// 后续任何输出都绝不再让 LLM 判断介入，避免二次执行/吞句。
+			nativeToolsExecuted ||
 			options.toolContext === undefined ||
 			options.tools === undefined ||
 			options.tools.length === 0 ||
