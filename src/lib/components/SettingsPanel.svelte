@@ -5,16 +5,22 @@
 	import { DEFAULT_LLM_CONFIG, type LlmConfig } from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
 	import type { AppProfile } from '../stores/settings.svelte';
+	import type { SyncResult } from '../sync/sync-service';
+	import type { SyncSettings } from '../sync/types';
 	import ModelCombobox from './ModelCombobox.svelte';
 
 	interface Props {
 		config: LlmConfig;
 		profile: AppProfile;
 		developerMode: boolean;
+		syncSettings: SyncSettings;
 		onSaveConfig: (config: LlmConfig) => Promise<void>;
 		onSaveProfile: (profile: AppProfile) => Promise<void>;
 		onResetProfile: () => Promise<void>;
 		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
+		onSaveSync: (settings: SyncSettings) => Promise<void>;
+		onTestSync: (draft: SyncSettings) => Promise<SyncResult>;
+		onSyncNow: () => Promise<SyncResult>;
 		onFetchModels: (draft: LlmConfig) => Promise<FetchedModel[]>;
 		onTestConnection: (draft: LlmConfig) => Promise<void>;
 		onExportWorkspace: () => void;
@@ -25,10 +31,14 @@
 		config,
 		profile,
 		developerMode,
+		syncSettings,
 		onSaveConfig,
 		onSaveProfile,
 		onResetProfile,
 		onSaveDeveloperMode,
+		onSaveSync,
+		onTestSync,
+		onSyncNow,
 		onFetchModels,
 		onTestConnection,
 		onExportWorkspace,
@@ -49,6 +59,11 @@
 	let allowAiStateTools = $state(false);
 	let llmStateConfirm = $state(false);
 	let devMode = $state(false);
+	let syncEnabled = $state(false);
+	let syncServerUrl = $state('');
+	let syncServerKey = $state('');
+	let syncStatus = $state('');
+	let syncBusy = $state(false);
 	let profileName = $state('');
 	let systemPrompt = $state('');
 	let saving = $state(false);
@@ -96,6 +111,9 @@
 		profileName = profile.name;
 		systemPrompt = profile.systemPrompt ?? '';
 		devMode = developerMode;
+		syncEnabled = syncSettings.enabled;
+		syncServerUrl = syncSettings.serverUrl;
+		syncServerKey = syncSettings.serverKey;
 	});
 
 	/** 切换服务商：选中预设时自动填充地址与默认模型。 */
@@ -148,11 +166,47 @@
 			const name = profileName.trim();
 			const prompt = systemPrompt.trim() || null;
 			const dev = devMode;
+			const sync = {
+				enabled: syncEnabled,
+				serverUrl: syncServerUrl.trim(),
+				serverKey: syncServerKey.trim()
+			};
 			await onSaveConfig(buildConfig());
 			await onSaveProfile({ name, systemPrompt: prompt });
 			await onSaveDeveloperMode(dev);
+			await onSaveSync(sync);
 		} finally {
 			saving = false;
+		}
+	}
+
+	/** 连接测试：用当前草稿配置验证服务器可用。 */
+	async function testSync(): Promise<void> {
+		if (syncServerUrl.trim() === '') {
+			syncStatus = '请先填写服务器地址';
+			return;
+		}
+		syncBusy = true;
+		try {
+			const result = await onTestSync({
+				enabled: syncEnabled,
+				serverUrl: syncServerUrl.trim(),
+				serverKey: syncServerKey.trim()
+			});
+			syncStatus = result.message;
+		} finally {
+			syncBusy = false;
+		}
+	}
+
+	/** 手动立即同步。 */
+	async function syncNow(): Promise<void> {
+		syncBusy = true;
+		try {
+			const result = await onSyncNow();
+			syncStatus = result.message;
+		} finally {
+			syncBusy = false;
 		}
 	}
 
@@ -484,6 +538,43 @@
 				style="display: none;"
 				onchange={onImportFile}
 			/>
+		</div>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">数据同步</h3>
+		<p class="muted" style="margin: 0 0 10px;">
+			连接你自己的远程服务器，实时同步快照、地点库/衣柜/日程、世界书与角色档案 （不含模型配置，API
+			Key 不会上传）。服务器地址与密钥由服务器端一键安装脚本生成。
+		</p>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input id="sync-enabled" class="checkbox" type="checkbox" bind:checked={syncEnabled} />
+			<label for="sync-enabled" class="muted">启用远程同步</label>
+		</div>
+		<div class="field">
+			<label for="sync-server-url">服务器地址</label>
+			<input
+				id="sync-server-url"
+				class="input"
+				bind:value={syncServerUrl}
+				placeholder="https://sync.example.com 或 http://1.2.3.4:8787"
+			/>
+		</div>
+		<div class="field">
+			<label for="sync-server-key">服务器密钥</label>
+			<input
+				id="sync-server-key"
+				class="input"
+				bind:value={syncServerKey}
+				placeholder="服务器生成的同步密钥"
+			/>
+		</div>
+		<div class="row-actions">
+			<button class="btn" onclick={testSync} disabled={syncBusy}>连接测试</button>
+			<button class="btn" onclick={syncNow} disabled={syncBusy || !syncEnabled}>立即同步</button>
+			{#if syncStatus}
+				<span class="muted">{syncStatus}</span>
+			{/if}
 		</div>
 	</div>
 

@@ -1,14 +1,23 @@
+import { SvelteSet } from 'svelte/reactivity';
 import type { WorldInfoEntry } from '../core/types';
 import type { WorldInfoRepository } from '../db/world-info-repo';
 
 /** 世界信息 store：条目的响应式列表 + 增删改入口。 */
 export function createWorldInfoStore(repo: WorldInfoRepository) {
 	let entries = $state<WorldInfoEntry[]>([]);
+	const listeners = new SvelteSet<() => void>();
+
+	function emit(): void {
+		for (const listener of listeners) {
+			listener();
+		}
+	}
 
 	/** 全量加载并按优先级降序排列。 */
 	async function init(): Promise<void> {
 		const all = await repo.getAll();
 		entries = [...all].sort((a, b) => b.priority - a.priority);
+		emit();
 	}
 
 	/** 新增或整体替换一条。 */
@@ -37,6 +46,12 @@ export function createWorldInfoStore(repo: WorldInfoRepository) {
 		await init();
 	}
 
+	/** 订阅条目变化（同步推送用）。 */
+	function subscribe(listener: () => void): () => void {
+		listeners.add(listener);
+		return () => listeners.delete(listener);
+	}
+
 	return {
 		get entries() {
 			return entries;
@@ -45,6 +60,7 @@ export function createWorldInfoStore(repo: WorldInfoRepository) {
 		upsert,
 		remove,
 		importEntries,
-		clear
+		clear,
+		subscribe
 	};
 }
