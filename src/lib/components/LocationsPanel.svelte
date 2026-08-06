@@ -37,6 +37,8 @@
 	interface PlaceRow {
 		id: string;
 		category: string;
+		/** 分类编辑草稿：提交（失焦/回车）前不写入 category，避免实时分组打断输入。 */
+		categoryDraft: string;
 		name: string;
 		description: string;
 	}
@@ -61,6 +63,7 @@
 		rows = places.map((place) => ({
 			id: place.id,
 			category: place.category,
+			categoryDraft: place.category,
 			name: place.name,
 			description: place.description
 		}));
@@ -123,6 +126,16 @@
 		});
 	}
 
+	/** 分类在失焦/回车时提交：写入 category 后才按新分类重新分组并保存。 */
+	function commitCategory(row: PlaceRow): void {
+		const next = row.categoryDraft.trim();
+		if (next === row.category) {
+			return;
+		}
+		row.category = next;
+		commitPlaces();
+	}
+
 	function addPlace(): void {
 		const name = draftName.trim();
 		if (name === '') {
@@ -130,7 +143,13 @@
 		}
 		rows = [
 			...rows,
-			{ id: newId(), category: draftCategory.trim(), name, description: draftDescription.trim() }
+			{
+				id: newId(),
+				category: draftCategory.trim(),
+				categoryDraft: draftCategory.trim(),
+				name,
+				description: draftDescription.trim()
+			}
 		];
 		commitPlaces();
 		draftCategory = '';
@@ -293,8 +312,8 @@
 								<input
 									class="input"
 									style="width: 110px;"
-									bind:value={row.category}
-									onchange={commitPlaces}
+									bind:value={row.categoryDraft}
+									onchange={() => commitCategory(row)}
 									placeholder="分类"
 								/>
 								<input

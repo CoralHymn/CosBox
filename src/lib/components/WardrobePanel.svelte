@@ -46,6 +46,8 @@
 	interface WardrobeRow {
 		id: string;
 		category: string;
+		/** 分类编辑草稿：提交（失焦/回车）前不写入 category，避免实时分组打断输入。 */
+		categoryDraft: string;
 		kind: ClothingKind;
 		name: string;
 		description: string;
@@ -102,6 +104,7 @@
 		rows = outfit.wardrobe.map((item) => ({
 			id: item.id,
 			category: item.category,
+			categoryDraft: item.category,
 			kind: item.kind ?? 'any',
 			name: item.name,
 			description: item.description
@@ -116,6 +119,16 @@
 		const patch: Partial<OutfitState> = {};
 		patch[slot] = value;
 		onUpdate({ outfit: patch }, '更新穿着');
+	}
+
+	/** 分类在失焦/回车时提交：写入 category 后才按新分类重新分组并保存。 */
+	function commitCategory(row: WardrobeRow): void {
+		const next = row.categoryDraft.trim();
+		if (next === row.category) {
+			return;
+		}
+		row.category = next;
+		commitWardrobe();
 	}
 
 	function commitWardrobe(): void {
@@ -140,6 +153,7 @@
 			{
 				id: newId(),
 				category: draftCategory.trim(),
+				categoryDraft: draftCategory.trim(),
 				kind: draftKind,
 				name,
 				description: draftDescription.trim()
@@ -297,8 +311,8 @@
 								<div style="width: 90px; flex: none;">
 									<input
 										class="input"
-										bind:value={row.category}
-										onchange={commitWardrobe}
+										bind:value={row.categoryDraft}
+										onchange={() => commitCategory(row)}
 										placeholder="分类"
 									/>
 								</div>

@@ -273,6 +273,31 @@ test('地点库与衣柜的维护编辑不生成版本快照', async ({ page }) 
 	await expect(page.locator('.chip').filter({ hasText: '快照' })).toHaveText(/3 快照/);
 });
 
+test('地点分类在失焦/回车时才提交，输入过程不实时分组', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /地点/ }).click();
+	await page.locator('#new-place-category').fill('市中心');
+	await page.locator('#new-place-name').fill('测试地点A');
+	await page.getByRole('button', { name: '添加地点' }).click();
+
+	const rowCategory = page.locator('input[placeholder="分类"]').last();
+	await expect(rowCategory).toHaveValue('市中心');
+
+	// 输入新分类时仍是原分组：旧实现每敲一个字就换分组，打断中文输入
+	await rowCategory.click();
+	await rowCategory.fill('商业街');
+	await expect(page.locator('.group-name', { hasText: '市中心' })).toBeVisible();
+	await expect(page.locator('.group-name', { hasText: '商业街' })).toHaveCount(0);
+
+	// 回车提交后才移动到新分类并保存
+	await rowCategory.press('Enter');
+	const businessGroup = page.locator('div.group').filter({
+		has: page.locator('.group-name', { hasText: '商业街' })
+	});
+	await expect(businessGroup.locator('input[placeholder="分类"]').last()).toHaveValue('商业街');
+	await expect(businessGroup.locator('input[placeholder="地点名"]').last()).toHaveValue('测试地点A');
+});
+
 test('导入 SillyTavern V3 角色卡并写入世界书', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /导入导出/ }).click();
