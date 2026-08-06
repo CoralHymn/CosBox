@@ -82,8 +82,6 @@
 	>(null);
 	let copyStatus = $state('');
 	let copyTimer: number | undefined;
-	/** 移动端右上角「实时状态」浮层开关。 */
-	let mobileStateOpen = $state(false);
 
 	$effect(() => {
 		void conversation;
@@ -312,38 +310,4 @@
 			{onCompactNow}
 		/>
 	</aside>
-	<!-- 移动端：右上角可收起的状态概览（桌面端隐藏）。 -->
-	<button
-		class="mobile-state-toggle"
-		aria-label="实时状态"
-		title="实时状态"
-		onclick={() => (mobileStateOpen = !mobileStateOpen)}
-	>
-		{characterState.location.name}
-	</button>
-	{#if mobileStateOpen}
-		<div class="mobile-state-panel" role="dialog" aria-label="实时状态">
-			<div class="mobile-state-head">
-				<span>实时状态</span>
-				<button
-					class="btn btn-small"
-					aria-label="关闭状态面板"
-					onclick={() => (mobileStateOpen = false)}>关闭</button
-				>
-			</div>
-			<div class="mobile-state-body">
-				<StatePreview {characterState} />
-				<ContextPanel
-					{config}
-					{context}
-					{usage}
-					{compaction}
-					{autoCompact}
-					{compactThreshold}
-					{compacting}
-					{onCompactNow}
-				/>
-			</div>
-		</div>
-	{/if}
 </div>
