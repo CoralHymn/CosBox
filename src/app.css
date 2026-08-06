@@ -254,6 +254,53 @@ button:disabled {
 	color: var(--text-dim);
 }
 
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	background: var(--panel-2);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	padding: 3px 8px 3px 10px;
+	font-size: 12.5px;
+}
+
+.chip-x {
+	border: none;
+	background: none;
+	color: var(--text-dim);
+	cursor: pointer;
+	font-size: 11px;
+	line-height: 1;
+	padding: 2px;
+}
+
+.chip-x:hover {
+	color: var(--err);
+}
+
+.accessory-actions {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+
+.accessory-actions .select {
+	width: auto;
+	flex: 1 1 180px;
+}
+
+.accessory-actions .input {
+	flex: 1 1 140px;
+}
+
 .input,
 .textarea,
 .select {

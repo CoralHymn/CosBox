@@ -51,8 +51,11 @@ const SLOT_LABELS: Record<OutfitSlot, string> = {
 	shoes: '鞋子'
 };
 
-/** 中文槽位别名 -> 标准槽位键（模型经常直接传中文）。 */
-const SLOT_ALIASES: Record<string, OutfitSlot> = {
+/** 配饰是列表槽位（可同时佩戴多件），单独处理。 */
+const ACCESSORY_SLOT = 'accessory' as const;
+
+/** 中文槽位别名 -> 标准槽位键（模型经常直接传中文）；配饰别名归入列表槽位。 */
+const SLOT_ALIASES: Record<string, OutfitSlot | typeof ACCESSORY_SLOT> = {
 	帽子: 'headwear',
 	头饰: 'headwear',
 	'帽子/头饰': 'headwear',
@@ -64,7 +67,10 @@ const SLOT_ALIASES: Record<string, OutfitSlot> = {
 	裙子: 'bottom',
 	袜子: 'socks',
 	鞋: 'shoes',
-	鞋子: 'shoes'
+	鞋子: 'shoes',
+	配饰: 'accessory',
+	饰品: 'accessory',
+	装饰: 'accessory'
 };
 
 /** 视为「脱掉」的 item 值（模型常用文本表达代替 null）。 */
@@ -164,24 +170,31 @@ export const advanceTimeTool: StateToolDefinition = {
 export const setOutfitTool: StateToolDefinition = {
 	name: 'set_outfit',
 	description:
-		'更换角色穿着。slot 为槽位（headwear/top/underwear/underpants/bottom/socks/shoes，也可用中文：帽子/上衣/内衣/内裤/下装/袜子/鞋）；slot 可省略——提供衣柜中已存在的衣物名称时会自动识别槽位。item 必须是衣柜中已存在的衣物名称（精确名称，如「白色衬衫」），或用 null / 「无」表示脱掉。',
+		'更换角色穿着。slot 为槽位（headwear/top/underwear/underpants/bottom/socks/shoes/accessory，也可用中文：帽子/上衣/内衣/内裤/下装/袜子/鞋/配饰）；slot 可省略——提供衣柜中已存在的衣物名称时会自动识别槽位。item 必须是衣柜中已存在的衣物名称（精确名称，如「白色衬衫」），或用 null / 「无」表示脱掉。配饰是多件列表槽位：slot=配饰 + item=名称 添加一件，action=remove 移除指定一件，item=无 或 action=clear 清空全部配饰。',
 	parameters: {
 		type: 'object',
 		properties: {
 			slot: {
 				type: 'string',
 				description: '穿着槽位',
-				enum: OUTFIT_SLOTS
+				enum: [...OUTFIT_SLOTS, ACCESSORY_SLOT]
 			},
-			item: { type: 'string', description: '衣柜中的衣物名称或 null' }
+			item: { type: 'string', description: '衣柜中的衣物名称或 null' },
+			action: {
+				type: 'string',
+				description: '配饰操作：add=添加一件（默认）、remove=移除指定一件、clear=清空全部；仅 slot=配饰 时有效',
+				enum: ['add', 'remove', 'clear']
+			}
 		},
 		required: ['slot', 'item']
 	},
 	async execute(args, ctx) {
 		const rawSlot = typeof args.slot === 'string' ? args.slot.trim().toLowerCase() : '';
-		let slot =
-			SLOT_ALIASES[rawSlot] ??
-			(OUTFIT_SLOTS.includes(rawSlot as OutfitSlot) ? (rawSlot as OutfitSlot) : undefined);
+		let slot: OutfitSlot | typeof ACCESSORY_SLOT | undefined =
+			rawSlot === ACCESSORY_SLOT
+				? ACCESSORY_SLOT
+				: (SLOT_ALIASES[rawSlot] ??
+					(OUTFIT_SLOTS.includes(rawSlot as OutfitSlot) ? (rawSlot as OutfitSlot) : undefined));
 		const item = args.item;
 		if (item !== null && typeof item !== 'string') {
 			throw new Error('set_outfit 的 item 必须是衣物名称或 null');
@@ -196,7 +209,9 @@ export const setOutfitTool: StateToolDefinition = {
 				entry.name.toLowerCase().includes(value.toLowerCase())
 			);
 			const entry = exact ?? (fuzzy.length === 1 ? fuzzy[0] : undefined);
-			if (
+			if (entry?.kind === 'accessory') {
+				slot = ACCESSORY_SLOT;
+			} else if (
 				entry?.kind !== undefined &&
 				entry.kind !== 'any' &&
 				OUTFIT_SLOTS.includes(entry.kind as OutfitSlot)
@@ -206,8 +221,56 @@ export const setOutfitTool: StateToolDefinition = {
 		}
 		if (slot === undefined) {
 			throw new Error(
-				`未知槽位：${String(args.slot ?? '')}，可用：帽子/上衣/内衣/内裤/下装/袜子/鞋`
+				`未知槽位：${String(args.slot ?? '')}，可用：帽子/上衣/内衣/内裤/下装/袜子/鞋/配饰`
 			);
+		}
+		// 配饰是多件列表槽位：增删/清空独立处理。
+		if (slot === ACCESSORY_SLOT) {
+			const current = ctx.getState().outfit.accessories;
+			const action = typeof args.action === 'string' ? args.action.trim().toLowerCase() : 'add';
+			if (value === null || action === 'clear') {
+				if (current.length > 0) {
+					await ctx.update(
+						{ outfit: { accessories: [] } },
+						{ desc: 'AI 更换穿着：配饰 → 无' }
+					);
+				}
+				return '已清空配饰';
+			}
+			const wardrobe = ctx.getState().outfit.wardrobe;
+			const exact = wardrobe.find((entry) => entry.name === value);
+			const lower = value.toLowerCase();
+			const fuzzy = wardrobe.filter((entry) => entry.name.toLowerCase().includes(lower));
+			const entry = exact ?? (fuzzy.length === 1 ? fuzzy[0] : undefined);
+			if (entry === undefined || !matchesSlotKind(entry.kind, ACCESSORY_SLOT)) {
+				throw new Error(
+					`衣柜中没有可用的配饰「${value}」${fuzzy.length > 1 ? '（名称有歧义）' : ''}，可选配饰：${
+						wardrobe
+							.filter((item) => matchesSlotKind(item.kind, ACCESSORY_SLOT))
+							.map((item) => item.name)
+							.join('、') || '（暂无）'
+					}`
+				);
+			}
+			const name = entry.name;
+			if (action === 'remove') {
+				if (!current.includes(name)) {
+					return `当前配饰中没有「${name}」`;
+				}
+				await ctx.update(
+					{ outfit: { accessories: current.filter((item) => item !== name) } },
+					{ desc: `AI 更换穿着：移除配饰 → ${name}` }
+				);
+				return `已移除配饰「${name}」`;
+			}
+			if (current.includes(name)) {
+				return `已佩戴配饰「${name}」`;
+			}
+			await ctx.update(
+				{ outfit: { accessories: [...current, name] } },
+				{ desc: `AI 更换穿着：配饰 → ${name}` }
+			);
+			return `已添加配饰「${name}」`;
 		}
 		const slotKey = slot;
 		if (value !== null) {
@@ -246,8 +309,11 @@ export const setOutfitTool: StateToolDefinition = {
 	}
 };
 
-/** 衣物 kind 是否适用于该槽位（any/未标注视为通用）。 */
-function matchesSlotKind(kind: ClothingKind | undefined, slot: OutfitSlot): boolean {
+/** 衣物 kind 是否适用于该槽位（any/未标注视为通用）；配饰是列表槽位。 */
+function matchesSlotKind(
+	kind: ClothingKind | undefined,
+	slot: OutfitSlot | typeof ACCESSORY_SLOT
+): boolean {
 	return kind === undefined || kind === 'any' || kind === slot;
 }
 

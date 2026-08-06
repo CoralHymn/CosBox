@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { AttributeValue, CharacterState, OutfitSlot, StatePatch } from '../core/types';
+	import AccessoryPicker from './AccessoryPicker.svelte';
 	import OutfitSlotPicker from './OutfitSlotPicker.svelte';
 
 	interface AttributeRow {
@@ -24,11 +25,11 @@
 		{ key: 'shoes', label: '鞋' }
 	];
 
-	let accessories = $state('');
+	// attrs 同时被用户编辑与外部状态同步，不能改写成只读 derived。
+	// eslint-disable-next-line svelte/prefer-writable-derived
 	let attrs = $state<AttributeRow[]>([]);
 
 	$effect(() => {
-		accessories = characterState.outfit.accessories.join('，');
 		attrs = Object.entries(characterState.attributes).map(([key, value]) => ({
 			key,
 			value: String(value)
@@ -39,20 +40,6 @@
 		const patch: Partial<typeof characterState.outfit> = {};
 		patch[slot] = value;
 		onUpdate({ outfit: patch }, '更新穿着');
-	}
-
-	function commitAccessories(): void {
-		onUpdate(
-			{
-				outfit: {
-					accessories: accessories
-						.split(/[,，]/)
-						.map((part) => part.trim())
-						.filter((part) => part !== '')
-				}
-			},
-			'更新穿着'
-		);
 	}
 
 	function parseAttribute(raw: string): AttributeValue | undefined {
@@ -116,15 +103,13 @@
 					onCommit={(value) => commitSlot(slot.key, value)}
 				/>
 			{/each}
-			<div class="field">
-				<label for="outfit-accessories">配饰（逗号分隔）</label>
-				<input
-					id="outfit-accessories"
-					class="input"
-					bind:value={accessories}
-					onchange={commitAccessories}
-				/>
-			</div>
+			<AccessoryPicker
+				idPrefix="outfit"
+				label="配饰"
+				value={characterState.outfit.accessories}
+				wardrobe={characterState.outfit.wardrobe}
+				onCommit={(next) => onUpdate({ outfit: { accessories: next } }, '更新穿着')}
+			/>
 		</div>
 	</div>
 
