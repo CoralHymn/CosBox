@@ -65,11 +65,13 @@
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
 	import { downloadBytes, downloadTextFile } from '../lib/utils/download';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
+	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
 	import LocationsPanel from '../lib/components/LocationsPanel.svelte';
 	import NavRail from '../lib/components/NavRail.svelte';
 	import SchedulePanel from '../lib/components/SchedulePanel.svelte';
 	import SettingsPanel from '../lib/components/SettingsPanel.svelte';
+	import StatePreview from '../lib/components/StatePreview.svelte';
 	import StatePanel from '../lib/components/StatePanel.svelte';
 	import Toasts from '../lib/components/Toasts.svelte';
 	import VersionPanel from '../lib/components/VersionPanel.svelte';
@@ -91,8 +93,12 @@
 	const searchClient = new WebSearchClient();
 
 	let tab = $state<TabId>('chat');
+	/** 是否处于移动端视口（≤768px）：决定是否渲染抽屉/状态浮层等移动端元素。 */
+	let isMobile = $state(false);
 	/** 移动端左侧抽屉导航是否打开。 */
 	let mobileNavOpen = $state(false);
+	/** 移动端顶栏「实时状态」下拉是否打开。 */
+	let mobileStateOpen = $state(false);
 	let busy = $state(false);
 	let searching = $state(false);
 	let ready = $state(false);
@@ -131,6 +137,17 @@
 	const searchSupported = $derived(
 		settings.config.webSearch.enabled && settings.config.webSearch.apiKey.trim() !== ''
 	);
+
+	/** 监听视口宽度，移动端才渲染汉堡菜单与状态浮层（桌面端 DOM 不受影响）。 */
+	$effect(() => {
+		const query = window.matchMedia('(max-width: 768px)');
+		const update = (): void => {
+			isMobile = query.matches;
+		};
+		update();
+		query.addEventListener('change', update);
+		return () => query.removeEventListener('change', update);
+	});
 
 	/** 移动端抽屉打开时支持 Esc 关闭。 */
 	$effect(() => {
@@ -698,19 +715,31 @@
 
 <div class="app" class:nav-open={mobileNavOpen}>
 	<header class="header">
-		<button
-			class="mobile-nav-toggle"
-			aria-label="打开菜单"
-			title="菜单"
-			onclick={() => (mobileNavOpen = !mobileNavOpen)}
-		>
-			☰
-		</button>
+		{#if isMobile}
+			<button
+				class="mobile-nav-toggle"
+				aria-label="打开菜单"
+				title="菜单"
+				onclick={() => (mobileNavOpen = !mobileNavOpen)}
+			>
+				☰
+			</button>
+		{/if}
 		<div class="brand">
 			<span class="brand-mark">C</span>
 			<span>CosBox</span>
 		</div>
 		<div class="header-spacer"></div>
+		{#if ready && isMobile}
+			<button
+				class="mobile-state-toggle"
+				aria-label="实时状态"
+				title="实时状态"
+				onclick={() => (mobileStateOpen = !mobileStateOpen)}
+			>
+				{formatWorldTime(session.state.schedule.time)} · {session.state.location.name}
+			</button>
+		{/if}
 		{#if ready}
 			<span class="chip"
 				><span class="dot"></span>{formatWorldTime(session.state.schedule.time)}</span
@@ -723,13 +752,41 @@
 		{/if}
 	</header>
 
+	{#if isMobile && mobileStateOpen}
+		<div class="mobile-state-panel" role="dialog" aria-label="实时状态">
+			<div class="mobile-state-head">
+				<span>实时状态</span>
+				<button
+					class="btn btn-small"
+					aria-label="关闭状态面板"
+					onclick={() => (mobileStateOpen = false)}>关闭</button
+				>
+			</div>
+			<div class="mobile-state-body">
+				<StatePreview characterState={session.state} />
+				<ContextPanel
+					config={settings.config}
+					context={lastContext.bundle}
+					usage={lastContext.usage}
+					compaction={lastContext.compaction}
+					autoCompact={settings.config.autoCompact === true}
+					compactThreshold={settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD}
+					{compacting}
+					onCompactNow={handleCompactNow}
+				/>
+			</div>
+		</div>
+	{/if}
+
 	<div class="body">
-		<div
-			class="nav-backdrop"
-			class:show={mobileNavOpen}
-			role="presentation"
-			onclick={() => (mobileNavOpen = false)}
-		></div>
+		{#if isMobile}
+			<div
+				class="nav-backdrop"
+				class:show={mobileNavOpen}
+				role="presentation"
+				onclick={() => (mobileNavOpen = false)}
+			></div>
+		{/if}
 		<NavRail
 			active={tab}
 			onSelect={(next) => {

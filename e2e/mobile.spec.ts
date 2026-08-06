@@ -28,9 +28,11 @@ test('移动端：左侧抽屉导航 + 右上角状态浮层 + 聊天可用 + �
 	await page.locator('.nav-rail').getByRole('button', { name: /对话/ }).click();
 	await expect(page.getByPlaceholder(/输入消息/)).toBeVisible();
 
-	// 右上角状态浮层：打开 → 可见 → 关闭
+	// 顶栏状态开关显示时间 + 地点，点击展开浮层
 	const stateToggle = page.getByRole('button', { name: '实时状态' });
 	await expect(stateToggle).toBeVisible();
+	await expect(stateToggle).toContainText('周一 08:00');
+	await expect(stateToggle).toContainText('学院正门');
 	await stateToggle.click();
 	const stateDialog = page.getByRole('dialog', { name: '实时状态' });
 	await expect(stateDialog).toBeVisible();

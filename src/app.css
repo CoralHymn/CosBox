@@ -1156,17 +1156,15 @@ button:disabled {
 	.mobile-state-toggle {
 		display: inline-flex;
 		align-items: center;
+		justify-content: center;
 		gap: 6px;
-		position: fixed;
-		top: 52px;
-		right: 10px;
-		z-index: 40;
-		max-width: 44vw;
+		flex: 1;
+		min-width: 0;
 		padding: 5px 10px;
 		border-radius: 999px;
 		border: 1px solid var(--border);
 		background: var(--panel-2);
-		color: var(--text-dim);
+		color: var(--text);
 		font-size: 12px;
 		white-space: nowrap;
 		overflow: hidden;
@@ -1175,7 +1173,7 @@ button:disabled {
 
 	.mobile-state-panel {
 		position: fixed;
-		top: 90px;
+		top: 52px;
 		right: 10px;
 		width: min(320px, calc(100vw - 20px));
 		max-height: 58vh;
