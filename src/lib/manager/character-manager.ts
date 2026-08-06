@@ -97,6 +97,16 @@ export class CharacterManager {
 		return this.conversation;
 	}
 
+	/**
+	 * 重建任意快照处的角色状态（含世界配置覆盖），不改动当前 head。
+	 * 供「手动状态确认」等需要按历史时刻判断状态的场景使用。
+	 */
+	async getStateAt(targetId: string): Promise<CharacterState> {
+		await this.ensureInit();
+		const rebuilt = await this.deps.snapshots.rebuildState(targetId);
+		return applyConfigOverrides(rebuilt.state, this.configOverrides);
+	}
+
 	/** 全部快照节点（按时间升序）。 */
 	getSnapshots(): SnapshotNode[] {
 		return this.snapshots;

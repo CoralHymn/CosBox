@@ -1,5 +1,5 @@
 import { addMinutes, formatWorldTime, minutesSinceMidnight } from '../core/state';
-import type { ChatMessageView, WorldTime } from '../core/types';
+import type { CharacterState, ChatMessageView, WorldTime } from '../core/types';
 import { buildContext, type ContextBundle, type ContextPipelineInput } from '../context/pipeline';
 import { excludeFromContext } from '../context/history';
 import {
@@ -707,26 +707,59 @@ export class ChatService {
 							? { thinking: currentResult.thinking }
 							: {})
 					};
-		const judge = await runStateJudge({
+		const result = await this.confirmStateForTurn({
 			state: input.state,
 			lastUser,
 			lastAssistant: currentAssistant,
-			client: this.client,
 			config,
+			tools: options.tools,
+			toolContext: options.toolContext,
 			signal
+		});
+		return { executed: result.executed, rounds: result.rounds, debug: result.debug };
+	}
+
+	/**
+	 * 手动 LLM 状态确认：对指定一轮对话运行状态判断（不重新生成回复）。
+	 * 需要时由确认阶段执行状态工具，并返回执行反馈与完整调试视图；
+	 * 未开启工具 / 客户端不支持工具时直接返回空结果。
+	 */
+	async confirmStateForTurn(input: {
+		state: CharacterState;
+		lastUser: ChatMessageView | undefined;
+		lastAssistant: ChatMessageView | undefined;
+		config: LlmConfig;
+		tools: readonly StateToolDefinition[];
+		toolContext: StateToolContext;
+		signal?: AbortSignal;
+	}): Promise<{
+		executed: ExecutedToolCall[];
+		rounds: ReplyRound[];
+		debug: JudgeDebugView | null;
+	}> {
+		if (input.tools.length === 0 || this.client.chatWithTools === undefined) {
+			return { executed: [], rounds: [], debug: null };
+		}
+		const judge = await runStateJudge({
+			state: input.state,
+			lastUser: input.lastUser,
+			lastAssistant: input.lastAssistant,
+			client: this.client,
+			config: input.config,
+			signal: input.signal
 		});
 		if (!judge.needsTool) {
 			return { executed: [], rounds: [], debug: judge.debug };
 		}
 		const confirmation = await runStateConfirmation({
 			state: input.state,
-			lastUser,
-			lastAssistant: currentAssistant,
+			lastUser: input.lastUser,
+			lastAssistant: input.lastAssistant,
 			client: this.client,
-			config,
-			tools: options.tools,
-			toolContext: options.toolContext,
-			signal
+			config: input.config,
+			tools: input.tools,
+			toolContext: input.toolContext,
+			signal: input.signal
 		});
 		const debug: JudgeDebugView = {
 			...judge.debug,

@@ -95,6 +95,60 @@ test('状态编辑生成快照并在预览中反映', async ({ page }) => {
 	await expect(page.getByText('红色风衣')).toBeVisible();
 });
 
+test('消息重试：回溯重新生成并可切换分支', async ({ page }) => {
+	await page.goto('/');
+	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
+	await page.getByRole('button', { name: '发送' }).click();
+	const reply = page.locator('.message.assistant').first();
+	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
+
+	// 先把旧回复改成可区分的文本，便于验证分支切换
+	await reply.hover();
+	await reply.getByRole('button', { name: '编辑消息' }).click();
+	await reply.locator('.inline-edit').fill('（编辑后）旧分支回复');
+	await reply.getByRole('button', { name: '保存' }).click();
+	await expect(reply.getByText('（编辑后）旧分支回复')).toBeVisible();
+
+	// 重试：回溯到该回复之前重新生成（演示模式恢复确定性原文）
+	await reply.hover();
+	await reply.getByRole('button', { name: '重新生成' }).click();
+	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
+
+	// 分支切换：< > 悬浮出现在消息气泡下方，可在旧分支与新分支之间往返
+	await reply.hover();
+	await reply.getByRole('button', { name: '切换为更早的分支' }).click();
+	await expect(reply.getByText('（编辑后）旧分支回复')).toBeVisible();
+
+	await reply.hover();
+	await reply.getByRole('button', { name: '切换为更新的分支' }).click();
+	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
+});
+
+test('手动 LLM 状态确认：灯泡按钮补执行状态工具', async ({ page }) => {
+	await page.goto('/');
+	// 灯泡按钮依赖「允许 AI 自主修改状态」开关
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#ai-tools-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await page.getByRole('button', { name: /对话/ }).click();
+
+	await page.getByPlaceholder(/输入消息/).fill('时间推进，过了一段时间');
+	await page.getByRole('button', { name: '发送' }).click();
+	const bubble = page.locator('.message.assistant').first();
+	await expect(bubble.getByText(/演示模式回应/)).toBeVisible();
+
+	const toolFeedback = page.locator('.message.system', { hasText: '【工具调用】' });
+	// 原生 demo 已按关键词调用一次 advance_time
+	await expect(toolFeedback).toHaveCount(1);
+
+	// 点击灯泡：LLM 判断需要变更并补执行 advance_time
+	await bubble.hover();
+	await bubble.getByRole('button', { name: 'LLM 状态确认' }).click();
+
+	await expect(toolFeedback).toHaveCount(2);
+	await expect(page.getByText('LLM 状态判断已同步 1 项变更')).toBeVisible();
+});
+
 test('版本页切换回退状态与对话', async ({ page }) => {
 	await page.goto('/');
 

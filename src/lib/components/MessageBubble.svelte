@@ -9,9 +9,21 @@
 		onEdit?: (id: string, content: string) => Promise<void>;
 		/** 生成中禁用编辑，避免与流式草稿冲突。 */
 		disabled?: boolean;
+		/** 提供时显示「重新生成」按钮（assistant 消息）：回溯到该回复之前重新生成。 */
+		onRetry?: (id: string) => void;
+		/** 提供时显示「LLM 状态确认」按钮（assistant 消息）：手动触发状态判断并补执行工具。 */
+		onConfirmState?: (id: string) => void;
+		/** 提供时在气泡下方显示分支切换 < >（存在与当前分支在该消息处岔开的备选分支）。 */
+		branchNav?: {
+			canPrev: boolean;
+			canNext: boolean;
+			onPrev: () => void;
+			onNext: () => void;
+		} | null;
 	}
 
-	let { message, onEdit, disabled = false }: Props = $props();
+	let { message, onEdit, disabled = false, onRetry, onConfirmState, branchNav = null }: Props =
+		$props();
 
 	const roleLabel: Record<ChatMessageView['role'], string> = {
 		user: '你',
@@ -24,6 +36,9 @@
 			!disabled &&
 			message.id !== 'stream-draft' &&
 			(message.role === 'user' || message.role === 'assistant')
+	);
+	const actionable = $derived(
+		!disabled && message.id !== 'stream-draft' && message.role === 'assistant'
 	);
 	let editing = $state(false);
 	let draft = $state('');
@@ -112,7 +127,7 @@
 	{:else}
 		{message.content}
 	{/if}
-	{#if editable}
+	{#if editable || branchNav !== null}
 		<!-- 悬浮消息时在底部显示操作图标；编辑态常驻显示保存/取消（对齐主流聊天客户端）。 -->
 		<div class="message-actions" class:show={editing}>
 			{#if editing}
@@ -169,8 +184,101 @@
 						<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
 					</svg>
 				</button>
+				{#if actionable && onRetry !== undefined}
+					<button
+						class="icon-btn"
+						title="重新生成：回溯到本条消息之前重新发送"
+						aria-label="重新生成"
+						onclick={() => onRetry(message.id)}
+					>
+						<svg
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M21 12a9 9 0 1 1-2.64-6.36" />
+							<path d="M21 3v6h-6" />
+						</svg>
+					</button>
+				{/if}
+				{#if actionable && onConfirmState !== undefined}
+					<button
+						class="icon-btn"
+						title="LLM 状态确认：让 AI 判断本轮是否需要更新状态并补执行工具"
+						aria-label="LLM 状态确认"
+						onclick={() => onConfirmState(message.id)}
+					>
+						<svg
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M9 18h6" />
+							<path d="M10 22h4" />
+							<path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2h6c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z" />
+						</svg>
+					</button>
+				{/if}
 			{/if}
 		</div>
+		{#if branchNav !== null}
+			<div class="branch-nav" aria-label="切换分支">
+				<button
+					class="icon-btn"
+					title="切换为更早的分支"
+					aria-label="切换为更早的分支"
+					disabled={!branchNav.canPrev}
+					onclick={branchNav.onPrev}
+				>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="m15 18-6-6 6-6" />
+					</svg>
+				</button>
+				<button
+					class="icon-btn"
+					title="切换为更新的分支"
+					aria-label="切换为更新的分支"
+					disabled={!branchNav.canNext}
+					onclick={branchNav.onNext}
+				>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="m9 18 6-6-6-6" />
+					</svg>
+				</button>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -191,6 +299,22 @@
 	.message:hover .message-actions,
 	.message:focus-within .message-actions,
 	.message-actions.show {
+		opacity: 1;
+		pointer-events: auto;
+	}
+	.branch-nav {
+		position: absolute;
+		left: 50%;
+		transform: translateX(-50%);
+		bottom: 4px;
+		display: flex;
+		gap: 2px;
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 0.12s ease;
+	}
+	.message:hover .branch-nav,
+	.message:focus-within .branch-nav {
 		opacity: 1;
 		pointer-events: auto;
 	}
