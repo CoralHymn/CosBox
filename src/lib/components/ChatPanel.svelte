@@ -44,6 +44,10 @@
 		onSend: (content: string, options: { search: boolean }) => void;
 		/** 编辑已有消息正文（user/assistant），保存后原地改写快照。 */
 		onEditMessage?: (id: string, content: string) => Promise<void>;
+		/** 最近消息日志（从最近一次用户发言开始，流式实时追加）。 */
+		recentLog: string;
+		/** 导出最近日志。 */
+		onExportLog: () => void;
 		/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
 		streamingDraft: string | null;
 	}
@@ -68,6 +72,8 @@
 		onPreview,
 		onSend,
 		onEditMessage,
+		recentLog,
+		onExportLog,
 		streamingDraft
 	}: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
@@ -286,6 +292,17 @@
 					</div>
 				</div>
 			{/if}
+		{/if}
+		{#if recentLog.trim() !== ''}
+			<div class="log-bar">
+				<span class="muted">
+					最近日志：{recentLog.split('\n\n').length} 段
+					{#if streamingDraft !== null}
+						（记录中…）
+					{/if}
+				</span>
+				<button class="btn btn-small" onclick={onExportLog}>导出最近日志</button>
+			</div>
 		{/if}
 		<ChatInput
 			disabled={busy}

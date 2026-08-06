@@ -66,6 +66,7 @@
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
 	import { downloadBytes, downloadTextFile } from '../lib/utils/download';
+	import { buildRecentLog } from '../lib/utils/recent-log';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
@@ -124,6 +125,8 @@
 	let compacting = $state(false);
 	/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
 	let streamingDraft = $state<string | null>(null);
+	/** 最近消息日志：从最近一次用户发言开始实时记录，再次发言时重置。 */
+	let recentLog = $state('');
 	/** 最近一次 LLM 状态判断的调试视图（开发者模式查看）。 */
 	let lastJudgeDebug = $state<JudgeDebugView | null>(null);
 
@@ -203,9 +206,19 @@
 		try {
 			const command = parseSlashCommand(content);
 			if (command !== null) {
+				// 斜杠命令也是用户输入：重置日志并记录其产生的系统反馈。
+				const beforeCount = session.conversation.length;
+				recentLog = `[用户] ${content}`;
 				await handleSlashCommand(command);
+				for (const message of session.conversation.slice(beforeCount)) {
+					if (message.role === 'system') {
+						recentLog += `\n\n[系统] ${message.content}`;
+					}
+				}
 				return;
 			}
+			// 普通发言：重置最近日志，从本条用户发言开始实时记录。
+			recentLog = `[用户] ${content}`;
 			if (options.search) {
 				searching = true;
 				try {
@@ -261,6 +274,8 @@
 				onDelta: (delta) => {
 					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
 					streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
+					// 实时追加流式内容到最近日志。
+					recentLog += delta;
 				},
 				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 				toolContext: {
@@ -313,6 +328,9 @@
 						: '模型返回了空回复，本轮未追加消息，请重试或换一种说法。'
 				);
 			}
+			// 生成完成：用权威数据（轮次叙事/工具反馈/思考/最终回复）重建日志，
+			// 保证与落库内容完全一致（覆盖流式期间的原始追加）。
+			recentLog = buildRecentLog(session.conversation);
 		} catch (err) {
 			toasts.error(err);
 		} finally {
@@ -764,6 +782,16 @@
 			toasts.error(err);
 		}
 	}
+
+	/** 导出最近消息日志（从最近一次用户发言开始的全部文本）。 */
+	function handleExportLog(): void {
+		if (recentLog.trim() === '') {
+			toasts.push('info', '暂无最近日志，发送一条消息后即可导出');
+			return;
+		}
+		downloadTextFile(`cosbox-log-${stamp()}.txt`, recentLog);
+		toasts.success('最近日志已导出');
+	}
 </script>
 
 <div class="app" class:nav-open={mobileNavOpen}>
@@ -873,6 +901,8 @@
 					onPreview={handlePreview}
 					onSend={handleSend}
 					onEditMessage={handleEditMessage}
+					{recentLog}
+					onExportLog={handleExportLog}
 					{streamingDraft}
 				/>
 			{:else if tab === 'state'}

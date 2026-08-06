@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 /** 示例角色卡 JSON（chara_card_v3 规范）。 */
 const SAMPLE_CARD = JSON.stringify({
@@ -33,6 +34,22 @@ test('发送消息：演示模式回复并追加快照', async ({ page }) => {
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
 		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 2));
+});
+
+test('导出最近消息日志：从最近用户发言开始包含回复', async ({ page }) => {
+	await page.goto('/');
+	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
+	await page.getByRole('button', { name: '发送' }).click();
+	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByRole('button', { name: '导出最近日志' }).click();
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toMatch(/^cosbox-log-\d{8}-\d{4}\.txt$/);
+	const path = await download.path();
+	const content = readFileSync(path!, 'utf8');
+	expect(content).toContain('[用户] 你好，绫音');
+	expect(content).toContain('[角色] （演示模式回应）');
 });
 
 test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
