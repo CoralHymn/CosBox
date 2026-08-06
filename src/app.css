@@ -503,7 +503,8 @@ button:disabled {
 	padding: 22px 24px;
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
+	/* 气泡下方为操作条预留空间（消息本身 + 4px 间距 + 24px 控制条）。 */
+	gap: 8px;
 }
 
 .message {
@@ -1268,7 +1269,7 @@ button:disabled {
 	}
 
 	/* 触屏下常显消息操作图标（桌面 hover 在触屏上不可用） */
-	.message .message-actions {
+	.message-row .message-controls {
 		opacity: 1 !important;
 		pointer-events: auto !important;
 	}
