@@ -231,6 +231,19 @@ export function applyProviderPreset(config: LlmConfig, preset: LlmProviderPreset
 	};
 }
 
+/**
+ * 判断配置是否指向 DeepSeek 思考系模型。
+ * DeepSeek V4（model 名含 `deepseek-*`）的思考模式不接受 `tool_choice` 参数，
+ * 强发 `tool_choice: "required"` 会返回 400，因此 CosBox 在此类模型上放弃强制工具调用，
+ * 改用「强提示 + 非流式重试」。
+ * 通过 providerId 与模型名双方面检查，兼容第三方代理（如 SiliconFlow 的 `deepseek-ai/DeepSeek-V3`）。
+ */
+export function isDeepSeekModel(config: Pick<LlmConfig, 'providerId' | 'model'>): boolean {
+	const model = config.model.toLowerCase();
+	const providerId = config.providerId.toLowerCase();
+	return providerId === 'deepseek' || model.includes('deepseek');
+}
+
 /** LLM 配置补丁：webSearch 允许部分字段（兼容旧版本存档）。 */
 export interface LlmConfigPatch {
 	provider?: LlmConfig['provider'];

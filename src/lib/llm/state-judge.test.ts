@@ -62,10 +62,12 @@ describe('buildJudgeSystemPrompt / buildJudgeUserPayload', () => {
 	it('系统提示包含状态、严格输出要求与禁止安全拒绝', () => {
 		const prompt = buildJudgeSystemPrompt(createInitialState());
 		expect(prompt).toContain('【当前状态】');
-		expect(prompt).toContain('只输出 True 或 False');
+		expect(prompt).toContain('json 格式');
+		expect(prompt).toContain('{"needsTool": true}');
+		expect(prompt).toContain('{"needsTool": false}');
 		expect(prompt).toContain('最高优先级指令');
 		expect(prompt).toContain('泳衣');
-		expect(prompt).toContain('只有完全确认没有任何变化才输出 False');
+		expect(prompt).toContain('只有完全确认没有任何变化才输出 {"needsTool": false}');
 		expect(prompt).toContain('禁止以任何安全');
 	});
 
@@ -116,6 +118,74 @@ describe('runStateJudge', () => {
 			config
 		});
 		expect(result.needsTool).toBe(false);
+	});
+
+	it('输出 JSON {"needsTool": true} 时判定需要工具', async () => {
+		const result = await runStateJudge({
+			state: createInitialState(),
+			lastUser,
+			lastAssistant,
+			client: clientReturning('{"needsTool": true}'),
+			config
+		});
+		expect(result.needsTool).toBe(true);
+		expect(result.debug.output).toBe('{"needsTool": true}');
+	});
+
+	it('输出 JSON {"needsTool": false} 时判定无需工具', async () => {
+		const result = await runStateJudge({
+			state: createInitialState(),
+			lastUser,
+			lastAssistant,
+			client: clientReturning('{"needsTool": false}'),
+			config
+		});
+		expect(result.needsTool).toBe(false);
+	});
+
+	it('输出带 json 围栏的对象时同样解析', async () => {
+		const result = await runStateJudge({
+			state: createInitialState(),
+			lastUser,
+			lastAssistant,
+			client: clientReturning('```json\n{"needsTool": false}\n```'),
+			config
+		});
+		expect(result.needsTool).toBe(false);
+	});
+
+	it('判断请求以 jsonMode 发送（response_format 结构化输出）', async () => {
+		const chat = vi.fn<LlmClient['chat']>(async () => ({
+			content: '{"needsTool": false}',
+			toolCalls: []
+		}));
+		const result = await runStateJudge({
+			state: createInitialState(),
+			lastUser,
+			lastAssistant,
+			client: { chat },
+			config
+		});
+		expect(result.needsTool).toBe(false);
+		expect(chat.mock.calls[0]![4]).toEqual({ jsonMode: true });
+		expect(chat.mock.calls[0]![1]).toMatchObject({ maxTokens: 64, temperature: 0 });
+	});
+
+	it('jsonMode 请求失败时回退普通请求并仍可解析', async () => {
+		const chat = vi
+			.fn<LlmClient['chat']>()
+			.mockRejectedValueOnce(new Error('response_format not supported'))
+			.mockResolvedValueOnce({ content: 'false', toolCalls: [] });
+		const result = await runStateJudge({
+			state: createInitialState(),
+			lastUser,
+			lastAssistant,
+			client: { chat },
+			config
+		});
+		expect(result.needsTool).toBe(false);
+		expect(chat).toHaveBeenCalledTimes(2);
+		expect(chat.mock.calls[1]![4]).toBeUndefined();
 	});
 
 	it('输出含糊内容时按需要执行处理且保留原始输出', async () => {

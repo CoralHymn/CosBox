@@ -94,7 +94,9 @@ export interface LlmClient {
 		messages: ChatMessage[],
 		config: LlmConfig,
 		signal?: AbortSignal,
-		onDelta?: (delta: string) => void
+		onDelta?: (delta: string) => void,
+		/** 强制模型输出 JSON 对象（response_format: json_object）；部分端点不支持。 */
+		options?: { jsonMode?: boolean }
 	): Promise<LlmChatResult>;
 	/** 上下文压缩用的延续摘要；不实现时由 ChatService 用 chat 兜底。 */
 	summarize?(
@@ -108,8 +110,8 @@ export interface LlmClient {
 		config: LlmConfig,
 		signal?: AbortSignal,
 		onDelta?: (delta: string) => void,
-		/** 强制模型至少发出一个工具调用（tool_choice=required）；部分端点不支持会报错。 */
-		options?: { forceToolCall?: boolean }
+		/** 强制模型至少发出一个工具调用（tool_choice=required）或 JSON 对象输出。 */
+		options?: { forceToolCall?: boolean; jsonMode?: boolean }
 	): Promise<LlmChatResult>;
 }
 

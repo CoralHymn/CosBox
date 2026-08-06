@@ -4,6 +4,7 @@ import {
 	applyProviderPreset,
 	CUSTOM_PROVIDER_ID,
 	findProviderPreset,
+	isDeepSeekModel,
 	LLM_PROVIDER_PRESETS,
 	normalizeLlmConfig
 } from './providers';
@@ -51,6 +52,21 @@ describe('applyProviderPreset', () => {
 		expect(result.model).toBe(preset.defaultModel);
 		expect(result.apiKey).toBe('keep-me');
 		expect(result.webSearch).toEqual(DEFAULT_LLM_CONFIG.webSearch);
+	});
+});
+
+describe('isDeepSeekModel', () => {
+	it('providerId 或模型名命中 DeepSeek 时返回 true', () => {
+		expect(isDeepSeekModel({ providerId: 'deepseek', model: 'deepseek-v4-flash' })).toBe(true);
+		expect(isDeepSeekModel({ providerId: 'custom', model: 'deepseek-v4-pro' })).toBe(true);
+		expect(
+			isDeepSeekModel({ providerId: 'siliconflow', model: 'deepseek-ai/DeepSeek-V3' })
+		).toBe(true);
+	});
+
+	it('非 DeepSeek 配置返回 false', () => {
+		expect(isDeepSeekModel({ providerId: 'custom', model: 'gpt-4o-mini' })).toBe(false);
+		expect(isDeepSeekModel({ providerId: 'openai', model: 'gpt-5.6-terra' })).toBe(false);
 	});
 });
 

@@ -912,3 +912,32 @@ API Key 绝不能上传。
    保留原始流式输出比“重建为准”更能暴露流式阶段的真实问题。
    **代价**：流式模式下多轮回合的正文在日志中按实时追加顺序连排
    （无回合分隔，换取原始性）；日志仅覆盖最近一次用户发言之后（按需求设计）。
+
+## D72：DeepSeek V4 工具调用兼容与状态判断的 JSON 输出
+
+**问题**：
+
+1. DeepSeek V4 思考模式（deepseek-v4-flash/pro）的 OpenAI 兼容接口
+   `supportsToolChoice: false`，`tool_choice: "required"` 会直接返回 400。
+   此前「强制补调」第二档（`retryPlannedTool` / `retryTimeClaim`）固定发送
+   `tool_choice=required`，对 DeepSeek 每次都失败并被 catch 静默吞掉——
+   代码确实限制了 AI 的工具发挥，而非模型本身不调用。
+2. LLM 状态确认只靠提示词要求「输出 True/False」，不稳定；DeepSeek 官方
+   JSON Output（`response_format: json_object`）可保证合法 JSON 对象输出。
+
+**选择**：
+
+1. 新增 `isDeepSeekModel(config)`（providerId === 'deepseek' 或模型名含
+   deepseek，兼容 SiliconFlow 等第三方代理）；`openai-client.buildRequestBody`
+   与 chat-service 的强制补调档统一跳过 `tool_choice`，DeepSeek 第二档退化为
+   「强提示 + 非流式重试」（非流式仍可绕开代理丢失 tool_calls 的问题）。
+2. 状态判断改用 `jsonMode`（请求体带 `response_format: { type: 'json_object' }`），
+   提示词要求输出 `{"needsTool": true|false}`；`parseJudgeOutput` 兼容 JSON 对象、
+   裸布尔、带引号布尔与 ```json 围栏；端点不支持 response_format 时自动回退
+   普通请求。语义保持「只有明确 False 才跳过」，安全拒绝 / 含糊输出一律按需要执行。
+
+**理由**：符合 DeepSeek 官方 Tool Calls / JSON Mode 文档；在无 tool_choice 支持的
+思考模式下，「强提示 + 重试 + 宿主侧推断」是唯一可靠路径；JSON 结构化输出比
+提示词控制更稳定。
+**代价**：DeepSeek 思考模式无法「强制调用工具」，只能靠提示驱动，模型仍可能漏调，
+由宿主侧时间推断与 LLM 状态确认兜底；jsonMode 需要端点支持，不支持时多一次回退请求。

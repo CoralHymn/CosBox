@@ -387,6 +387,49 @@ describe('OpenAiCompatibleClient', () => {
 		expect(body.tool_choice).toBe('required');
 	});
 
+	it('DeepSeek 模型 forceToolCall 时不带 tool_choice（思考模式不接受）', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chatWithTools(
+			[{ role: 'user', content: 'hi' }],
+			TOOL_SCHEMAS,
+			{ ...config, providerId: 'deepseek', model: 'deepseek-v4-flash' },
+			undefined,
+			undefined,
+			{ forceToolCall: true }
+		);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body).not.toHaveProperty('tool_choice');
+		expect(body.tools).toBeDefined();
+	});
+
+	it('jsonMode 时请求体带 response_format=json_object', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('{"needsTool":false}'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chat([{ role: 'user', content: '判断' }], config, undefined, undefined, {
+			jsonMode: true
+		});
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.response_format).toEqual({ type: 'json_object' });
+	});
+
+	it('未设置 jsonMode 时不带 response_format', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chat([{ role: 'user', content: 'hi' }], config);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body).not.toHaveProperty('response_format');
+	});
+
 	it('未设置 forceToolCall 时不带 tool_choice', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(okResponse('好的'));

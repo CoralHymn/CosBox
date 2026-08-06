@@ -447,6 +447,27 @@ describe('ChatService', () => {
 		expect(chatWithTools.mock.calls[2]![5]).toEqual({ forceToolCall: true });
 	});
 
+	it('agent 循环：DeepSeek 配置下强制补调退化为非流式重试（不带 tool_choice）', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '已经傍晚了。', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '好的。', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '好的。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			{ ...config, providerId: 'deepseek', model: 'deepseek-v4-flash' },
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		// DeepSeek V4 思考模式不接受 tool_choice，第二档改发非流式且不强制。
+		expect(chatWithTools.mock.calls[2]![5]).toEqual({ forceToolCall: false });
+	});
+
 	it('agent 循环：时间流逝措辞补调全部失败时，宿主侧推断推进时间并回写反馈', async () => {
 		const chatWithTools = vi
 			.fn()
@@ -598,7 +619,8 @@ describe('ChatService', () => {
 		expect(reply).toBe('（笑）嗯。');
 		// 判断 LLM 收到的是系统提示 + 最近对话载荷
 		const judgeMessages = chat.mock.calls[0]![0] as ChatMessage[];
-		expect(judgeMessages[0]!.content).toContain('只输出 True 或 False');
+		expect(judgeMessages[0]!.content).toContain('json 格式');
+		expect(judgeMessages[0]!.content).toContain('{"needsTool": true}');
 	});
 
 	it('LLM 状态确认：判断为 False 时不执行工具', async () => {
