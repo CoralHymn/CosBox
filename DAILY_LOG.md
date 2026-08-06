@@ -1555,3 +1555,23 @@ CosBox 之前没有该机制，导致模型继续输出、工具始终没执行�
 
 - 单元测试：全量 598 个全过；39 条 e2e 全过（日志导出用例改为先开启
   开发者模式）；build / check / lint 全绿。
+
+## 2026-08-06：修复「保存设置失败：settings.sync」
+
+### 现象与根因
+
+点击保存设置报「保存设置失败：settings.sync」。根因：`saveSync` 把
+Svelte 5 `$state` 响应式代理对象直接交给 IndexedDB 写入，structuredClone
+无法克隆代理（DataCloneError，与之前日程编辑 clone 崩溃同源）；
+其余设置保存的是局部普通对象所以正常，唯独 sync 读取的是 `$state` 变量。
+
+### 修复
+
+- `KvRepository.set` 在边界统一用 `clonePlain` 克隆后再写入
+  （structuredClone 失败自动回退 JSON），杜绝任何代理值写入崩溃；
+- `saveSync` 改用普通副本赋值与写入；
+- 新增回归测试：代理包装的值也能安全写入并读回。
+
+### 门禁
+
+- 单元测试：全量 599 个全过；39 条 e2e 全过；build / check / lint 全绿。

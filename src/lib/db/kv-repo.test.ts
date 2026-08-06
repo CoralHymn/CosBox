@@ -34,6 +34,15 @@ describe('KvRepository', () => {
 		expect(await repo.get<number>('k')).toBe(2);
 	});
 
+	it('Svelte 响应式代理值也能安全写入（structuredClone 兜底）', async () => {
+		const proxied = new Proxy({ dark: true, level: 3 }, {});
+		await repo.set('theme', proxied);
+		expect(await repo.get<{ dark: boolean; level: number }>('theme')).toEqual({
+			dark: true,
+			level: 3
+		});
+	});
+
 	it('remove 删除键', async () => {
 		await repo.set('k', 'v');
 		await repo.remove('k');
