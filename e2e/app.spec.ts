@@ -69,10 +69,11 @@ test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
 	// 操作条位于气泡下方，悬浮才显示：先 hover 整行再点编辑
 	await assistantRow.hover();
 	await assistantRow.getByRole('button', { name: '编辑消息' }).click();
-	const inlineEdit = bubble.locator('.inline-edit');
+	const inlineEdit = bubble.locator('textarea.inline-edit');
 	// 等待编辑区进入可编辑状态（原文由 effect 填充）
 	await expect(inlineEdit).toBeAttached();
 	await inlineEdit.fill('（编辑后）新的回应文本');
+	await expect(inlineEdit).toHaveValue('（编辑后）新的回应文本');
 	await assistantRow.getByRole('button', { name: '保存' }).click();
 
 	await expect(bubble.getByText('（编辑后）新的回应文本')).toBeVisible();
@@ -108,7 +109,8 @@ test('消息重试：回溯重新生成并可切换分支', async ({ page }) => 
 	// 先把旧回复改成可区分的文本，便于验证分支切换
 	await assistantRow.hover();
 	await assistantRow.getByRole('button', { name: '编辑消息' }).click();
-	await reply.locator('.inline-edit').fill('（编辑后）旧分支回复');
+	await reply.locator('textarea.inline-edit').fill('（编辑后）旧分支回复');
+	await expect(reply.locator('textarea.inline-edit')).toHaveValue('（编辑后）旧分支回复');
 	await assistantRow.getByRole('button', { name: '保存' }).click();
 	await expect(reply.getByText('（编辑后）旧分支回复')).toBeVisible();
 

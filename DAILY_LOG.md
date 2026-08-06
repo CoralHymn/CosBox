@@ -1709,3 +1709,32 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 ### 门禁
 
 - check / lint 全绿；重试、分支切换、手动状态确认相关 e2e 通过。
+
+## 2026-08-07（续）：定位并修复编辑保存竞态（textarea 双向绑定）
+
+### 根因
+
+「编辑 assistant 回复正文并原地落库」e2e 偶发失败（保存后气泡仍是旧文本）。
+逐项排除后确认：`contenteditable` 没有 Svelte 原生绑定，编辑链路存在两个
+毫秒级时序竞态——
+
+1. 进入编辑态靠 `$effect` 写 `textContent` 预填原文；保存链路中 conversation
+   重建会让 `message` prop 变化并重跑 `$effect`，在 `saveEdit` 尚未把
+   `editing` 置回 false 时把用户已输入文本覆盖回旧值；
+2. Playwright 对 `contenteditable` 的 `fill()` 不保证同步提交 input 事件，
+   保存读取 `editEl.textContent` 的时机依赖浏览器内部编辑状态。
+
+期间尝试过：`editInitialized` 一次性初始化守卫（修掉竞态 1，仍有约半数失败）、
+显式读写事务等提交完成（无效）、fill 后 `toHaveText` 等待（无效）。
+
+### 修复
+
+- 编辑区改为 `<textarea bind:value={draft}>`：`draft` 由 Svelte 双向绑定
+  维护，保存直接读 JS 变量，无 DOM 时序问题；
+- `$effect` 只负责聚焦与高度自适应（autoResize），不再写回文本；
+- e2e 选择器改为 `textarea.inline-edit`，断言改用 `toHaveValue`。
+
+### 门禁
+
+- 编辑 e2e 连跑 8/8 通过（此前约 1/6）；重试与手动状态确认 e2e 通过；
+  622 个单元测试全过；check / lint / build 全绿。

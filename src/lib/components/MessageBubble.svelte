@@ -56,7 +56,7 @@
 	let editing = $state(false);
 	let draft = $state('');
 	let saving = $state(false);
-	let editEl = $state<HTMLDivElement | null>(null);
+	let editEl = $state<HTMLTextAreaElement | null>(null);
 
 	/** 进入编辑态，草稿预填当前正文。 */
 	function startEdit(): void {
@@ -64,19 +64,26 @@
 		editing = true;
 	}
 
-	/** 编辑态聚焦编辑区，让用户直接开始打字。 */
+	/** 编辑态聚焦并让 textarea 高度跟随内容（draft 由 bind:value 双向绑定维护）。 */
 	$effect(() => {
 		if (editing && editEl !== null) {
-			// contenteditable 不会自动带入正文，进入编辑态时先把原文写入编辑区。
-			// eslint-disable-next-line svelte/no-dom-manipulating -- contenteditable 无 Svelte 原生绑定，必须直接写 textContent
-			editEl.textContent = message.content;
 			editEl.focus();
+			autoResize();
 		}
 	});
 
-	/** 从可编辑区同步草稿（contenteditable 无双向绑定，手动读取 textContent）。 */
+	/** 输入时自动撑高编辑区，让多行正文可见。 */
 	function onEditInput(): void {
-		draft = editEl?.textContent ?? '';
+		autoResize();
+	}
+
+	/** 高度跟随内容：先复位再取 scrollHeight。 */
+	function autoResize(): void {
+		if (editEl === null) {
+			return;
+		}
+		editEl.style.height = 'auto';
+		editEl.style.height = `${editEl.scrollHeight}px`;
 	}
 
 	/** Esc 取消；Ctrl/Cmd+Enter 保存。 */
@@ -96,8 +103,8 @@
 		}
 		saving = true;
 		try {
-			// 直接读编辑区当前文本，避免「输入事件未刷新 draft 就点了保存」的竞态。
-			const next = (editEl?.textContent ?? draft).trim();
+			// draft 由 bind:value 维护，读 JS 变量即可，无 DOM 时序问题。
+			const next = draft.trim();
 			if (next === '') {
 				return;
 			}
@@ -132,17 +139,16 @@
 			</details>
 		{/if}
 		{#if editing}
-			<!-- 直接在原文上编辑：contenteditable 高度与正文一致，切换编辑态零布局变动。 -->
-			<div
+			<!-- 用 textarea + bind:value 双向绑定，draft 始终与输入同步，
+			     保存直接读 JS 变量，不受 DOM/输入事件时序影响。 -->
+			<textarea
 				class="inline-edit"
-				contenteditable="plaintext-only"
-				role="textbox"
-				tabindex="0"
-				aria-label="编辑消息正文"
+				bind:value={draft}
 				bind:this={editEl}
+				aria-label="编辑消息正文"
 				oninput={onEditInput}
 				onkeydown={onEditKeydown}
-			></div>
+			></textarea>
 		{:else}
 			{message.content}
 		{/if}
@@ -373,13 +379,19 @@
 	.inline-edit {
 		width: 100%;
 		font: inherit;
-		line-height: inherit;
+		line-height: 1.55;
 		color: inherit;
 		white-space: pre-wrap;
 		word-break: break-word;
 		min-height: 1.55em;
 		outline: none;
 		caret-color: var(--accent);
+		background: transparent;
+		border: none;
+		padding: 0;
+		margin: 0;
+		resize: none;
+		overflow: hidden;
 	}
 	.inline-edit:focus {
 		outline: 1px solid var(--accent);
