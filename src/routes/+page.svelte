@@ -220,7 +220,6 @@
 			}
 			// 普通发言：重置最近日志，从本条用户发言开始实时记录。
 			recentLog = `[用户] ${content}`;
-			streamedAny = false;
 			if (options.search) {
 				searching = true;
 				try {
@@ -232,134 +231,233 @@
 				}
 			}
 			await session.addMessage('user', content);
-			const input: ContextPipelineInput = {
-				state: session.state,
-				conversation: session.conversation,
-				worldInfo: worldInfo.entries,
-				enableStateTools: settings.config.allowAiStateTools === true,
-				characterName:
-					settings.profile.name ||
-					(typeof session.state.attributes.name === 'string'
-						? session.state.attributes.name
-						: undefined),
-				systemPrompt: settings.profile.systemPrompt ?? undefined,
-				...(searchResults !== undefined ? { searchResults } : {})
-			};
-			const service = new ChatService(
-				settings.config.provider === 'demo' ? demoClient : openAiClient
-			);
-			const contextWindow = resolveContextWindow(
-				settings.config.modelContextWindow,
-				settings.config.model
-			);
-			const compactionOptions =
-				settings.config.autoCompact === true
-					? {
-							contextWindow,
-							threshold: settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD,
-							keepRecent: DEFAULT_KEEP_RECENT,
-							state: compactState
-						}
-					: undefined;
-			streamingDraft = '';
-			const {
-				reply,
-				debug,
-				bundle,
-				usage,
-				compaction,
-				thinking,
-				finishReason,
-				judgeDebug,
-				rounds
-			} = await service.generateReply(input, settings.config, {
-				onDelta: (delta) => {
-					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
-					streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
-					// 实时记录原始流式内容（不覆盖、不清洗），供排查流式专属问题。
-					recentLog += delta;
-					streamedAny = true;
-				},
-				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
-				toolContext: {
-					getState: () => session.state,
-					update: (patch, metadata) => session.update(patch, metadata),
-					advanceTime: (minutes) => session.advanceTime(minutes)
-				},
-				enableStateJudge: settings.config.llmStateConfirm === true,
-				...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
-			});
-			debugPrompt = debug;
-			lastJudgeDebug = judgeDebug;
-			lastContext = { bundle, usage: usage ?? null, compaction };
-			compactState = compaction;
-			streamingDraft = null;
-			// AI 一次回复可包含多段：每轮先落叙事文本，再把工具调用反馈持久化为
-			// 系统消息（前端可见、后续上下文持续携带）。
-			for (const round of rounds) {
-				if (round.content !== null && round.content.trim() !== '') {
-					await session.addMessage('assistant', round.content, {
-						thinking: round.thinking
-					});
-				}
-				for (const tool of round.tools) {
-					await session.addMessage('system', `【工具调用】${tool.name}：${tool.output}`);
-				}
-			}
-			const budgetExhausted = finishReason === 'length';
-			if (reply.trim() !== '') {
-				await session.addMessage('assistant', reply, { thinking });
-			} else if (thinking !== undefined && thinking.trim() !== '') {
-				// 模型只输出了思考过程、正文为空：保留思考（对话气泡可展开），正文留空。
-				await session.addMessage('assistant', '', { thinking });
-				if (finishReason === 'length') {
-					toasts.push(
-						'info',
-						'思考耗尽了 Max Tokens 预算，正文被截断。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
-					);
-				} else if (finishReason === 'stop') {
-					toasts.push(
-						'info',
-						'模型只输出思考、未生成正文就结束了（finish_reason=stop）。这通常是模型/端点的思考模式异常：可尝试关闭模型的思考模式、检查代理是否正确转发正文，或换用 DeepSeek 官方端点。'
-					);
-				}
-			} else {
-				toasts.push(
-					'info',
-					budgetExhausted
-						? '模型输出被 Max Tokens 上限截断，正文为空。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
-						: '模型返回了空回复，本轮未追加消息，请重试或换一种说法。'
-				);
-			}
-			// 生成完成：追加未流式输出但应记录的部分（思考、工具反馈），
-			// 以及非流式模式下没有实时记录的正文——绝不覆盖已实时记录的流式内容。
-			const additions: string[] = [];
-			for (const round of rounds) {
-				if (!streamedAny && round.content !== null && round.content.trim() !== '') {
-					additions.push(`[角色] ${round.content}`);
-				}
-				if (round.thinking !== undefined && round.thinking.trim() !== '') {
-					additions.push(`[角色思考] ${round.thinking}`);
-				}
-				for (const tool of round.tools) {
-					additions.push(`[工具] ${tool.name}：${tool.output}`);
-				}
-			}
-			if (!streamedAny && reply.trim() !== '') {
-				additions.push(`[角色] ${reply}`);
-			}
-			if (thinking !== undefined && thinking.trim() !== '') {
-				additions.push(`[角色思考] ${thinking}`);
-			}
-			if (additions.length > 0) {
-				recentLog += `\n\n${additions.join('\n\n')}`;
-			}
+			await runAiReply(searchResults);
 		} catch (err) {
 			toasts.error(err);
 		} finally {
 			streamingDraft = null;
 			busy = false;
 			searching = false;
+		}
+	}
+
+	/** 用当前会话状态生成回复并落库（普通发送与消息重试共用）；调用方需已设置 busy。 */
+	async function runAiReply(searchResults?: SearchResult[]): Promise<void> {
+		streamedAny = false;
+		const input: ContextPipelineInput = {
+			state: session.state,
+			conversation: session.conversation,
+			worldInfo: worldInfo.entries,
+			enableStateTools: settings.config.allowAiStateTools === true,
+			characterName:
+				settings.profile.name ||
+				(typeof session.state.attributes.name === 'string'
+					? session.state.attributes.name
+					: undefined),
+			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			...(searchResults !== undefined ? { searchResults } : {})
+		};
+		const service = new ChatService(
+			settings.config.provider === 'demo' ? demoClient : openAiClient
+		);
+		const contextWindow = resolveContextWindow(
+			settings.config.modelContextWindow,
+			settings.config.model
+		);
+		const compactionOptions =
+			settings.config.autoCompact === true
+				? {
+						contextWindow,
+						threshold: settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD,
+						keepRecent: DEFAULT_KEEP_RECENT,
+						state: compactState
+					}
+				: undefined;
+		streamingDraft = '';
+		const {
+			reply,
+			debug,
+			bundle,
+			usage,
+			compaction,
+			thinking,
+			finishReason,
+			judgeDebug,
+			rounds
+		} = await service.generateReply(input, settings.config, {
+			onDelta: (delta) => {
+				// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
+				streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
+				// 实时记录原始流式内容（不覆盖、不清洗），供排查流式专属问题。
+				recentLog += delta;
+				streamedAny = true;
+			},
+			tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
+			toolContext: {
+				getState: () => session.state,
+				update: (patch, metadata) => session.update(patch, metadata),
+				advanceTime: (minutes) => session.advanceTime(minutes)
+			},
+			enableStateJudge: settings.config.llmStateConfirm === true,
+			...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
+		});
+		debugPrompt = debug;
+		lastJudgeDebug = judgeDebug;
+		lastContext = { bundle, usage: usage ?? null, compaction };
+		compactState = compaction;
+		streamingDraft = null;
+		// AI 一次回复可包含多段：每轮先落叙事文本，再把工具调用反馈持久化为
+		// 系统消息（前端可见、后续上下文持续携带）。
+		for (const round of rounds) {
+			if (round.content !== null && round.content.trim() !== '') {
+				await session.addMessage('assistant', round.content, {
+					thinking: round.thinking
+				});
+			}
+			for (const tool of round.tools) {
+				await session.addMessage('system', `【工具调用】${tool.name}：${tool.output}`);
+			}
+		}
+		const budgetExhausted = finishReason === 'length';
+		if (reply.trim() !== '') {
+			await session.addMessage('assistant', reply, { thinking });
+		} else if (thinking !== undefined && thinking.trim() !== '') {
+			// 模型只输出了思考过程、正文为空：保留思考（对话气泡可展开），正文留空。
+			await session.addMessage('assistant', '', { thinking });
+			if (finishReason === 'length') {
+				toasts.push(
+					'info',
+					'思考耗尽了 Max Tokens 预算，正文被截断。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
+				);
+			} else if (finishReason === 'stop') {
+				toasts.push(
+					'info',
+					'模型只输出思考、未生成正文就结束了（finish_reason=stop）。这通常是模型/端点的思考模式异常：可尝试关闭模型的思考模式、检查代理是否正确转发正文，或换用 DeepSeek 官方端点。'
+				);
+			}
+		} else {
+			toasts.push(
+				'info',
+				budgetExhausted
+					? '模型输出被 Max Tokens 上限截断，正文为空。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
+					: '模型返回了空回复，本轮未追加消息，请重试或换一种说法。'
+			);
+		}
+		// 生成完成：追加未流式输出但应记录的部分（思考、工具反馈），
+		// 以及非流式模式下没有实时记录的正文——绝不覆盖已实时记录的流式内容。
+		const additions: string[] = [];
+		for (const round of rounds) {
+			if (!streamedAny && round.content !== null && round.content.trim() !== '') {
+				additions.push(`[角色] ${round.content}`);
+			}
+			if (round.thinking !== undefined && round.thinking.trim() !== '') {
+				additions.push(`[角色思考] ${round.thinking}`);
+			}
+			for (const tool of round.tools) {
+				additions.push(`[工具] ${tool.name}：${tool.output}`);
+			}
+		}
+		if (!streamedAny && reply.trim() !== '') {
+			additions.push(`[角色] ${reply}`);
+		}
+		if (thinking !== undefined && thinking.trim() !== '') {
+			additions.push(`[角色思考] ${thinking}`);
+		}
+		if (additions.length > 0) {
+			recentLog += `\n\n${additions.join('\n\n')}`;
+		}
+	}
+
+	/** 消息重试：回溯到该 assistant 回复之前（旧分支保留为备选），并重新生成。 */
+	async function handleRetry(messageId: string): Promise<void> {
+		if (busy) {
+			return;
+		}
+		const index = session.conversation.findIndex((message) => message.id === messageId);
+		if (index <= 0) {
+			return;
+		}
+		const parent = session.conversation[index - 1];
+		if (parent === undefined) {
+			return;
+		}
+		busy = true;
+		try {
+			await session.checkout(parent.id);
+			// 日志从回溯后最近一条用户发言重新开始（与普通发送语义一致）。
+			const lastUser = [...session.conversation]
+				.reverse()
+				.find((message) => message.role === 'user');
+			recentLog = lastUser === undefined ? '' : `[用户] ${lastUser.content}`;
+			toasts.push('info', '已回溯到该回复之前，正在重新生成…');
+			await runAiReply();
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			streamingDraft = null;
+			busy = false;
+		}
+	}
+
+	/** 手动 LLM 状态确认：对指定 assistant 消息的那一轮运行状态判断并补执行工具。 */
+	async function handleConfirmState(messageId: string): Promise<void> {
+		if (busy || settings.config.allowAiStateTools !== true) {
+			return;
+		}
+		const index = session.conversation.findIndex((message) => message.id === messageId);
+		const assistant = session.conversation[index];
+		if (assistant === undefined || assistant.role !== 'assistant') {
+			return;
+		}
+		const lastUser = [...session.conversation.slice(0, index)]
+			.reverse()
+			.find((message) => message.role === 'user');
+		busy = true;
+		try {
+			// 用该轮发生时的状态（含世界配置覆盖）做判断，避免被后续消息污染。
+			const stateAt = await session.getStateAt(assistant.id);
+			const service = new ChatService(
+				settings.config.provider === 'demo' ? demoClient : openAiClient
+			);
+			const { executed, debug } = await service.confirmStateForTurn({
+				state: stateAt,
+				lastUser,
+				lastAssistant: assistant,
+				config: settings.config,
+				tools: [...STATE_TOOLS],
+				toolContext: {
+					getState: () => session.state,
+					update: (patch, metadata) => session.update(patch, metadata),
+					advanceTime: (minutes) => session.advanceTime(minutes)
+				}
+			});
+			lastJudgeDebug = debug;
+			// 工具反馈持久化为系统消息：前端可见，后续上下文持续携带。
+			for (const tool of executed) {
+				await session.addMessage('system', `【工具调用】${tool.name}：${tool.output}`);
+			}
+			if (executed.length === 0) {
+				toasts.push('info', 'LLM 状态判断：本轮无需变更状态');
+			} else {
+				toasts.success(`LLM 状态判断已同步 ${executed.length} 项变更`);
+			}
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			busy = false;
+		}
+	}
+
+	/** 从消息气泡下方快速切换分支（< >）。 */
+	async function handleSwitchBranch(tipId: string): Promise<void> {
+		if (busy) {
+			return;
+		}
+		try {
+			await session.checkout(tipId);
+			toasts.success('已切换到该分支');
+		} catch (err) {
+			toasts.error(err);
 		}
 	}
 
@@ -927,6 +1025,13 @@
 					{recentLog}
 					onExportLog={handleExportLog}
 					{streamingDraft}
+					branches={session.branches}
+					snapshots={session.snapshots}
+					headId={session.headId}
+					allowStateTools={settings.config.allowAiStateTools === true}
+					onRetry={handleRetry}
+					onConfirmState={handleConfirmState}
+					onSwitchBranch={handleSwitchBranch}
 				/>
 			{:else if tab === 'state'}
 				<StatePanel characterState={session.state} onUpdate={handleStateUpdate} />

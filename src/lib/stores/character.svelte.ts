@@ -16,6 +16,8 @@ export interface CharacterSessionStore {
 	readonly conversation: ChatMessageView[];
 	readonly snapshots: SnapshotNode[];
 	readonly branches: BranchSummary[];
+	/** 重建任意快照处的状态（含世界配置覆盖），不改动当前 head。 */
+	getStateAt: (targetId: string) => Promise<CharacterState>;
 	update: (patch: StatePatch, metadata: { desc: string }) => Promise<SnapshotNode>;
 	addMessage: (
 		role: MessageRole,
@@ -71,6 +73,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 		get branches() {
 			return branches;
 		},
+		getStateAt: (targetId) => manager.getStateAt(targetId),
 		update: (patch, metadata) => manager.update(patch, metadata),
 		addMessage: (role, content, options) => manager.addMessage(role, content, options),
 		editMessage: (id, content) => manager.editMessage(id, content),

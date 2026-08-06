@@ -1,6 +1,11 @@
 <script lang="ts">
 	import type { ContextBundle } from '../context/pipeline';
-	import type { CharacterState, ChatMessageView } from '../core/types';
+	import type {
+		BranchSummary,
+		CharacterState,
+		ChatMessageView,
+		SnapshotNode
+	} from '../core/types';
 	import { formatWorldTime } from '../core/state';
 	import {
 		serializeDebugPrompt,
@@ -50,6 +55,20 @@
 		onExportLog: () => void;
 		/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
 		streamingDraft: string | null;
+		/** 全部分支 tip（用于消息气泡下方的分支切换）。 */
+		branches: BranchSummary[];
+		/** 全部快照节点（用于计算分支备选路径）。 */
+		snapshots: SnapshotNode[];
+		/** 当前 head 快照 id。 */
+		headId: string | null;
+		/** 是否允许 AI 状态工具：决定「LLM 状态确认」按钮是否可用。 */
+		allowStateTools: boolean;
+		/** 重新生成：回溯到该 assistant 消息之前重新发送。 */
+		onRetry: (id: string) => void;
+		/** 手动触发 LLM 状态确认（判断 + 补执行工具）。 */
+		onConfirmState: (id: string) => void;
+		/** 切换到指定分支 tip。 */
+		onSwitchBranch: (tipId: string) => void;
 	}
 
 	let {
@@ -74,7 +93,14 @@
 		onEditMessage,
 		recentLog,
 		onExportLog,
-		streamingDraft
+		streamingDraft,
+		branches,
+		snapshots,
+		headId,
+		allowStateTools,
+		onRetry,
+		onConfirmState,
+		onSwitchBranch
 	}: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
 	/** 输入框当前草稿（供预览）。 */
@@ -88,6 +114,88 @@
 	>(null);
 	let copyStatus = $state('');
 	let copyTimer: number | undefined;
+
+	/** 消息 id -> 可切换的备选分支（与该分支在该消息位置岔开，不含当前 head）。 */
+	const branchAlts = $derived.by(() => {
+		const result: Record<string, { tipId: string; timestamp: number }[]> = {};
+		const byId: Record<string, SnapshotNode> = {};
+		for (const node of snapshots) {
+			byId[node.id] = node;
+		}
+		const currentIds = conversation.map((message) => message.id);
+		for (const branch of branches) {
+			if (branch.tipId === headId) {
+				continue;
+			}
+			// 沿 parentId 回溯该分支的消息 id 链（根 -> tip），避免引入可变 Map。
+			const ids: string[] = [];
+			let cursor: string | null = branch.tipId;
+			let guard = 0;
+			while (cursor !== null && guard <= snapshots.length) {
+				guard += 1;
+				const current: SnapshotNode | undefined = byId[cursor];
+				if (current === undefined) {
+					break;
+				}
+				if (current.delta !== null && current.delta.kind === 'message') {
+					ids.push(current.id);
+				}
+				cursor = current.parentId;
+			}
+			ids.reverse();
+			let diverge = 0;
+			while (
+				diverge < currentIds.length &&
+				diverge < ids.length &&
+				currentIds[diverge] === ids[diverge]
+			) {
+				diverge += 1;
+			}
+			if (diverge >= currentIds.length && diverge >= ids.length) {
+				continue;
+			}
+			const attachIndex = diverge < currentIds.length ? diverge : currentIds.length - 1;
+			if (attachIndex < 0) {
+				continue;
+			}
+			const currentId = currentIds[attachIndex]!;
+			const list = result[currentId] ?? [];
+			list.push({ tipId: branch.tipId, timestamp: branch.lastTimestamp });
+			result[currentId] = list;
+		}
+		return result;
+	});
+
+	/** 指定消息的分支切换状态（< > 循环切换同一位置的所有备选分支）。 */
+	function branchNavFor(messageId: string): {
+		canPrev: boolean;
+		canNext: boolean;
+		onPrev: () => void;
+		onNext: () => void;
+	} | null {
+		const entries = [...(branchAlts[messageId] ?? [])];
+		if (headId !== null) {
+			const headTimestamp =
+				snapshots.find((node) => node.id === headId)?.timestamp ?? Number.MAX_SAFE_INTEGER;
+			entries.push({ tipId: headId, timestamp: headTimestamp });
+		}
+		entries.sort((a, b) => a.timestamp - b.timestamp);
+		if (entries.length <= 1) {
+			return null;
+		}
+		const currentIndex = entries.findIndex((entry) => entry.tipId === headId);
+		if (currentIndex === -1) {
+			return null;
+		}
+		const prev = entries[(currentIndex - 1 + entries.length) % entries.length]!;
+		const next = entries[(currentIndex + 1) % entries.length]!;
+		return {
+			canPrev: true,
+			canNext: true,
+			onPrev: () => onSwitchBranch(prev.tipId),
+			onNext: () => onSwitchBranch(next.tipId)
+		};
+	}
 
 	$effect(() => {
 		void conversation;
@@ -171,7 +279,14 @@
 		{:else}
 			<div class="messages" bind:this={listEl}>
 				{#each conversation as message (message.id)}
-					<MessageBubble {message} onEdit={onEditMessage} disabled={busy} />
+					<MessageBubble
+						{message}
+						onEdit={onEditMessage}
+						disabled={busy}
+						onRetry={onRetry}
+						onConfirmState={allowStateTools ? onConfirmState : undefined}
+						branchNav={branchNavFor(message.id)}
+					/>
 				{/each}
 				{#if streamingDraft !== null && streamingDraft !== ''}
 					<MessageBubble

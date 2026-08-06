@@ -652,6 +652,28 @@ describe('CharacterManager', () => {
 		expect(manager.getState().places.map((place) => place.name)).toEqual(['湖边']);
 	});
 
+	it('getStateAt 重建历史快照处的状态（含配置覆盖）且不改动 head', async () => {
+		const manager = createManager();
+		await manager.init();
+		const root = manager.getHeadId()!;
+		await manager.applyConfig({
+			places: [{ id: 'lake', category: '校外', name: '湖边', description: '' }]
+		});
+		await manager.update({ outfit: { top: '故事里的外套' } }, { desc: '换装' });
+		await manager.addMessage('user', '过了一段时间');
+		// 历史时刻：换装前的根快照（配置覆盖仍然叠加）。
+		const stateAtRoot = await manager.getStateAt(root);
+		expect(stateAtRoot.outfit.top).toBe(createInitialState().outfit.top);
+		expect(stateAtRoot.places.map((place) => place.name)).toEqual(['湖边']);
+		// 历史时刻：消息快照处的状态等于其父状态（消息不改变状态）。
+		const messageId = manager.getConversation()[0]!.id;
+		const stateAtMessage = await manager.getStateAt(messageId);
+		expect(stateAtMessage.outfit.top).toBe('故事里的外套');
+		// getStateAt 是纯读：不改动 head 与会话。
+		expect(manager.getHeadId()).toBe(messageId);
+		expect(manager.getConversation().map((m) => m.content)).toEqual(['过了一段时间']);
+	});
+
 	it('applyConfig 非法配置抛错且不落 kv、不改状态', async () => {
 		const manager = createManager();
 		await manager.init();

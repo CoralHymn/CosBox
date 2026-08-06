@@ -763,6 +763,71 @@ describe('ChatService', () => {
 		expect(chat).not.toHaveBeenCalled();
 	});
 
+	it('手动状态确认：判断为 True 时补执行工具并返回反馈', async () => {
+		const chat = vi.fn<LlmClient['chat']>(async () => ({
+			content: '{"needsTool": true}',
+			toolCalls: []
+		}));
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
+			})
+			.mockResolvedValueOnce({ content: '完成', toolCalls: [] });
+		const client: LlmClient = { chat, chatWithTools };
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const result = await service.confirmStateForTurn({
+			state: createInitialState(),
+			lastUser: { id: 'u1', role: 'user', content: '过了一段时间', timestamp: 1 },
+			lastAssistant: { id: 'a1', role: 'assistant', content: '（笑）嗯。', timestamp: 2 },
+			config,
+			tools: [...STATE_TOOLS],
+			toolContext: ctx
+		});
+		expect(result.executed.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 9, minute: 0 });
+		expect(result.debug?.needsTool).toBe(true);
+		expect(result.rounds[0]!.tools[0]!.name).toBe('advance_time');
+		// 判断请求走 JSON 模式。
+		expect(chat.mock.calls[0]![4]).toEqual({ jsonMode: true });
+	});
+
+	it('手动状态确认：判断为 False 时不执行工具', async () => {
+		const chat = vi.fn(async () => ({ content: '{"needsTool": false}', toolCalls: [] }));
+		const chatWithTools = vi.fn();
+		const client: LlmClient = { chat, chatWithTools };
+		const service = new ChatService(client);
+		const result = await service.confirmStateForTurn({
+			state: createInitialState(),
+			lastUser: undefined,
+			lastAssistant: undefined,
+			config,
+			tools: [...STATE_TOOLS],
+			toolContext: makeToolContext()
+		});
+		expect(result.executed).toEqual([]);
+		expect(result.debug?.needsTool).toBe(false);
+		expect(chatWithTools).not.toHaveBeenCalled();
+	});
+
+	it('手动状态确认：未提供工具时直接返回空结果', async () => {
+		const chat = vi.fn();
+		const service = new ChatService({ chat });
+		const result = await service.confirmStateForTurn({
+			state: createInitialState(),
+			lastUser: undefined,
+			lastAssistant: undefined,
+			config,
+			tools: [],
+			toolContext: makeToolContext()
+		});
+		expect(result.executed).toEqual([]);
+		expect(result.debug).toBeNull();
+		expect(chat).not.toHaveBeenCalled();
+	});
+
 	it('调试视图携带本次实际请求参数', async () => {
 		const client: LlmClient = {
 			chat: vi.fn(async () => ({ content: '好的', toolCalls: [] }))
