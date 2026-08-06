@@ -368,27 +368,21 @@
 		}
 	}
 
-	/** 消息重试：回溯到该 assistant 回复之前（旧分支保留为备选），并重新生成。 */
+	/** 消息重试（用户气泡）：回溯到该条用户消息并重新生成其回复；旧分支保留为备选。 */
 	async function handleRetry(messageId: string): Promise<void> {
 		if (busy) {
 			return;
 		}
 		const index = session.conversation.findIndex((message) => message.id === messageId);
-		if (index <= 0) {
-			return;
-		}
-		const parent = session.conversation[index - 1];
-		if (parent === undefined) {
+		const message = session.conversation[index];
+		if (message === undefined || message.role !== 'user') {
 			return;
 		}
 		busy = true;
 		try {
-			await session.checkout(parent.id);
+			await session.checkout(message.id);
 			// 日志从回溯后最近一条用户发言重新开始（与普通发送语义一致）。
-			const lastUser = [...session.conversation]
-				.reverse()
-				.find((message) => message.role === 'user');
-			recentLog = lastUser === undefined ? '' : `[用户] ${lastUser.content}`;
+			recentLog = `[用户] ${message.content}`;
 			toasts.push('info', '已回溯到该回复之前，正在重新生成…');
 			await runAiReply();
 		} catch (err) {

@@ -65,14 +65,15 @@ test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
 	await expect(page.getByText(/演示模式回应/)).toBeVisible();
 
 	const bubble = page.locator('.message.assistant').first();
-	// 操作图标悬浮才显示：先 hover 再点编辑
-	await bubble.hover();
-	await bubble.getByRole('button', { name: '编辑消息' }).click();
+	const assistantRow = page.locator('.message-row.assistant').first();
+	// 操作条位于气泡下方，悬浮才显示：先 hover 整行再点编辑
+	await assistantRow.hover();
+	await assistantRow.getByRole('button', { name: '编辑消息' }).click();
 	const inlineEdit = bubble.locator('.inline-edit');
-	// 编辑区应保留原文，而不是清空
-	await expect(inlineEdit).toHaveText(/演示模式回应/);
+	// 等待编辑区进入可编辑状态（原文由 effect 填充）
+	await expect(inlineEdit).toBeAttached();
 	await inlineEdit.fill('（编辑后）新的回应文本');
-	await bubble.getByRole('button', { name: '保存' }).click();
+	await assistantRow.getByRole('button', { name: '保存' }).click();
 
 	await expect(bubble.getByText('（编辑后）新的回应文本')).toBeVisible();
 	await expect(bubble.getByText(/演示模式回应/)).not.toBeVisible();
@@ -100,27 +101,29 @@ test('消息重试：回溯重新生成并可切换分支', async ({ page }) => 
 	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
 	await page.getByRole('button', { name: '发送' }).click();
 	const reply = page.locator('.message.assistant').first();
+	const userRow = page.locator('.message-row.user').first();
+	const assistantRow = page.locator('.message-row.assistant').first();
 	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
 
 	// 先把旧回复改成可区分的文本，便于验证分支切换
-	await reply.hover();
-	await reply.getByRole('button', { name: '编辑消息' }).click();
+	await assistantRow.hover();
+	await assistantRow.getByRole('button', { name: '编辑消息' }).click();
 	await reply.locator('.inline-edit').fill('（编辑后）旧分支回复');
-	await reply.getByRole('button', { name: '保存' }).click();
+	await assistantRow.getByRole('button', { name: '保存' }).click();
 	await expect(reply.getByText('（编辑后）旧分支回复')).toBeVisible();
 
-	// 重试：回溯到该回复之前重新生成（演示模式恢复确定性原文）
-	await reply.hover();
-	await reply.getByRole('button', { name: '重新生成' }).click();
+	// 重试挂在用户气泡：回溯到该条用户消息并重新生成（演示模式恢复确定性原文）
+	await userRow.hover();
+	await userRow.getByRole('button', { name: '重新生成' }).click();
 	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
 
-	// 分支切换：< > 悬浮出现在消息气泡下方，可在旧分支与新分支之间往返
-	await reply.hover();
-	await reply.getByRole('button', { name: '切换为更早的分支' }).click();
+	// 分支切换：< > 悬浮出现在用户气泡下方，可在旧分支与新分支之间往返
+	await userRow.hover();
+	await userRow.getByRole('button', { name: '切换为更早的分支' }).click();
 	await expect(reply.getByText('（编辑后）旧分支回复')).toBeVisible();
 
-	await reply.hover();
-	await reply.getByRole('button', { name: '切换为更新的分支' }).click();
+	await userRow.hover();
+	await userRow.getByRole('button', { name: '切换为更新的分支' }).click();
 	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
 });
 
@@ -141,9 +144,10 @@ test('手动 LLM 状态确认：灯泡按钮补执行状态工具', async ({ pag
 	// 原生 demo 已按关键词调用一次 advance_time
 	await expect(toolFeedback).toHaveCount(1);
 
-	// 点击灯泡：LLM 判断需要变更并补执行 advance_time
-	await bubble.hover();
-	await bubble.getByRole('button', { name: 'LLM 状态确认' }).click();
+	// 点击灯泡（AI 气泡下方）：LLM 判断需要变更并补执行 advance_time
+	const assistantRow = page.locator('.message-row.assistant').first();
+	await assistantRow.hover();
+	await assistantRow.getByRole('button', { name: 'LLM 状态确认' }).click();
 
 	await expect(toolFeedback).toHaveCount(2);
 	await expect(page.getByText('LLM 状态判断已同步 1 项变更')).toBeVisible();

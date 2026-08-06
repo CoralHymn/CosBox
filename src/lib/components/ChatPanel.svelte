@@ -123,6 +123,7 @@
 			byId[node.id] = node;
 		}
 		const currentIds = conversation.map((message) => message.id);
+		const currentRoles = conversation.map((message) => message.role);
 		for (const branch of branches) {
 			if (branch.tipId === headId) {
 				continue;
@@ -154,8 +155,13 @@
 			if (diverge >= currentIds.length && diverge >= ids.length) {
 				continue;
 			}
-			const attachIndex = diverge < currentIds.length ? diverge : currentIds.length - 1;
-			if (attachIndex < 0) {
+			let attachIndex = diverge < currentIds.length ? diverge : currentIds.length - 1;
+			// 分支切换挂在用户气泡：若岔开位置是 assistant（重试场景），
+			// 挂到其前面的用户消息，让用户能在「重发的那条消息」下方切换。
+			while (attachIndex > 0 && currentRoles[attachIndex] !== 'user') {
+				attachIndex -= 1;
+			}
+			if (attachIndex < 0 || currentRoles[attachIndex] !== 'user') {
 				continue;
 			}
 			const currentId = currentIds[attachIndex]!;
