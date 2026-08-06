@@ -1,4 +1,5 @@
 import { StorageError } from '../core/errors';
+import { clonePlain } from '../core/clone';
 import type { KvRecord, CosBoxDatabase } from './schema';
 
 /**
@@ -20,7 +21,9 @@ export class KvRepository {
 	/** 写入值（upsert）。 */
 	async set<T>(key: string, value: T): Promise<void> {
 		try {
-			await this.database.kv.put({ key, value });
+			// 用普通副本写入：Svelte 5 的 $state 响应式代理无法被 IndexedDB
+			// structuredClone（会抛 DataCloneError），统一在边界克隆兜底。
+			await this.database.kv.put({ key, value: clonePlain(value) });
 		} catch (err) {
 			throw new StorageError(`保存设置失败：${key}`, { cause: err });
 		}

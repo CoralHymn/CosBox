@@ -89,8 +89,9 @@ export function createSettingsStore(kv: KvRepository) {
 
 	/** 保存远程同步设置（服务器地址 + 密钥，密钥不随工作区同步）。 */
 	async function saveSync(next: SyncSettings): Promise<void> {
-		sync = { ...DEFAULT_SYNC_SETTINGS, ...next };
-		await kv.set(SYNC_KEY, sync);
+		const plain = { ...DEFAULT_SYNC_SETTINGS, ...next };
+		sync = plain;
+		await kv.set(SYNC_KEY, plain);
 		emit();
 	}
 
