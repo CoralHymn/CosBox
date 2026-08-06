@@ -66,7 +66,6 @@
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
 	import { downloadBytes, downloadTextFile } from '../lib/utils/download';
-	import { buildRecentLog } from '../lib/utils/recent-log';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
@@ -127,6 +126,8 @@
 	let streamingDraft = $state<string | null>(null);
 	/** 最近消息日志：从最近一次用户发言开始实时记录，再次发言时重置。 */
 	let recentLog = $state('');
+	/** 本次发送是否发生过流式输出（决定完成后是否需要补记未流式的正文）。 */
+	let streamedAny = false;
 	/** 最近一次 LLM 状态判断的调试视图（开发者模式查看）。 */
 	let lastJudgeDebug = $state<JudgeDebugView | null>(null);
 
@@ -219,6 +220,7 @@
 			}
 			// 普通发言：重置最近日志，从本条用户发言开始实时记录。
 			recentLog = `[用户] ${content}`;
+			streamedAny = false;
 			if (options.search) {
 				searching = true;
 				try {
@@ -274,8 +276,9 @@
 				onDelta: (delta) => {
 					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
 					streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
-					// 实时追加流式内容到最近日志。
+					// 实时记录原始流式内容（不覆盖、不清洗），供排查流式专属问题。
 					recentLog += delta;
+					streamedAny = true;
 				},
 				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 				toolContext: {
@@ -328,9 +331,29 @@
 						: '模型返回了空回复，本轮未追加消息，请重试或换一种说法。'
 				);
 			}
-			// 生成完成：用权威数据（轮次叙事/工具反馈/思考/最终回复）重建日志，
-			// 保证与落库内容完全一致（覆盖流式期间的原始追加）。
-			recentLog = buildRecentLog(session.conversation);
+			// 生成完成：追加未流式输出但应记录的部分（思考、工具反馈），
+			// 以及非流式模式下没有实时记录的正文——绝不覆盖已实时记录的流式内容。
+			const additions: string[] = [];
+			for (const round of rounds) {
+				if (!streamedAny && round.content !== null && round.content.trim() !== '') {
+					additions.push(`[角色] ${round.content}`);
+				}
+				if (round.thinking !== undefined && round.thinking.trim() !== '') {
+					additions.push(`[角色思考] ${round.thinking}`);
+				}
+				for (const tool of round.tools) {
+					additions.push(`[工具] ${tool.name}：${tool.output}`);
+				}
+			}
+			if (!streamedAny && reply.trim() !== '') {
+				additions.push(`[角色] ${reply}`);
+			}
+			if (thinking !== undefined && thinking.trim() !== '') {
+				additions.push(`[角色思考] ${thinking}`);
+			}
+			if (additions.length > 0) {
+				recentLog += `\n\n${additions.join('\n\n')}`;
+			}
 		} catch (err) {
 			toasts.error(err);
 		} finally {

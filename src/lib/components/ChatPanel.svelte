@@ -195,6 +195,12 @@
 				{#if judgeDebug !== null}
 					<button class="btn btn-small" onclick={openJudgeDebug}> 开发者：查看上次状态判断 </button>
 				{/if}
+				{#if recentLog.trim() !== ''}
+					<button class="btn btn-small" onclick={onExportLog}>
+						导出最近日志（{recentLog.split('\n\n').length} 段
+						{#if streamingDraft !== null}，记录中{/if}）
+					</button>
+				{/if}
 				<button class="btn btn-small" onclick={openPreview}> 开发者：预览输入框提示词 </button>
 			</div>
 			{#if modal !== null}
@@ -292,17 +298,6 @@
 					</div>
 				</div>
 			{/if}
-		{/if}
-		{#if recentLog.trim() !== ''}
-			<div class="log-bar">
-				<span class="muted">
-					最近日志：{recentLog.split('\n\n').length} 段
-					{#if streamingDraft !== null}
-						（记录中…）
-					{/if}
-				</span>
-				<button class="btn btn-small" onclick={onExportLog}>导出最近日志</button>
-			</div>
 		{/if}
 		<ChatInput
 			disabled={busy}

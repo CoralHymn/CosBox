@@ -38,12 +38,18 @@ test('发送消息：演示模式回复并追加快照', async ({ page }) => {
 
 test('导出最近消息日志：从最近用户发言开始包含回复', async ({ page }) => {
 	await page.goto('/');
+	// 导出日志属于开发者功能：先开启开发者模式
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#dev-mode-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await page.getByRole('button', { name: /对话/ }).click();
+
 	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
 	await page.getByRole('button', { name: '发送' }).click();
 	await expect(page.getByText(/演示模式回应/)).toBeVisible();
 
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByRole('button', { name: '导出最近日志' }).click();
+	await page.getByRole('button', { name: /导出最近日志/ }).click();
 	const download = await downloadPromise;
 	expect(download.suggestedFilename()).toMatch(/^cosbox-log-\d{8}-\d{4}\.txt$/);
 	const path = await download.path();
