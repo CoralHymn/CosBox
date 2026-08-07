@@ -426,12 +426,26 @@
 		}
 		// 最终回复若携带思考/正文交替顺序（interleaved thinking），按序分段展示，
 		// 避免「思考→正文→思考→正文」被折叠成一段思考 + 一段正文。
+		const replySegmentsList = replySegments ?? [];
+		// 重试/兜底替换 result 时，替换结果的 segments 可能只剩正文、丢失首轮思考：
+		// 若整个 replySegments 不含思考段而最终 thinking 非空，在首个正文段前补回。
+		const replyHasThinking = replySegmentsList.some((segment) => segment.kind === 'thinking');
+		let replyThinkingInjected = false;
 		let replyTextPushed = false;
-		if (replySegments !== undefined && replySegments.length > 0) {
-			for (const segment of replySegments) {
+		if (replySegmentsList.length > 0) {
+			for (const segment of replySegmentsList) {
 				if (segment.kind === 'thinking') {
 					mergedSegments.push({ kind: 'thinking', content: segment.content.trim() });
 				} else if (segment.kind === 'text') {
+					if (
+						!replyHasThinking &&
+						!replyThinkingInjected &&
+						thinking !== undefined &&
+						thinking.trim() !== ''
+					) {
+						mergedSegments.push({ kind: 'thinking', content: thinking.trim() });
+						replyThinkingInjected = true;
+					}
 					mergedSegments.push({
 						kind: 'text',
 						content: sanitizeAssistantText(segment.content.trim())
@@ -452,7 +466,12 @@
 				.filter((segment) => segment.kind === 'text')
 				.map((segment) => segment.content)
 				.join('\n');
-			await session.addMessage('assistant', plainText, { segments: mergedSegments });
+			await session.addMessage('assistant', plainText, {
+				segments: mergedSegments,
+				...(thinking !== undefined && thinking.trim() !== ''
+					? { thinking: thinking.trim() }
+					: {})
+			});
 		} else {
 			toasts.push(
 				'info',

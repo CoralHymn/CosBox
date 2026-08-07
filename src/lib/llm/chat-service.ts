@@ -368,7 +368,10 @@ export class ChatService {
 							finishReason: result.finishReason,
 							judgeDebug,
 							rounds,
-							replySegments: result.segments
+							replySegments: ensureFirstThinkingInSegments(
+								result.segments,
+								firstResultThinking
+							)
 						};
 					}
 					const toolMessages: ChatMessage[] = [];
@@ -479,7 +482,7 @@ export class ChatService {
 			finishReason: result.finishReason,
 			judgeDebug,
 			rounds,
-			replySegments: result.segments
+			replySegments: ensureFirstThinkingInSegments(result.segments, firstResultThinking)
 		};
 	}
 
@@ -907,6 +910,32 @@ function preferThinking(
 		return current;
 	}
 	return fallback;
+}
+
+/**
+ * 把「本回合首次响应携带的思考」并入最终分段：流式首轮思考在重试/兜底替换
+ * result 后可能被新结果的 segments 顶掉（新结果通常只有正文或新的思考），
+ * 这里保证首轮思考仍出现在气泡分段里，避免「流式时看到、完成后消失」。
+ * 分段已包含相同思考时不重复插入。
+ */
+export function ensureFirstThinkingInSegments(
+	segments: MessageSegment[] | undefined,
+	firstThinking: string | undefined
+): MessageSegment[] | undefined {
+	if (firstThinking === undefined || firstThinking.trim() === '') {
+		return segments;
+	}
+	const trimmed = firstThinking.trim();
+	if (segments !== undefined && segments.length > 0) {
+		const alreadyIncluded = segments.some(
+			(segment) => segment.kind === 'thinking' && segment.content.includes(trimmed)
+		);
+		if (alreadyIncluded) {
+			return segments;
+		}
+		return [{ kind: 'thinking', content: trimmed }, ...segments];
+	}
+	return [{ kind: 'thinking', content: trimmed }];
 }
 
 /** 把最近一次请求序列化为纯文本（供调试复制）。 */
