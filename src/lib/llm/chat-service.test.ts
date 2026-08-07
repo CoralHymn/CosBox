@@ -137,6 +137,54 @@ describe('ChatService', () => {
 		).toBe(true);
 	});
 
+	it('工具路径：流式思考实时命中循环时中断当前请求并带提示重启', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockImplementationOnce(
+				(
+					_messages: ChatMessage[],
+					_tools: unknown,
+					_config: LlmConfig,
+					signal: AbortSignal | undefined,
+					_onDelta: ((delta: string) => void) | undefined,
+					_options?: { onThinkingDelta?: (delta: string) => void }
+				) =>
+					new Promise((resolve, reject) => {
+						// 流式推送重复循环的思考增量；看门狗检测到后应中断本次请求。
+						_options?.onThinkingDelta?.(
+							'让我详细描写。让我自然地描写。让我自然地回应。让我详细描写。让我自然地描写。让我自然地回应。' +
+								'让我详细描写。让我自然地描写。让我自然地回应。'
+						);
+						if (signal?.aborted === true) {
+							reject(new Error('aborted'));
+							return;
+						}
+						signal?.addEventListener(
+							'abort',
+							() => reject(new Error('aborted')),
+							{ once: true }
+						);
+						setTimeout(() => resolve({ content: '循环正文', toolCalls: [] }), 20);
+					})
+			)
+			.mockResolvedValueOnce({ content: '（自然回应）我们走吧。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('（自然回应）我们走吧。');
+		// 首次请求被实时中断，第二次为带「停止重复」提示的重启请求。
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
+		expect(retryMessages.some((message) => message.content.includes('重复循环'))).toBe(true);
+	});
+
 	it('工具路径：重试仍只输出思考时保留原空回复，不无限重试', async () => {
 		const chatWithTools = vi
 			.fn()
@@ -1576,7 +1624,7 @@ describe('ChatService', () => {
 		expect(onDelta).toHaveBeenNthCalledWith(2, '式');
 	});
 
-	it('透传流式思考增量回调给客户端', async () => {
+	it('流式思考增量经看门狗包装后转发给原回调', async () => {
 		const onThinkingDelta = vi.fn();
 		const chat = vi.fn<LlmClient['chat']>(async () => ({ content: '好', toolCalls: [] }));
 		const client: LlmClient = { chat };
@@ -1586,7 +1634,10 @@ describe('ChatService', () => {
 			config,
 			{ onThinkingDelta }
 		);
-		expect(chat.mock.calls[0]![4]).toEqual({ onThinkingDelta });
+		const options = chat.mock.calls[0]![4] as { onThinkingDelta?: (delta: string) => void };
+		expect(typeof options.onThinkingDelta).toBe('function');
+		options.onThinkingDelta?.('增量');
+		expect(onThinkingDelta).toHaveBeenCalledWith('增量');
 	});
 });
 

@@ -1,5 +1,6 @@
 import { addMinutes, formatWorldTime, minutesSinceMidnight } from '../core/state';
 import type { CharacterState, ChatMessageView, MessageSegment, WorldTime } from '../core/types';
+import { LlmError } from '../core/errors';
 import { buildContext, type ContextBundle, type ContextPipelineInput } from '../context/pipeline';
 import { excludeFromContext } from '../context/history';
 import {
@@ -215,13 +216,12 @@ export class ChatService {
 				const maxTurns = options.maxToolTurns ?? DEFAULT_MAX_TOOL_TURNS;
 				for (let turn = 0; turn < maxTurns; turn += 1) {
 					debug = buildDebugView(messages[0]!.content, messages, config, options);
-					let result = await this.client.chatWithTools(
+					let result = await this.callWithLoopIntercept(
 						messages,
-						options.tools,
 						config,
+						options,
 						signal,
-						options.onDelta,
-						{ onThinkingDelta: options.onThinkingDelta }
+						'tools'
 					);
 					usage = mergeUsage(usage, result.usage);
 					// 记录本轮模型第一次响应携带的思考：后续补调/重试可能替换 result，
@@ -444,9 +444,13 @@ export class ChatService {
 			}
 		}
 
-		let result = await this.client.chat(messages, config, signal, options.onDelta, {
-			onThinkingDelta: options.onThinkingDelta
-		});
+		let result = await this.callWithLoopIntercept(
+			messages,
+			config,
+			options,
+			signal,
+			'plain'
+		);
 		// 与工具路径一致：重试可能替换 result，兜底保留第一次响应携带的思考，
 		// 防止「只思考无正文」重试成功但替换结果丢失思考、落库后不再展示。
 		const firstResultThinking = result.thinking;
@@ -642,6 +646,83 @@ export class ChatService {
 		} catch {
 			return null;
 		}
+	}
+
+	/**
+	 * 带思考循环看门狗的 LLM 请求：流式思考中一旦检测到重复循环（同一句/同一段
+	 * 连续重复 ≥3 次或短句序列循环），立即中断当前请求，注入「停止重复、尽快输出
+	 * 正文」提示后重试一次；外部取消仍按原样传播。非循环场景行为与直接调用一致。
+	 */
+	private async callWithLoopIntercept(
+		messages: ReadonlyArray<ChatMessage>,
+		config: LlmConfig,
+		options: GenerateReplyOptions,
+		signal: AbortSignal | undefined,
+		kind: 'tools' | 'plain'
+	): Promise<LlmChatResult> {
+		const attempt = async (retryNudge: string | null): Promise<LlmChatResult> => {
+			const attemptController = new AbortController();
+			let thinkingAccum = '';
+			let loopAborted = false;
+			const onExternalAbort = (): void => attemptController.abort();
+			if (signal !== undefined) {
+				if (signal.aborted) {
+					throw new LlmError('请求已取消');
+				}
+				signal.addEventListener('abort', onExternalAbort, { once: true });
+			}
+			const wrappedThinkingDelta = (delta: string): void => {
+				thinkingAccum += delta;
+				// 仅首次请求实时拦截；重试不再二次中断，避免无限重启。
+				if (retryNudge === null && detectThinkingLoop(thinkingAccum)) {
+					loopAborted = true;
+					attemptController.abort();
+				}
+				options.onThinkingDelta?.(delta);
+			};
+			try {
+				const requestMessages: ChatMessage[] =
+					retryNudge === null
+						? [...messages]
+						: [...messages, { role: 'system', content: retryNudge }];
+				if (kind === 'tools') {
+					if (
+						this.client.chatWithTools === undefined ||
+						options.tools === undefined ||
+						options.toolContext === undefined
+					) {
+						throw new LlmError('工具请求未就绪');
+					}
+					return await this.client.chatWithTools(
+						requestMessages,
+						options.tools,
+						config,
+						attemptController.signal,
+						options.onDelta,
+						{ onThinkingDelta: wrappedThinkingDelta }
+					);
+				}
+				return await this.client.chat(
+					requestMessages,
+					config,
+					attemptController.signal,
+					options.onDelta,
+					{ onThinkingDelta: wrappedThinkingDelta }
+				);
+			} catch (err) {
+				if (signal?.aborted) {
+					throw err;
+				}
+				// 流式思考命中循环导致中断：注入「停止重复」提示重试一次。
+				if (loopAborted) {
+					return await attempt(REPETITION_NUDGE);
+				}
+				throw err;
+			} finally {
+				signal?.removeEventListener('abort', onExternalAbort);
+			}
+		};
+		return attempt(null);
 	}
 
 	/**
