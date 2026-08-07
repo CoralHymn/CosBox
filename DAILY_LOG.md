@@ -2067,6 +2067,34 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 
 - 689 个单元测试全过；check / lint 全绿。
 
+## 2026-08-07（续）：换模型再切回 DeepSeek 思考模式丢失思考——统一补 reasoning_content
+
+### 需求
+
+对话模型换成非思考模型、再切回 DeepSeek 思考模型后，AI 不再输出思考过程
+（无 reasoning 流式内容，且曾出现「只思考无正文 / 不思考」）。
+
+### 根因
+
+DeepSeek V4 思考模式要求多轮历史中**每条 assistant 消息都携带
+`reasoning_content`**（空字符串也可以）。换到非思考模型期间，落库的
+assistant 消息没有 thinking；切回 DeepSeek 后这些历史消息序列化时缺少
+`reasoning_content` 字段，端点返回 400 或思考行为异常。
+
+### 实现
+
+- `openai-client.buildRequestBody` 计算 `deepSeekThinking = isDeepSeekModel(config)`，
+  `serializeMessage(message, deepSeekThinking)` 对 DeepSeek 的**所有**
+  assistant 消息统一补 `reasoning_content`：有思考原样回传、无思考补空字符串；
+  非 DeepSeek 端点不再携带该字段（避免未知字段被严格端点拒绝）。
+- 测试：DeepSeek + assistant 无 reasoning → 序列化带 `reasoning_content: ''`；
+  非 DeepSeek + assistant 带 reasoning → 不携带；原有「工具轮回传」用例改为
+  DeepSeek 配置。
+
+### 门禁
+
+- 691 个单元测试全过；check / lint 全绿。
+
 ## 2026-08-07（续）：上下文用量按对话模型展示 + 模型服务管理即时保存
 
 ### 需求

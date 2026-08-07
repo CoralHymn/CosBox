@@ -438,9 +438,13 @@ function buildRequestBody(
 	forceToolCall = false,
 	jsonMode = false
 ): Record<string, unknown> {
+	// DeepSeek V4 思考模式：多轮历史里每条 assistant 消息都必须带 reasoning_content
+	// （空字符串也可），否则切换模型/跨轮次后 API 返回 400 或思考行为异常。
+	// 这里统一在序列化层补全，避免上层各调用点遗漏。
+	const deepSeekThinking = isDeepSeekModel(config);
 	const body: Record<string, unknown> = {
 		model: config.model,
-		messages: messages.map(serializeMessage),
+		messages: messages.map((message) => serializeMessage(message, deepSeekThinking)),
 		temperature: config.temperature,
 		max_tokens: config.maxTokens
 	};
@@ -464,7 +468,10 @@ function buildRequestBody(
 }
 
 /** 把内部消息结构序列化为 OpenAI-compatible 消息。 */
-function serializeMessage(message: ChatMessage): Record<string, unknown> {
+function serializeMessage(
+	message: ChatMessage,
+	deepSeekThinking = false
+): Record<string, unknown> {
 	// 世界时间只在「序列化给模型」这一步注入为元数据行，消息正文始终纯净。
 	const content =
 		message.worldTime !== undefined
@@ -478,9 +485,11 @@ function serializeMessage(message: ChatMessage): Record<string, unknown> {
 			function: { name: call.name, arguments: JSON.stringify(call.arguments) }
 		}));
 	}
-	// DeepSeek 思考模式：带工具调用的 assistant 消息必须原样回传 reasoning_content。
-	if (message.role === 'assistant' && message.reasoning !== undefined && message.reasoning !== '') {
-		serialized.reasoning_content = message.reasoning;
+	// DeepSeek 思考模式：所有 assistant 历史消息都必须带 reasoning_content——
+	// 有思考原样回传，没有（如来自其他模型的轮次）补空字符串，保证思考模式连续性。
+	if (message.role === 'assistant' && deepSeekThinking) {
+		serialized.reasoning_content =
+			message.reasoning !== undefined && message.reasoning !== '' ? message.reasoning : '';
 	}
 	if (message.role === 'tool') {
 		serialized.tool_call_id = message.toolCallId ?? '';

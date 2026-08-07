@@ -1191,3 +1191,23 @@ Claude Code / Mem0 验证过的模式，且不牺牲「对话记录不可变」�
 判断/生成/提取用小模型可显著降低开销；三级回退保证老存档零迁移成本。
 **代价**：Key 以明文存于 IndexedDB（与旧实现相同，本地单机可接受）；每类角色
 需要手动分配「服务 + 模型」；压缩仍跟随对话角色（未单独拆分，避免角色过多）。
+
+## D84：DeepSeek 思考模式历史消息统一补 reasoning_content 空串
+
+**问题**：对话模型在 DeepSeek 思考模型与非思考模型间来回切换后，切回
+DeepSeek 不再输出思考过程。非思考模型轮次落库的 assistant 消息没有 thinking，
+请求序列化时缺少 `reasoning_content` 字段；DeepSeek V4 思考模式要求多轮历史中
+**每条 assistant 消息都携带该字段**（空字符串也可以），缺失时端点 400 或
+思考行为异常（不思考 / 只思考无正文）。
+
+**选择**：在 `openai-client.serializeMessage` 中，仅当目标模型是 DeepSeek
+（`isDeepSeekModel(config)`）时，对每条 assistant 消息统一写入
+`reasoning_content`：有 reasoning 原样回传、没有则补空字符串；非 DeepSeek
+端点不再携带该字段。
+
+**理由**：与 opencode / langchain / OmniRoute 等社区项目对同一问题的修复一致；
+比 D50「仅在携带 thinking 时才回传」覆盖了换模型场景，比「对所有模型回传」
+更安全（OpenAI 等严格端点会拒绝未知字段）。
+
+**代价**：DeepSeek 请求体中每个 assistant 轮次多一个空字段，体积可忽略；
+工具轮次的思考仍原样回传，信息不丢失。
