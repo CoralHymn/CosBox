@@ -6,7 +6,8 @@ import {
 	buildMemoryExtractionSystemPrompt,
 	buildMemoryExtractionUserPayload,
 	extractMemoriesFromConversation,
-	parseExtractedMemories
+	parseExtractedMemories,
+	selectExistingForExtraction
 } from './extract';
 import type { MemoryEntry } from './types';
 
@@ -63,6 +64,42 @@ describe('buildMemoryExtractionUserPayload', () => {
 		expect(payload).toContain('[角色] 消息19');
 		expect(payload).toContain('[用户] 消息18');
 		expect(payload).not.toContain('消息0');
+	});
+});
+
+describe('selectExistingForExtraction', () => {
+	function entry(overrides: Partial<MemoryEntry>): MemoryEntry {
+		return {
+			...memory('事实'),
+			id: 'm',
+			createdAt: 1,
+			updatedAt: 1,
+			lastUsedAt: 0,
+			useCount: 0,
+			...overrides
+		};
+	}
+
+	it('置顶优先，其次重要度，再按最近召回时间排序', () => {
+		const low = entry({ id: 'a', importance: 2, pinned: false, lastUsedAt: 10 });
+		const high = entry({ id: 'b', importance: 5, pinned: false, lastUsedAt: 0 });
+		const pinned = entry({ id: 'c', importance: 1, pinned: true, lastUsedAt: 0 });
+		const recentlyUsed = entry({ id: 'd', importance: 5, pinned: false, lastUsedAt: 99 });
+		expect(selectExistingForExtraction([low, high, pinned, recentlyUsed]).map((e) => e.id)).toEqual([
+			'c',
+			'd',
+			'b',
+			'a'
+		]);
+	});
+
+	it('超过 limit 时截断且至少保留一条', () => {
+		const entries = Array.from({ length: 70 }, (_, index) =>
+			entry({ id: `m${index}`, importance: 1 })
+		);
+		expect(selectExistingForExtraction(entries, 60)).toHaveLength(60);
+		expect(selectExistingForExtraction([entry({ id: 'only' })], 0)).toHaveLength(1);
+		expect(selectExistingForExtraction([], 60)).toHaveLength(0);
 	});
 });
 

@@ -10,6 +10,29 @@ const EXTRACT_MESSAGE_LIMIT = 12;
 const EXTRACT_MAX_TOKENS = 1024;
 /** 提取输出中单条记忆的最大关键词数。 */
 const MAX_KEYWORDS = 8;
+/** 注入提取提示词的既有记忆上限：控制提示词体积，避免随记忆库增长而膨胀。 */
+const EXISTING_MEMORY_LIMIT = 60;
+
+/**
+ * 选择注入提取提示词的既有记忆子集：置顶优先，其次重要度，再按最近召回时间，
+ * 取前 limit 条。参考 Zep「全量历史注入会失控」与 mem0 异步批处理的思路，
+ * 去重判断仍然作用于完整记忆库，仅提示词注入受限。
+ */
+export function selectExistingForExtraction(
+	existing: ReadonlyArray<MemoryEntry>,
+	limit = EXISTING_MEMORY_LIMIT
+): MemoryEntry[] {
+	const ranked = [...existing].sort((a, b) => {
+		if (a.pinned !== b.pinned) {
+			return a.pinned ? -1 : 1;
+		}
+		if (a.importance !== b.importance) {
+			return b.importance - a.importance;
+		}
+		return b.lastUsedAt - a.lastUsedAt;
+	});
+	return ranked.slice(0, Math.max(1, Math.floor(limit)));
+}
 
 /**
  * 记忆提取的系统提示词：告诉 LLM 提取什么、跳过什么、输出格式与去重要求。
@@ -219,10 +242,11 @@ export async function extractMemoriesFromConversation(input: {
 	stateSummary: string;
 	signal?: AbortSignal;
 }): Promise<{ items: ExtractedMemory[]; raw: string }> {
+	const existing = selectExistingForExtraction(input.existing);
 	const messages: ChatMessage[] = [
 		{
 			role: 'system',
-			content: buildMemoryExtractionSystemPrompt(input.existing, input.stateSummary)
+			content: buildMemoryExtractionSystemPrompt(existing, input.stateSummary)
 		},
 		{
 			role: 'user',
