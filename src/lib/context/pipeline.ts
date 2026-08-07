@@ -121,17 +121,17 @@ export function buildPerTurnToolReminder(lastUserContent: string | undefined): s
 	if (lastUserContent !== undefined && lastUserContent.trim() !== '') {
 		if (TIME_FLOW_HINT_PATTERNS.some((pattern) => pattern.test(lastUserContent))) {
 			hints.push(
-				'- 本次发言涉及时间流逝或时段变化 → 请调用 advance_time（minutes 为具体分钟数）后再输出正文；'
+				'- 本次发言可能涉及时间流逝或时段变化：如果剧情确实发生了时间流逝，请调用 advance_time（minutes 为具体分钟数）后再输出正文；'
 			);
 		}
 		if (LOCATION_HINT_PATTERNS.some((pattern) => pattern.test(lastUserContent))) {
 			hints.push(
-				'- 本次发言涉及地点变化 → 请调用 goto_location（优先从【已知地点】中选择）后再输出正文；'
+				'- 本次发言可能涉及地点变化：如果剧情确实发生了地点变化，请调用 goto_location（优先从【已知地点】中选择）后再输出正文；'
 			);
 		}
 		if (OUTFIT_HINT_PATTERNS.some((pattern) => pattern.test(lastUserContent))) {
 			hints.push(
-				'- 本次发言涉及穿着变化 → 请调用 set_outfit（item 用【衣柜】中的精确名称，「无」表示脱掉）后再输出正文；'
+				'- 本次发言可能涉及穿着变化：如果剧情确实发生了穿着变化，请调用 set_outfit（item 用【衣柜】中的精确名称，「无」表示脱掉）后再输出正文；'
 			);
 		}
 	}
@@ -139,7 +139,7 @@ export function buildPerTurnToolReminder(lastUserContent: string | undefined): s
 		'<system-reminder>',
 		'本消息是状态同步提醒，不属于剧情内容：',
 		'- 输出正文前，先判断本段剧情是否发生了时间流逝、地点变化、穿着变化或属性变化；',
-		'- 需要同步状态时，必须先在本次回复中发出对应的工具调用（tool_calls），收到工具反馈后再输出正文；',
+		'- 关键词命中只是提醒你复核，不代表状态一定变化：只有确认剧情确实发生了时间/地点/穿着/属性变化时，才必须先在本次回复中发出对应的工具调用（tool_calls），收到工具反馈后再输出正文；',
 		'- 只口头描述状态变化而不调用工具，视为未完成状态同步，正文中的状态描述将与实际状态不一致。',
 		...hints,
 		'</system-reminder>'

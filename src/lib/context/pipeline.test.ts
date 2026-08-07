@@ -93,6 +93,18 @@ describe('buildPerTurnToolReminder', () => {
 		expect(text).toContain('涉及地点变化');
 	});
 
+	it('针对性提醒采用「可能」措辞，允许模型判断后不调用', () => {
+		const location = buildPerTurnToolReminder('我们回宿舍吧');
+		expect(location).toContain('可能涉及地点变化');
+		expect(location).toContain('如果剧情确实发生了地点变化');
+		expect(buildPerTurnToolReminder('快把衬衫穿上')).toContain(
+			'如果剧情确实发生了穿着变化'
+		);
+		expect(buildPerTurnToolReminder('我排了几分钟队')).toContain(
+			'如果剧情确实发生了时间流逝'
+		);
+	});
+
 	it('用户发言命中穿着变化时追加 set_outfit 提醒', () => {
 		const text = buildPerTurnToolReminder('快把衬衫穿上');
 		expect(text).toContain('set_outfit');
