@@ -1415,3 +1415,24 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 **代价**：意图模式是启发式，可能对「提到换衣但无换装意图」的思考触发一次额外
 重试（重试提示允许模型拒绝，成本为一次请求）；提醒移入用户消息会让输入预览
 里的用户消息多出一段提醒文本（与真实发送一致，透明可见）。
+
+## D94：记忆编辑「保存失败」但界面显示已改——DB 边界缺失代理深拷贝
+
+**问题**：修改记忆时提示「保存记忆失败」，但切页后界面仍显示修改后的内容。
+根因：`memoryStore.update` 先更新内存态（`entries` 立即生效），再写 DB；而
+`{ ...current }` 展开的是 Svelte 5 `$state` 代理，嵌套的 `keywords` 数组仍是
+代理，Dexie `put` 走 IndexedDB structuredClone 时抛 DataCloneError
+（“could not be cloned”）→ 报「保存记忆失败」。内存态已更新所以界面显示正确，
+但 DB 写入实际失败，刷新后会丢失。
+
+**选择**：在 `MemoryRepository` 的 DB 边界统一 `clonePlain`（与 `kv-repo`、
+`character-manager` 一致）：`upsert`/`bulkPut` 写入前深拷贝，structuredClone
+失败时退回 JSON 深拷贝。存储层无需感知 Svelte 代理，所有调用方（手动编辑、
+置顶、markUsed、AI 导入）自动受益。
+
+**理由**：项目里 `src/lib/core/clone.ts` 就是为此设计的（角色状态、设置等此前
+已修过同类问题），记忆仓库是唯一遗漏的写入边界。在仓库收口比在每个 store
+方法里拷贝更不易漏。
+
+**代价**：每次写入多一次深拷贝（记忆条目体积小，可忽略）；JSON 回退会丢弃
+不可克隆属性，但记忆数据模型保证为 JSON 安全值。

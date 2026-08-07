@@ -44,6 +44,22 @@ describe('MemoryRepository', () => {
 		expect(await repo.getAll()).toHaveLength(2);
 	});
 
+	it('upsert 兼容 Svelte 响应式代理值（structuredClone 兜底）', async () => {
+		const entry = memory('m-proxy');
+		entry.keywords = new Proxy(['打雷'], {});
+		await repo.upsert(entry);
+		const stored = await repo.getAll();
+		expect(stored[0]!.keywords).toEqual(['打雷']);
+	});
+
+	it('bulkPut 兼容 Svelte 响应式代理值', async () => {
+		const entry = memory('m-bulk-proxy');
+		entry.keywords = new Proxy(['怕雷'], {});
+		await repo.bulkPut([entry]);
+		const stored = await repo.getAll();
+		expect(stored[0]!.keywords).toEqual(['怕雷']);
+	});
+
 	it('bulkPut 空数组为无操作', async () => {
 		await repo.bulkPut([]);
 		expect(await repo.getAll()).toEqual([]);
