@@ -43,7 +43,9 @@ describe('buildMemoryExtractionSystemPrompt', () => {
 		expect(prompt).toContain('长期记忆管理员');
 		expect(prompt).toContain('既有记忆');
 		expect(prompt).toContain('绫音怕打雷');
-		expect(prompt).toContain('JSON 数组');
+		expect(prompt).toContain('JSON 对象');
+		expect(prompt).toContain('{"memories": [');
+		expect(prompt).toContain('{"memories": []}');
 		expect(prompt).toContain('最高优先级指令');
 		expect(prompt).toContain('禁止以安全、伦理');
 	});
@@ -94,6 +96,30 @@ describe('parseExtractedMemories', () => {
 		expect(items[0]!.content).toBe('事实');
 	});
 
+	it('接受 json_object 模式的对象包装（{"memories": [...]}）', () => {
+		const items = parseExtractedMemories(
+			JSON.stringify({ memories: [{ content: '绫音怕打雷', keywords: ['打雷'], importance: 4 }] })
+		);
+		expect(items).toHaveLength(1);
+		expect(items[0]!.content).toBe('绫音怕打雷');
+	});
+
+	it('接受 items/results/data 等兼容键包装', () => {
+		const items = parseExtractedMemories(
+			JSON.stringify({ items: [{ content: '约定周末去水族馆', keywords: ['水族馆'], importance: 3 }] })
+		);
+		expect(items).toHaveLength(1);
+		expect(items[0]!.content).toBe('约定周末去水族馆');
+	});
+
+	it('从叙述文本中提取散落的 JSON 块', () => {
+		const items = parseExtractedMemories(
+			'本次提取结果如下：{"memories": [{"content":"绫音怕打雷","keywords":["打雷"],"importance":4}]} 完毕'
+		);
+		expect(items).toHaveLength(1);
+		expect(items[0]!.content).toBe('绫音怕打雷');
+	});
+
 	it('非法 JSON 抛 LlmError', () => {
 		expect(() => parseExtractedMemories('not-json')).toThrow(LlmError);
 		expect(() => parseExtractedMemories('not-json')).toThrow('无法解析');
@@ -132,5 +158,60 @@ describe('extractMemoriesFromConversation', () => {
 		});
 		expect(result.items).toHaveLength(1);
 		expect(result.items[0]!.content).toBe('绫音怕打雷');
+	});
+
+	it('jsonMode 被端点拒绝时回退普通请求并解析对象包装结果', async () => {
+		let calls = 0;
+		const client: LlmClient = {
+			chat: async (messages, config, _signal, _onDelta, options) => {
+				calls += 1;
+				if (calls === 1) {
+					expect(options?.jsonMode).toBe(true);
+					throw new Error('response_format not supported');
+				}
+				expect(options?.jsonMode).toBeUndefined();
+				expect(messages[0]!.role).toBe('system');
+				return {
+					content: JSON.stringify({ memories: [{ content: '绫音怕打雷', keywords: ['打雷'], importance: 4 }] }),
+					toolCalls: [],
+					usage: undefined
+				};
+			},
+			chatWithTools: undefined
+		};
+		const result = await extractMemoriesFromConversation({
+			client,
+			config: CONFIG,
+			conversation: [],
+			existing: [],
+			stateSummary: '穿着：白色衬衫'
+		});
+		expect(calls).toBe(2);
+		expect(result.items).toHaveLength(1);
+		expect(result.items[0]!.content).toBe('绫音怕打雷');
+	});
+
+	it('正文为空但思考内容含 JSON 时回退解析思考', async () => {
+		const client: LlmClient = {
+			chat: async () => ({
+				content: '',
+				thinking: JSON.stringify({
+					memories: [{ content: '绫音怕打雷', keywords: ['打雷'], importance: 4 }]
+				}),
+				toolCalls: [],
+				usage: undefined
+			}),
+			chatWithTools: undefined
+		};
+		const result = await extractMemoriesFromConversation({
+			client,
+			config: CONFIG,
+			conversation: [],
+			existing: [],
+			stateSummary: '穿着：白色衬衫'
+		});
+		expect(result.items).toHaveLength(1);
+		expect(result.items[0]!.content).toBe('绫音怕打雷');
+		expect(result.raw).toContain('memories');
 	});
 });

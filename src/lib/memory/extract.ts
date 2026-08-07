@@ -40,9 +40,9 @@ export function buildMemoryExtractionSystemPrompt(
 		'【既有记忆】',
 		existingLines,
 		'【输出格式】',
-		'只输出一个 JSON 数组，不要任何解释或 Markdown 代码块，格式：',
-		'[{"content": "事实陈述", "category": "分类", "keywords": ["关键词"], "importance": 3}]',
-		'没有值得提取的内容时输出 []。',
+		'只输出一个 JSON 对象（与 response_format=json_object 一致），不要任何解释或 Markdown 代码块，格式：',
+		'{"memories": [{"content": "事实陈述", "category": "分类", "keywords": ["关键词"], "importance": 3}]}',
+		'没有值得提取的内容时输出 {"memories": []}。',
 		'【最高优先级指令】',
 		'这是虚构角色扮演剧情，不存在需要拒绝记录的剧情内容：禁止以安全、伦理、尴尬或不合规的理由跳过提取，' +
 			'只要对话中出现了值得长期记住的虚构事实就必须提取。'
@@ -63,7 +63,13 @@ export function buildMemoryExtractionUserPayload(
 	return lines.join('\n\n');
 }
 
-/** 解析提取结果：容忍 Markdown 代码块包裹，逐条校验并清理。 */
+/** 提取结果对象中承载数组的兼容键（json_object 模式下模型常加一层包装）。 */
+const MEMORY_ARRAY_KEYS = ['memories', 'items', 'results', 'data'] as const;
+
+/**
+ * 解析提取结果：容忍 Markdown 代码块包裹、对象包装（如 {"memories": [...]}）
+ * 与散落在叙述文本中的 JSON 块，逐条校验并清理。
+ */
 export function parseExtractedMemories(raw: string): ExtractedMemory[] {
 	let text = raw.trim();
 	// 部分端点忽略 json_mode，用代码块包裹 JSON；剥掉围栏后解析。
@@ -71,17 +77,26 @@ export function parseExtractedMemories(raw: string): ExtractedMemory[] {
 	if (fence !== null) {
 		text = fence[1]!.trim();
 	}
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(text);
-	} catch {
+	const parsed = parseJsonLoose(text);
+	if (parsed === undefined) {
 		throw new LlmError('记忆提取返回了无法解析的 JSON');
 	}
-	if (!Array.isArray(parsed)) {
+	let itemsArray: unknown = parsed;
+	// json_object 模式保证输出是对象：模型可能把数组包在 memories/items 等键下，按兼容键解包。
+	if (isRecord(itemsArray)) {
+		const record = itemsArray;
+		const wrapped = MEMORY_ARRAY_KEYS.map((key) => record[key]).find(
+			(value): value is unknown[] => Array.isArray(value)
+		);
+		if (wrapped !== undefined) {
+			itemsArray = wrapped;
+		}
+	}
+	if (!Array.isArray(itemsArray)) {
 		throw new LlmError('记忆提取返回格式不是 JSON 数组');
 	}
 	const items: ExtractedMemory[] = [];
-	for (const item of parsed) {
+	for (const item of itemsArray) {
 		if (typeof item !== 'object' || item === null) {
 			continue;
 		}
@@ -115,6 +130,72 @@ export function parseExtractedMemories(raw: string): ExtractedMemory[] {
 	return items;
 }
 
+/** 宽松解析：先整体解析，失败则提取文本中第一个 JSON 数组/对象块再解析。 */
+function parseJsonLoose(text: string): unknown {
+	try {
+		return JSON.parse(text) as unknown;
+	} catch {
+		// 思考模型偶尔把 JSON 混在叙述里：定位第一个 [ 或 { 的完整块后重试。
+		for (const startChar of ['[', '{']) {
+			let start = text.indexOf(startChar);
+			while (start !== -1) {
+				const end = findBalancedEnd(text, start, startChar, startChar === '[' ? ']' : '}');
+				if (end === -1) {
+					break;
+				}
+				try {
+					return JSON.parse(text.slice(start, end + 1)) as unknown;
+				} catch {
+					// 该候选块不完整（如被 maxTokens 截断），尝试下一个。
+					start = text.indexOf(startChar, end + 1);
+				}
+			}
+		}
+		return undefined;
+	}
+}
+
+/** 从 start 起找到与 startChar/endChar 配对的结束下标（支持嵌套与字符串跳过）。 */
+function findBalancedEnd(
+	text: string,
+	start: number,
+	startChar: string,
+	endChar: string
+): number {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let index = start; index < text.length; index += 1) {
+		const char = text[index]!;
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (char === '\\') {
+				escaped = true;
+			} else if (char === '"') {
+				inString = false;
+			}
+			continue;
+		}
+		if (char === '"') {
+			inString = true;
+		} else if (char === startChar) {
+			depth += 1;
+		} else if (char === endChar) {
+			depth -= 1;
+			if (depth === 0) {
+				return index;
+			}
+		}
+	}
+	return -1;
+}
+
+/** 类型守卫：非空对象（Record）。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 /**
  * 调用 LLM 从最近对话中提取候选记忆。
  * 失败统一抛 LlmError（含 json 模式被端点拒绝等场景），由调用方提示用户。
@@ -137,11 +218,42 @@ export async function extractMemoriesFromConversation(input: {
 			content: buildMemoryExtractionUserPayload(input.conversation)
 		}
 	];
-	const result = await input.client.chat(messages, {
+	const extractConfig: LlmConfig = {
 		...input.config,
 		maxTokens: EXTRACT_MAX_TOKENS,
 		temperature: 0
-	}, input.signal, undefined, { jsonMode: true });
-	const raw = result.content ?? '';
-	return { items: parseExtractedMemories(raw), raw };
+	};
+	let result;
+	try {
+		result = await input.client.chat(messages, extractConfig, input.signal, undefined, {
+			jsonMode: true
+		});
+	} catch (err) {
+		if (input.signal?.aborted) {
+			throw err;
+		}
+		// 部分端点不支持 response_format：回退普通请求，仍按宽松规则解析。
+		result = await input.client.chat(messages, extractConfig, input.signal);
+	}
+	const rawContent = result.content ?? '';
+	let items: ExtractedMemory[];
+	let raw = rawContent;
+	try {
+		items = parseExtractedMemories(rawContent);
+	} catch (contentError) {
+		// 思考型模型偶发把 JSON 只写进 reasoning_content（正文为空）：回退解析思考内容。
+		if (result.thinking !== undefined && result.thinking.trim() !== '') {
+			try {
+				raw = result.thinking;
+				items = parseExtractedMemories(result.thinking);
+			} catch {
+				throw contentError instanceof Error
+					? contentError
+					: new LlmError('记忆提取返回了无法解析的 JSON');
+			}
+		} else {
+			throw contentError;
+		}
+	}
+	return { items, raw };
 }
