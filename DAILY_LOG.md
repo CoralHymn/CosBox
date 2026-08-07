@@ -2221,3 +2221,34 @@ AI 一次回复可能包含多轮「思考 → 工具调用 → 思考 → 最�
 ### 门禁
 
 - 689 个单元测试全过；check / lint 全绿。
+
+## 2026-08-07（续）：工具调用提醒强化——常驻策略 + 逐轮 system-reminder
+
+### 需求
+
+用户反馈：即便有了残缺 tool_calls 重试、思考提到工具名补调、时间描述补调、
+LLM 状态确认等兜底链，DeepSeek V4 仍偶发「思考里说要调用 advance_time / 换装、
+最终 tool_calls 为空」。询问主流 agent（opencode / Chatbox）是「系统提示内加强
+工具提示词」还是「对话命中关键词时注入上下文提醒」。
+
+### 调研结论
+
+- opencode：常驻强「Tool usage policy」系统提示 + 对每条用户消息注入
+  `<system-reminder>` 逐轮提醒（按 agent 模式条件注入，不是关键词命中）；
+- Chatbox：原生工具调用（Vercel AI SDK）；对不支持工具调用的模型，每次请求注入
+  JSON 工具指令兜底；
+- DeepSeek V4（issue #1244）：系统提示明确「需要调用时只输出 tool_calls 字段，
+  绝不把函数名/JSON 写进 content」后漏调用率从 ~12% 降到 ~3%。
+
+### 实现
+
+- `buildToolGuidance` 强化为工具使用策略：先 tool_calls 后正文、允许并行多工具、
+  「未调用工具 = 状态未同步、正文描述将被视为剧情事实错误」；
+- 新增 `buildPerTurnToolReminder`：每次请求注入 `<system-reminder>` 轻量提醒
+  （对齐 opencode），用户发言命中时间/地点/穿着信号时追加针对性一行
+  （确定性关键词，请求前判断，非 LLM、非兜底）；
+- `buildContext` 在启用状态工具时注入该提醒，开发者输入预览与最近提示词同步可见。
+
+### 门禁
+
+- 713 个单元测试全过（新增 7 个）；check / lint 全绿。
