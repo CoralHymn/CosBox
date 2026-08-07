@@ -77,17 +77,16 @@ button:disabled {
 	z-index: 0;
 }
 
-/* 主题背景图：由 .app 承载（::before 图层），透明度仅作用于图片本身。 */
-.app::before {
-	content: '';
+/* 主题背景图图层：图片与透明度由 JS 直接设置（theme-backdrop 元素），
+   避免超长 data URL 存进 CSS 变量导致解析失败；负 z-index 在 .app 的
+   层叠上下文内，位于 html 画布之上、.app 子元素之下。 */
+.theme-backdrop {
 	position: fixed;
 	inset: 0;
 	z-index: -1;
-	background-image: var(--bg-image, none);
 	background-size: cover;
 	background-position: center;
 	background-repeat: no-repeat;
-	opacity: var(--bg-image-opacity, 1);
 	pointer-events: none;
 }
 

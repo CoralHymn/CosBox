@@ -175,8 +175,6 @@ export function resolveThemeCss(theme: ThemeConfig): Record<string, string> {
 		vars[`--${key}`] = value;
 	}
 	if (theme.backgroundImage.trim() !== '') {
-		vars['--bg-image'] = `url("${theme.backgroundImage}")`;
-		vars['--bg-image-opacity'] = String(clampOpacity(theme.backgroundOpacity));
 		// 有背景图时让顶栏/导航/输入条/侧栏等结构面透明，背景图铺满全屏。
 		vars['--bg-app-header'] = 'transparent';
 		vars['--bg-app-panel'] = 'transparent';
@@ -198,9 +196,15 @@ export function applyThemeToDocument(theme: ThemeConfig): void {
 	for (const [key, value] of Object.entries(resolveThemeCss(theme))) {
 		root.style.setProperty(key, value);
 	}
-	if (theme.backgroundImage.trim() === '') {
-		root.style.removeProperty('--bg-image');
-		root.style.removeProperty('--bg-image-opacity');
+	// 背景图与透明度直接写到专用图层元素的内联样式：
+	// 超长 data URL 存 CSS 变量在部分浏览器会解析失败（表现为背景变黑）。
+	const backdrop = document.querySelector<HTMLElement>('.theme-backdrop');
+	if (theme.backgroundImage.trim() !== '') {
+		backdrop?.style.setProperty('background-image', `url("${theme.backgroundImage}")`);
+		backdrop?.style.setProperty('opacity', String(clampOpacity(theme.backgroundOpacity)));
+	} else {
+		backdrop?.style.removeProperty('background-image');
+		backdrop?.style.removeProperty('opacity');
 		root.style.removeProperty('--bg-app-header');
 		root.style.removeProperty('--bg-app-panel');
 		root.style.removeProperty('--bg-app-surface');

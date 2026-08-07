@@ -1891,3 +1891,28 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 
 - 43 条 e2e 全过（主题用例连跑 3/3）；633 个单元测试全过；
   check / lint 全绿。
+
+## 2026-08-07（续）：背景图改为 JS 直设专用图层（根治大图失效）
+
+### 根因
+
+用户上传真实图片（几十 KB ~ 几 MB）后仍是黑背景：背景图通过 CSS 变量
+`--bg-image` 承载 `url("data:…")`，超长值在部分浏览器对内联样式变量的
+解析不可靠，被静默丢弃，`var(--bg-image, none)` 回退 `none`。
+
+### 修复
+
+- 新增 `.theme-backdrop` 专用图层元素（`.app` 内、`position: fixed`、
+  `z-index: -1`）；背景图与透明度由 `applyThemeToDocument` 用 JS 直接
+  写到该元素内联样式，**完全不走 CSS 变量**，内联样式对大 data URL 无限制。
+- 尝试过 `url(var(--bg-image, none))` 方案，但 Vite 的 lightningcss
+  直接报 `BadUrl` 编译错误，放弃该方案。
+- `resolveThemeCss` 不再输出 `--bg-image` / `--bg-image-opacity`；
+  颜色与结构面/内容面透明变量保持不变。
+- e2e 断言改为 `.theme-backdrop` 的 computed backgroundImage / opacity。
+
+### 门禁
+
+- 43 条 e2e 全过；633 个单元测试全过；check / lint / build 全绿；
+  592KB 真实 PNG 上传后内联 `background-image` 完整写入（789KB 字符串），
+  像素采样呈现测试图红→蓝渐变（顶栏/内容区/侧栏均可见）。
