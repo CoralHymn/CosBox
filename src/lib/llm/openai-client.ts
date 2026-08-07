@@ -430,8 +430,8 @@ function extractFinishReason(data: unknown): string | undefined {
 	return typeof choice.finish_reason === 'string' ? choice.finish_reason : undefined;
 }
 
-/** 组装请求体：基础字段 + 可选 tools 声明。 */
-function buildRequestBody(
+/** 组装请求体：基础字段 + 可选 tools 声明。导出供调试视图展示实际发送内容。 */
+export function buildRequestBody(
 	messages: ChatMessage[],
 	tools: readonly StateToolSchema[],
 	config: LlmConfig,
