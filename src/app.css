@@ -49,20 +49,6 @@ body {
 	background: transparent;
 }
 
-/* 主题背景图：固定全屏图层，透明度由 --bg-image-opacity 控制（0-1）。 */
-body::before {
-	content: '';
-	position: fixed;
-	inset: 0;
-	z-index: -1;
-	background-image: var(--bg-image, none);
-	background-size: cover;
-	background-position: center;
-	background-repeat: no-repeat;
-	opacity: var(--bg-image-opacity, 1);
-	pointer-events: none;
-}
-
 button,
 input,
 textarea,
@@ -85,6 +71,24 @@ button:disabled {
 	display: grid;
 	grid-template-rows: 54px 1fr;
 	height: 100vh;
+	position: relative;
+	/* 创建独立层叠上下文：让 ::before 的负 z-index 只作用于 .app 内部，
+	   背景图始终位于 html 画布之上、.app 子元素之下。 */
+	z-index: 0;
+}
+
+/* 主题背景图：由 .app 承载（::before 图层），透明度仅作用于图片本身。 */
+.app::before {
+	content: '';
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	background-image: var(--bg-image, none);
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
+	opacity: var(--bg-image-opacity, 1);
+	pointer-events: none;
 }
 
 .header {

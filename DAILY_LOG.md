@@ -1810,3 +1810,34 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 
 - 43 条 e2e 全过；632 个单元测试全过；check / lint 全绿；
   像素采样验证顶栏/导航/侧栏位置均透出背景图。
+
+## 2026-08-07（续）：背景图层归属调整到 .app
+
+### 修正
+
+- 删除 `body::before` 图层，背景图改为 `.app` 承载：`.app` 加
+  `position: relative`，`.app::before` 固定全屏图层渲染
+  `background-image: var(--bg-image)`，透明度由
+  `--bg-image-opacity` 控制（仅作用于图片，避免整个 UI 半透明）。
+- e2e 断言选择器同步为 `.app::before`。
+- 说明：`theme.ts` 此前已正确输出 `--bg-image` /
+  `--bg-image-opacity` / `--bg-app-header` / `--bg-app-panel`
+  （178–182 行），本次无需改动 JS。
+
+### 门禁
+
+- 43 条 e2e 全过；632 个单元测试全过；check / lint 全绿；
+  像素采样验证顶栏/导航/侧栏透出背景图（.app::before 图层）。
+
+## 2026-08-07（续）：.app 补 z-index: 0 创建层叠上下文
+
+### 修正
+
+`.app` 增加 `z-index: 0`：创建独立层叠上下文，把 `.app::before`
+（`z-index: -1`）的绘制约束在 `.app` 内部——背景图始终位于 `html` 画布之上、
+`.app` 子元素之下，避免负 z-index 逸出到根层叠上下文与画布竞争。
+
+### 门禁
+
+- 43 条 e2e 全过；check / lint 全绿；像素采样验证顶栏/导航/侧栏
+  透出背景图（z-index 0 层叠上下文内）。
