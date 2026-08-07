@@ -188,7 +188,7 @@ describe('OpenAiCompatibleClient', () => {
 				}
 			],
 			TOOL_SCHEMAS,
-			config
+			{ ...config, providerId: 'deepseek', model: 'deepseek-v4-flash' }
 		);
 		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
 		const body = JSON.parse(init!.body as string);
@@ -201,6 +201,33 @@ describe('OpenAiCompatibleClient', () => {
 		vi.stubGlobal('fetch', fetchSpy);
 		const client = new OpenAiCompatibleClient();
 		await client.chat([{ role: 'user', content: 'hi', reasoning: 'x' }], config);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.messages[0]).not.toHaveProperty('reasoning_content');
+	});
+
+	it('DeepSeek 思考模型：assistant 无 reasoning 也补 reasoning_content 空串（切回思考模型不再丢思考）', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const deepSeekConfig = { ...config, providerId: 'deepseek', model: 'deepseek-v4-flash' };
+		await client.chat(
+			[{ role: 'assistant', content: '这条来自非思考模型的回复' }],
+			deepSeekConfig
+		);
+		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+		const body = JSON.parse(init!.body as string);
+		expect(body.messages[0]).toHaveProperty('reasoning_content');
+		expect(body.messages[0].reasoning_content).toBe('');
+	});
+
+	it('非 DeepSeek 模型：assistant 携带 reasoning 也不序列化 reasoning_content', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('好的'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chat([{ role: 'assistant', content: 'hi', reasoning: 'x' }], config);
 		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
 		const body = JSON.parse(init!.body as string);
 		expect(body.messages[0]).not.toHaveProperty('reasoning_content');
