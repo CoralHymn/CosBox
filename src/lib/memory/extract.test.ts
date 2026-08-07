@@ -112,12 +112,29 @@ describe('parseExtractedMemories', () => {
 		expect(items[0]!.content).toBe('约定周末去水族馆');
 	});
 
+	it('接受任意数组值包装（如 {"result": [...]}）', () => {
+		const items = parseExtractedMemories(
+			JSON.stringify({ result: [{ content: '绫音在游泳课后约定去约会', keywords: ['约会'], importance: 4 }] })
+		);
+		expect(items).toHaveLength(1);
+		expect(items[0]!.content).toBe('绫音在游泳课后约定去约会');
+	});
+
+	it('空对象视为无新记忆', () => {
+		expect(parseExtractedMemories('{}')).toEqual([]);
+	});
+
 	it('从叙述文本中提取散落的 JSON 块', () => {
 		const items = parseExtractedMemories(
 			'本次提取结果如下：{"memories": [{"content":"绫音怕打雷","keywords":["打雷"],"importance":4}]} 完毕'
 		);
 		expect(items).toHaveLength(1);
 		expect(items[0]!.content).toBe('绫音怕打雷');
+	});
+
+	it('报错信息包含原始返回预览，便于定位真实输出', () => {
+		expect(() => parseExtractedMemories('{"content":"x"}')).toThrow('{"content":"x"}');
+		expect(() => parseExtractedMemories('这是叙述文本')).toThrow('这是叙述文本');
 	});
 
 	it('非法 JSON 抛 LlmError', () => {

@@ -1,6 +1,7 @@
 import { LlmError } from '../core/errors';
 import type { ChatMessageView } from '../core/types';
 import type { ChatMessage, LlmClient, LlmConfig } from '../llm/types';
+import { truncate } from '../utils/format';
 import { MEMORY_CATEGORIES, type ExtractedMemory, type MemoryEntry } from './types';
 
 /** 提取时输入的最大对话轮数（取最近 N 条消息）。 */
@@ -79,7 +80,7 @@ export function parseExtractedMemories(raw: string): ExtractedMemory[] {
 	}
 	const parsed = parseJsonLoose(text);
 	if (parsed === undefined) {
-		throw new LlmError('记忆提取返回了无法解析的 JSON');
+		throw new LlmError(`记忆提取返回了无法解析的 JSON：${truncate(raw, 160)}`);
 	}
 	let itemsArray: unknown = parsed;
 	// json_object 模式保证输出是对象：模型可能把数组包在 memories/items 等键下，按兼容键解包。
@@ -90,10 +91,20 @@ export function parseExtractedMemories(raw: string): ExtractedMemory[] {
 		);
 		if (wrapped !== undefined) {
 			itemsArray = wrapped;
+		} else {
+			// 兼容任意数组值包装（如 {"result": [...]}）；空对象视为无新记忆。
+			const anyArray = Object.values(record).find(
+				(value): value is unknown[] => Array.isArray(value)
+			);
+			if (anyArray !== undefined) {
+				itemsArray = anyArray;
+			} else if (Object.keys(record).length === 0) {
+				itemsArray = [];
+			}
 		}
 	}
 	if (!Array.isArray(itemsArray)) {
-		throw new LlmError('记忆提取返回格式不是 JSON 数组');
+		throw new LlmError(`记忆提取返回格式不是 JSON 数组：${truncate(raw, 160)}`);
 	}
 	const items: ExtractedMemory[] = [];
 	for (const item of itemsArray) {

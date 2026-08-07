@@ -116,6 +116,18 @@ describe('DemoLlmClient', () => {
 		expect(result.usage!.promptTokens).toBeGreaterThan(0);
 	});
 
+	it('chat：记忆提取请求返回合法空结果（不误报解析失败）', async () => {
+		const client = new DemoLlmClient();
+		const result = await client.chat(
+			[
+				{ role: 'system', content: '你是 CosBox 的长期记忆管理员。' },
+				{ role: 'user', content: '【最近对话】你好' }
+			],
+			DEFAULT_LLM_CONFIG
+		);
+		expect(result.content).toBe('{"memories": []}');
+	});
+
 	it('已中止的 signal 拒绝请求', async () => {
 		const client = new DemoLlmClient();
 		const controller = new AbortController();
