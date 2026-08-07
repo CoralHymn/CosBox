@@ -133,7 +133,7 @@
 			<span>{formatTimestamp(message.timestamp)}</span>
 		</div>
 		{#if message.role === 'assistant' && message.thinking !== undefined && message.thinking.trim() !== ''}
-			<details class="thinking">
+			<details class="thinking" open={message.id === 'stream-draft'}>
 				<summary>思考过程</summary>
 				<pre>{message.thinking}</pre>
 			</details>
@@ -150,7 +150,15 @@
 				onkeydown={onEditKeydown}
 			></textarea>
 		{:else}
-			{message.content}
+			{#if message.content !== ''}
+				{message.content}
+			{:else if message.id === 'stream-draft'}
+				<span class="stream-wait" aria-label="AI 正在思考">
+					<span class="dot"></span>思考中…
+				</span>
+			{:else if message.role === 'assistant'}
+				<span class="muted">（无正文，仅思考过程）</span>
+			{/if}
 		{/if}
 	</div>
 	{#if showControls}
@@ -397,5 +405,30 @@
 		outline: 1px solid var(--accent);
 		outline-offset: 3px;
 		border-radius: 6px;
+	}
+	.stream-wait {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		color: var(--text-faint);
+		font-size: 13px;
+	}
+	.stream-wait .dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--accent);
+		animation: stream-pulse 1.1s ease-in-out infinite;
+	}
+	@keyframes stream-pulse {
+		0%,
+		100% {
+			opacity: 0.25;
+			transform: scale(0.85);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1);
+		}
 	}
 </style>

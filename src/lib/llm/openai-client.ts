@@ -12,6 +12,11 @@ import type {
 	TokenUsage
 } from './types';
 
+/** 流式读取看门狗：超过该时长未收到任何数据块，判定连接挂起并抛错。 */
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
+/** 看门狗触发时的用户可见错误信息。 */
+const STREAM_IDLE_TIMEOUT_MESSAGE = '模型服务 120 秒未返回数据，连接可能挂起';
+
 /**
  * OpenAI-compatible Chat Completions 客户端。
  * 通过原生 fetch 调用任意兼容端点（LiteLLM Proxy、vLLM、Ollama 等均可）。
@@ -261,9 +266,27 @@ async function readSse(
 	let buffer = '';
 	let rawText = '';
 	let sawEvent = false;
+	let idleTimer: ReturnType<typeof setTimeout> | undefined;
+	/** 清除看门狗计时器（读到数据或流结束时调用）。 */
+	function clearIdleTimer(): void {
+		if (idleTimer !== undefined) {
+			clearTimeout(idleTimer);
+			idleTimer = undefined;
+		}
+	}
 	try {
 		while (true) {
-			const { done, value } = await reader.read();
+			// 每次等待数据块前挂上看门狗：长时间无字节说明服务端挂起，
+			// 立即取消读取并抛出可读错误，避免界面永远停在「思考中」。
+			const idleGuard = new Promise<never>((_, reject) => {
+				clearIdleTimer();
+				idleTimer = setTimeout(() => {
+					void reader.cancel().catch(() => undefined);
+					reject(new Error(STREAM_IDLE_TIMEOUT_MESSAGE));
+				}, STREAM_IDLE_TIMEOUT_MS);
+			});
+			const { done, value } = await Promise.race([reader.read(), idleGuard]);
+			clearIdleTimer();
 			if (done) {
 				break;
 			}
@@ -287,6 +310,7 @@ async function readSse(
 			}
 		}
 	} finally {
+		clearIdleTimer();
 		reader.releaseLock();
 	}
 	return { sawEvent, rawText };
@@ -604,11 +628,16 @@ function extractUsage(data: unknown): TokenUsage | undefined {
 		return undefined;
 	}
 	const details = usage.prompt_tokens_details;
-	const cachedTokens = toNonNegativeInt(isRecord(details) ? details.cached_tokens : undefined);
+	// DeepSeek 原生 API 在 usage 顶层返回 prompt_cache_hit_tokens /
+	// prompt_cache_miss_tokens，而非 OpenAI 标准的
+	// prompt_tokens_details.cached_tokens；两者都读，避免缓存显示恒为 0、
+	// 费用按未缓存价误算。
+	const openAiCached = toNonNegativeInt(isRecord(details) ? details.cached_tokens : undefined);
+	const deepseekCached = toNonNegativeInt(usage.prompt_cache_hit_tokens);
 	return {
 		promptTokens: promptTokens ?? 0,
 		completionTokens: completionTokens ?? 0,
-		cachedTokens: cachedTokens ?? 0
+		cachedTokens: openAiCached ?? deepseekCached ?? 0
 	};
 }
 

@@ -619,6 +619,45 @@ describe('OpenAiCompatibleClient', () => {
 		expect(result.usage).toEqual({ promptTokens: 120, completionTokens: 30, cachedTokens: 40 });
 	});
 
+	it('chat 解析 usage：兼容 DeepSeek 原生 prompt_cache_hit_tokens', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: '你好' } }],
+				usage: {
+					prompt_tokens: 200,
+					completion_tokens: 40,
+					prompt_cache_hit_tokens: 150,
+					prompt_cache_miss_tokens: 50
+				}
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], config);
+		expect(result.usage).toEqual({ promptTokens: 200, completionTokens: 40, cachedTokens: 150 });
+	});
+
+	it('chat 解析 usage：DeepSeek 缓存字段与 OpenAI cached_tokens 并存时优先 OpenAI 字段', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			toolResponse({
+				choices: [{ message: { content: '你好' } }],
+				usage: {
+					prompt_tokens: 200,
+					completion_tokens: 40,
+					prompt_tokens_details: { cached_tokens: 30 },
+					prompt_cache_hit_tokens: 150,
+					prompt_cache_miss_tokens: 50
+				}
+			})
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], config);
+		expect(result.usage).toEqual({ promptTokens: 200, completionTokens: 40, cachedTokens: 30 });
+	});
+
 	it('chat 解析 usage：缺省 cached 与小数向下取整', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(
