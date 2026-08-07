@@ -40,6 +40,8 @@
 		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
 		onSaveSync: (settings: SyncSettings) => Promise<void>;
 		onSaveTheme: (theme: ThemeConfig) => Promise<void>;
+		/** 模型服务管理的即时保存（换绑/保存服务/温度等），静默持久化。 */
+		onAutoSaveConfig: (config: LlmConfig) => Promise<void>;
 		onTestSync: (draft: SyncSettings) => Promise<SyncResult>;
 		onSyncNow: () => Promise<SyncResult>;
 		onFetchModels: (draft: LlmConfig) => Promise<FetchedModel[]>;
@@ -60,6 +62,7 @@
 		onSaveDeveloperMode,
 		onSaveSync,
 		onSaveTheme,
+		onAutoSaveConfig,
 		onTestSync,
 		onSyncNow,
 		onFetchModels,
@@ -562,6 +565,7 @@
 				judgeModelEntryId = rebind(judgeModelId, judgeModelEntryId);
 				generatorModelEntryId = rebind(generatorModelId, generatorModelEntryId);
 			}
+			await persistModelConfig();
 			serviceEditorOpen = false;
 			editingServiceId = null;
 		} finally {
@@ -594,6 +598,7 @@
 			serviceEditorOpen = false;
 			editingServiceId = null;
 		}
+		void persistModelConfig();
 	}
 
 	/** 角色绑定：下拉值为 `服务id::模型条目id`。 */
@@ -612,6 +617,7 @@
 			generatorModelId = parsed.serviceId;
 			generatorModelEntryId = parsed.entryId;
 		}
+		void persistModelConfig();
 	}
 
 	/** 某服务被哪些角色使用（徽标展示）。 */
@@ -658,6 +664,16 @@
 			return '演示模式';
 		}
 		return findProviderPreset(service.providerId)?.label ?? '自定义';
+	}
+
+	/** 模型服务管理区改动即时落库（静默保存，失败由父级提示）。 */
+	async function persistModelConfig(): Promise<void> {
+		try {
+			await onAutoSaveConfig(buildConfig());
+		} catch (err) {
+			// 父级已弹出错误提示，这里不再重复处理。
+			void err;
+		}
 	}
 
 	async function onImportFile(event: Event): Promise<void> {
@@ -1004,6 +1020,7 @@
 				step="0.1"
 				bind:value={temperature}
 				style="width: 100%;"
+				onchange={() => void persistModelConfig()}
 			/>
 			<p class="muted" style="margin-top: 2px;">
 				全局 Max Tokens（{maxTokens}）作为各服务未单独设置时的回退值；
