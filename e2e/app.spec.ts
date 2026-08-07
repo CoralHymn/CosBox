@@ -476,7 +476,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 	await expect
 		.poll(() =>
 			page.evaluate(
-				() => getComputedStyle(document.body, '::before').backgroundImage
+				() => getComputedStyle(document.querySelector('.app')!, '::before').backgroundImage
 			)
 		)
 		.toContain('data:image/svg+xml');
