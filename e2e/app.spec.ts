@@ -485,6 +485,12 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 			page.evaluate(() => getComputedStyle(document.body).backgroundColor)
 		)
 		.toBe('rgba(0, 0, 0, 0)');
+	// 有背景图时顶栏等结构面自动透明，背景图透过面板铺满
+	await expect
+		.poll(() =>
+			page.evaluate(() => getComputedStyle(document.querySelector('.header')!).backgroundColor)
+		)
+		.toBe('rgba(0, 0, 0, 0)');
 	// 透明度滑杆存在且可调
 	await expect(page.locator('#theme-bg-opacity')).toBeVisible();
 	await page.locator('#theme-bg-opacity').fill('50');

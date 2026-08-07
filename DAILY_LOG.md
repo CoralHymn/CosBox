@@ -1785,3 +1785,28 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 ### 门禁
 
 - 43 条 e2e 全过；check / lint 全绿；像素采样验证内容区背景图确实渲染。
+
+## 2026-08-07（续）：背景图铺满全屏（结构面透明化）
+
+### 根因
+
+上一轮修复后背景图已能渲染，但整屏被不透明结构面盖住：顶栏、导航栏、输入条、
+侧栏均为 `--bg-elevated`，卡片/气泡为 `--panel`——背景图只在小缝隙可见，
+用户感知仍是「没生效」。
+
+### 修复
+
+- `.header` / `.nav-rail` / `.composer` / `.side-preview` 背景改为
+  `var(--bg-app-header, var(--bg-elevated))`；`.panel` 用
+  `var(--bg-app-panel, transparent)`。
+- `resolveThemeCss` 在启用背景图时输出 `--bg-app-header: transparent` 与
+  `--bg-app-panel: transparent`，结构面自动透明、背景图透过铺满全屏；
+  无背景图时清理这些变量，外观与原来完全一致。
+- 图片透明度继续由 `body::before` 图层的 `--bg-image-opacity` 控制
+  （不放 `.app`，避免整个 UI 半透明）。
+- e2e 主题用例断言上传背景图后 `body` 与 `.header` 计算背景为透明。
+
+### 门禁
+
+- 43 条 e2e 全过；632 个单元测试全过；check / lint 全绿；
+  像素采样验证顶栏/导航/侧栏位置均透出背景图。
