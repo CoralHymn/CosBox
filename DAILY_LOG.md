@@ -2130,6 +2130,36 @@ DeepSeek V4 思考模式的回传要求在上一提交已补齐（每条 assista
 
 - 694 个单元测试全过；check / lint 全绿。
 
+## 2026-08-07（续）：AI 一轮回复合并为单气泡分段展示——解决「思考/输出被吞」
+
+### 需求
+
+AI 一次回复可能包含多轮「思考 → 工具调用 → 思考 → 最终输出」，
+旧实现把每个工具轮次拆成独立 assistant 消息 + 系统工具反馈消息，
+「一个思考绑一个输出」，导致流式时能看到、落库后内容被吞（多段候选场景
+只保留最后一段，工具调用前后的话丢失）。希望像主流 agent 一样，
+**AI 一轮回复缩到一个气泡内**，按序展示全部思考 / 正文 / 工具调用段。
+
+### 实现
+
+- 数据模型：新增 `MessageSegment`（kind: thinking/text/tool），
+  `ChatMessageView.segments` 与 `SnapshotDelta.message.segments` 支持分段；
+  快照重建、addMessage、editMessage（编辑正文替换首个 text 段）全部兼容。
+- 落库：`runAiReply` 把 rounds + 最终 reply/thinking 合并为**一条**
+  assistant 消息的 segments（工具反馈也进气泡，不再生成独立系统消息）；
+  手动 LLM 状态确认补执行的工具通过 `appendSegments` 追加进原气泡。
+- 展示：`MessageBubble` 按段渲染——思考折叠块、正文段、工具调用芯片；
+  旧消息无 segments 时回退原渲染，流式草稿保持实时思考显示。
+- 上下文：`pipeline.expandSegmentedMessage` 把分段还原为发送序列
+  （assistant 思考+正文、工具反馈 system），与旧发送结构一致，
+  DeepSeek 思考模式的 reasoning_content 回传不受影响。
+- e2e：更新多段/工具反馈断言为「1 个气泡内多段」；顺带修复设置页改版后
+  失效的 6 个旧用例（#llm-provider → 模型服务管理控件）与移动端导航计数。
+
+### 门禁
+
+- 697 个单元测试全过；check / lint 全绿；45 个 e2e 全过。
+
 ## 2026-08-07（续）：上下文用量按对话模型展示 + 模型服务管理即时保存
 
 ### 需求

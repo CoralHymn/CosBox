@@ -132,12 +132,6 @@
 			{/if}
 			<span>{formatTimestamp(message.timestamp)}</span>
 		</div>
-		{#if message.role === 'assistant' && message.thinking !== undefined && message.thinking.trim() !== ''}
-			<details class="thinking" open={message.id === 'stream-draft'}>
-				<summary>思考过程</summary>
-				<pre>{message.thinking}</pre>
-			</details>
-		{/if}
 		{#if editing}
 			<!-- 用 textarea + bind:value 双向绑定，draft 始终与输入同步，
 			     保存直接读 JS 变量，不受 DOM/输入事件时序影响。 -->
@@ -149,7 +143,34 @@
 				oninput={onEditInput}
 				onkeydown={onEditKeydown}
 			></textarea>
-		{:else}
+		{/if}
+		{#if message.segments !== undefined && message.segments.length > 0}
+			<!-- AI 一轮回复的分段展示：思考 / 正文 / 工具调用按序排列在一个气泡内。 -->
+			{#each message.segments as segment, i (i)}
+				{#if segment.kind === 'thinking'}
+					<details class="thinking" open={message.id === 'stream-draft'}>
+						<summary>思考过程</summary>
+						<pre>{segment.content}</pre>
+					</details>
+				{:else if segment.kind === 'tool'}
+					<div class="tool-segment">
+						<span class="tool-output"
+							>【工具调用】{segment.toolName ?? ''}：{segment.content}</span
+						>
+					</div>
+				{:else}
+					{#if segment.content !== ''}
+						<div class="segment-text">{segment.content}</div>
+					{/if}
+				{/if}
+			{/each}
+		{:else if !editing}
+			{#if message.role === 'assistant' && message.thinking !== undefined && message.thinking.trim() !== ''}
+				<details class="thinking" open={message.id === 'stream-draft'}>
+					<summary>思考过程</summary>
+					<pre>{message.thinking}</pre>
+				</details>
+			{/if}
 			{#if message.content !== ''}
 				{message.content}
 			{:else if message.id === 'stream-draft'}
@@ -419,6 +440,40 @@
 		border-radius: 50%;
 		background: var(--accent);
 		animation: stream-pulse 1.1s ease-in-out infinite;
+	}
+	.segment-text {
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.segment-text + .segment-text {
+		margin-top: 10px;
+	}
+	.tool-segment {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px;
+		margin-top: 8px;
+		padding: 6px 10px;
+		border-radius: 8px;
+		background: var(--panel-2);
+		border: 1px solid var(--border);
+		font-size: 13px;
+		line-height: 1.5;
+	}
+	.tool-segment .tool-label {
+		color: var(--accent);
+		font-weight: 600;
+	}
+	.tool-segment .tool-name {
+		color: var(--text);
+		font-weight: 600;
+	}
+	.tool-segment .tool-output {
+		color: var(--text-faint);
+		white-space: pre-wrap;
+		word-break: break-word;
+		flex-basis: 100%;
 	}
 	@keyframes stream-pulse {
 		0%,

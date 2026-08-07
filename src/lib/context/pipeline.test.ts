@@ -179,6 +179,46 @@ describe('buildContext', () => {
 		expect(bundle.history.map((m) => m.id)).toEqual(['1']);
 	});
 
+	it('分段 assistant 消息展开为 思考+正文 / 工具反馈 / 思考+正文 的发送序列', () => {
+		const conversation: ChatMessageView[] = [
+			{ id: 'u1', role: 'user', content: '好了快穿上吧', timestamp: 1 },
+			{
+				id: 'a1',
+				role: 'assistant',
+				content: '（手忙脚乱地扣好扣子）呼——这下不会着凉了。',
+				timestamp: 2,
+				segments: [
+					{ kind: 'thinking', content: '先调用 set_outfit 换装' },
+					{ kind: 'text', content: '（愣了一下）我、我马上穿！' },
+					{ kind: 'tool', content: '已把上衣更换为「白色衬衫」', toolName: 'set_outfit' },
+					{ kind: 'thinking', content: '穿好了，回应一下' },
+					{ kind: 'text', content: '（手忙脚乱地扣好扣子）呼——这下不会着凉了。' }
+				]
+			}
+		];
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: []
+		});
+		const roles = bundle.messages.map((message) => message.role);
+		expect(roles).toEqual(['user', 'assistant', 'system', 'assistant']);
+		expect(bundle.messages[1]).toMatchObject({
+			role: 'assistant',
+			content: '（愣了一下）我、我马上穿！',
+			reasoning: '先调用 set_outfit 换装'
+		});
+		expect(bundle.messages[2]).toMatchObject({
+			role: 'system',
+			content: '【工具调用】set_outfit：已把上衣更换为「白色衬衫」'
+		});
+		expect(bundle.messages[3]).toMatchObject({
+			role: 'assistant',
+			content: '（手忙脚乱地扣好扣子）呼——这下不会着凉了。',
+			reasoning: '穿好了，回应一下'
+		});
+	});
+
 	it('启用状态工具时系统提示注入工具使用说明', () => {
 		const bundle = buildContext({
 			state: createInitialState(),

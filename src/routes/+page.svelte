@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { ChatMessageView, ConfigPatch, StatePatch, WorldInfoEntry } from '../lib/core/types';
+	import type {
+		ChatMessageView,
+		ConfigPatch,
+		MessageSegment,
+		StatePatch,
+		WorldInfoEntry
+	} from '../lib/core/types';
 	import { formatWorldTime } from '../lib/core/state';
 	import {
 		buildContext,
@@ -397,24 +403,49 @@
 		void persistCurrentContextUsage();
 		compactState = compaction;
 		streamingDraft = null;
-		// AI 一次回复可包含多段：每轮先落叙事文本，再把工具调用反馈持久化为
-		// 系统消息（前端可见、后续上下文持续携带）。
+		// AI 一轮回复合并为单条 assistant 消息：思考 / 正文 / 工具调用按序
+		// 保存为 segments，气泡内分段展示——不再把每个工具轮次拆成独立消息，
+		// 避免「一个思考绑一个输出」导致中间内容被吞。
+		const mergedSegments: MessageSegment[] = [];
 		for (const round of rounds) {
+			if (round.thinking !== undefined && round.thinking.trim() !== '') {
+				mergedSegments.push({ kind: 'thinking', content: round.thinking.trim() });
+			}
 			if (round.content !== null && round.content.trim() !== '') {
-				await session.addMessage('assistant', round.content, {
-					thinking: round.thinking
-				});
+				mergedSegments.push({ kind: 'text', content: round.content.trim() });
 			}
 			for (const tool of round.tools) {
-				await session.addMessage('system', `【工具调用】${tool.name}：${tool.output}`);
+				mergedSegments.push({ kind: 'tool', content: tool.output, toolName: tool.name });
 			}
+		}
+		if (thinking !== undefined && thinking.trim() !== '') {
+			mergedSegments.push({ kind: 'thinking', content: thinking.trim() });
 		}
 		const budgetExhausted = finishReason === 'length';
 		if (reply.trim() !== '') {
-			await session.addMessage('assistant', reply, { thinking });
-		} else if (thinking !== undefined && thinking.trim() !== '') {
-			// 模型只输出了思考过程、正文为空：保留思考（对话气泡可展开），正文留空。
-			await session.addMessage('assistant', '', { thinking });
+			mergedSegments.push({ kind: 'text', content: reply.trim() });
+		}
+		if (mergedSegments.length > 0) {
+			// content 保留纯正文（供导出/记忆/搜索等消费方使用），展示走 segments。
+			const plainText = mergedSegments
+				.filter((segment) => segment.kind === 'text')
+				.map((segment) => segment.content)
+				.join('\n');
+			await session.addMessage('assistant', plainText, { segments: mergedSegments });
+		} else {
+			toasts.push(
+				'info',
+				budgetExhausted
+					? '模型输出被 Max Tokens 上限截断，正文为空。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
+					: '模型返回了空回复，本轮未追加消息，请重试或换一种说法。'
+			);
+		}
+		if (
+			mergedSegments.every((segment) => segment.kind !== 'text') &&
+			thinking !== undefined &&
+			thinking.trim() !== ''
+		) {
+			// 模型只输出了思考过程、正文为空：消息已保留思考，另提示正文缺失原因。
 			if (finishReason === 'length') {
 				toasts.push(
 					'info',
@@ -426,13 +457,6 @@
 					'模型只输出思考、未生成正文就结束了（finish_reason=stop）。这通常是模型/端点的思考模式异常：可尝试关闭模型的思考模式、检查代理是否正确转发正文，或换用 DeepSeek 官方端点。'
 				);
 			}
-		} else {
-			toasts.push(
-				'info',
-				budgetExhausted
-					? '模型输出被 Max Tokens 上限截断，正文为空。请在「设置 → 模型服务」调大 Max Tokens（思考型模型建议 4096 以上）。'
-					: '模型返回了空回复，本轮未追加消息，请重试或换一种说法。'
-			);
 		}
 		// 生成完成：追加未流式输出但应记录的部分（思考、工具反馈），
 		// 以及非流式模式下没有实时记录的正文——绝不覆盖已实时记录的流式内容。
@@ -530,9 +554,16 @@
 				}
 			});
 			lastJudgeDebug = debug;
-			// 工具反馈持久化为系统消息：前端可见，后续上下文持续携带。
-			for (const tool of executed) {
-				await session.addMessage('system', `【工具调用】${tool.name}：${tool.output}`);
+			// 工具反馈追加进原 AI 气泡的分段：前端可见，后续上下文展开为系统反馈。
+			if (executed.length > 0) {
+				await session.appendSegments(
+					assistant.id,
+					executed.map((tool) => ({
+						kind: 'tool',
+						content: tool.output,
+						toolName: tool.name
+					}))
+				);
 			}
 			if (executed.length === 0) {
 				toasts.push('info', 'LLM 状态判断：本轮无需变更状态');
