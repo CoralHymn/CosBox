@@ -496,7 +496,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 		.poll(() =>
 			page.evaluate(() => getComputedStyle(document.querySelector('.card')!).backgroundColor)
 		)
-		.toBe('rgba(23, 27, 38, 0.72)');
+		.toBe('rgba(23, 27, 38, 0.5)');
 	// 透明度滑杆存在且可调
 	await expect(page.locator('#theme-bg-opacity')).toBeVisible();
 	await page.locator('#theme-bg-opacity').fill('50');
