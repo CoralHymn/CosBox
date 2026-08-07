@@ -13,6 +13,8 @@ import {
 	isValidWorldTime,
 	minutesSinceMidnight,
 	normalizeWorldTime,
+	normalizeLocationState,
+	resolveLocationPlace,
 	sortScheduleEntries,
 	validateCharacterState
 } from './state';
@@ -61,6 +63,48 @@ describe('createInitialScheduleEntries', () => {
 	});
 });
 
+describe('地点回归：resolveLocationPlace / normalizeLocationState', () => {
+	it('id 精确匹配时优先返回地点库条目', () => {
+		const state = createInitialState();
+		expect(resolveLocationPlace(state.location, state.places)?.id).toBe(state.location.id);
+	});
+
+	it('id 对不上但分类+名称匹配时重新关联', () => {
+		const state = createInitialState();
+		const cafeteria = state.places.find((place) => place.name === '食堂')!;
+		const stale = { id: '食堂', category: '学校', name: '食堂', description: '' };
+		expect(resolveLocationPlace(stale, state.places)?.id).toBe(cafeteria.id);
+		expect(normalizeLocationState(stale, state.places)).toEqual({
+			id: cafeteria.id,
+			category: cafeteria.category,
+			name: cafeteria.name,
+			description: cafeteria.description
+		});
+	});
+
+	it('无匹配时保留自定义地点原样', () => {
+		const state = createInitialState();
+		const custom = { id: '秘密基地', category: '', name: '秘密基地', description: '' };
+		expect(resolveLocationPlace(custom, state.places)).toBeUndefined();
+		expect(normalizeLocationState(custom, state.places)).toBe(custom);
+	});
+
+	it('applyStateDelta：id 为地点名字符串时自动回归到库内条目', () => {
+		const state = createInitialState();
+		const withPlace = applyStateDelta(state, {
+			places: [
+				...state.places,
+				{ id: 'art-room', category: '学校', name: '美术室', description: '美术教室' }
+			]
+		});
+		const next = applyStateDelta(withPlace, {
+			location: { id: '美术室', category: '学校', name: '美术室', description: '' }
+		});
+		expect(next.location.id).toBe('art-room');
+		expect(next.location.description).toBe('美术教室');
+	});
+});
+
 describe('applyStateDelta', () => {
 	it('浅合并 outfit 槽位并整体替换 accessories', () => {
 		const state = createInitialState();
@@ -76,8 +120,9 @@ describe('applyStateDelta', () => {
 
 	it('浅合并 location', () => {
 		const state = createInitialState();
-		const next = applyStateDelta(state, { location: { id: 'lib', name: '图书馆' } });
-		expect(next.location.name).toBe('图书馆');
+		// 补丁与地点库无任何匹配（id/分类+名称都对不上）：保持浅合并、不回归。
+		const next = applyStateDelta(state, { location: { id: 'custom-x', name: '校外小树林' } });
+		expect(next.location.name).toBe('校外小树林');
 		expect(next.location.description).toBe(state.location.description);
 	});
 

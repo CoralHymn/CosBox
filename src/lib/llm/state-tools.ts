@@ -128,6 +128,22 @@ export const gotoLocationTool: StateToolDefinition = {
 			);
 			return `已切换地点到「${byName.category} > ${byName.name}」`;
 		}
+		// 兼容「分类 > 名称」整串输入：拆开后按 分类+名称 精确匹配地点库。
+		const labelMatch = place.find((item) => `${item.category} > ${item.name}` === name);
+		if (labelMatch) {
+			await ctx.update(
+				{
+					location: {
+						id: labelMatch.id,
+						category: labelMatch.category,
+						name: labelMatch.name,
+						description: labelMatch.description
+					}
+				},
+				{ desc: `AI 切换地点：${labelMatch.category} > ${labelMatch.name}` }
+			);
+			return `已切换地点到「${labelMatch.category} > ${labelMatch.name}」`;
+		}
 		const category = typeof args.category === 'string' ? args.category.trim() : '';
 		const description = typeof args.description === 'string' ? args.description.trim() : '';
 		const label = `${category === '' ? '未分类' : category} > ${name}`;

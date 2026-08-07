@@ -248,8 +248,55 @@ export function applyStateDelta(state: CharacterState, patch: StatePatch): Chara
 		merged.attributes = mergeAttributes(state.attributes, patch.attributes);
 	}
 
+	// 地点回归：location 与 places 同帧变更（或历史数据 id 为名字字符串）时，
+	// 按 分类+名称 重新关联到地点库条目，避免「显示 学校 > 美术室 却匹配不上」。
+	merged.location = normalizeLocationState(merged.location, merged.places);
+
 	validateCharacterState(merged);
 	return merged;
+}
+
+/**
+ * 地点回归解析：把当前地点与地点库关联。
+ * 优先按 id 精确匹配；id 对不上时回退按「分类 + 名称」匹配
+ * （goto_location 兜底创建的历史数据 id 可能是地点名字符串）。
+ */
+export function resolveLocationPlace(
+	location: LocationState,
+	places: ReadonlyArray<LocationDef>
+): LocationDef | undefined {
+	const byId = places.find((place) => place.id === location.id);
+	if (byId !== undefined) {
+		return byId;
+	}
+	return places.find(
+		(place) => place.category === location.category && place.name === location.name
+	);
+}
+
+/** 用地点库归一化当前地点：命中已知地点时回填其 id/分类/名称/描述，否则原样保留。 */
+export function normalizeLocationState(
+	location: LocationState,
+	places: ReadonlyArray<LocationDef>
+): LocationState {
+	const matched = resolveLocationPlace(location, places);
+	if (matched === undefined) {
+		return location;
+	}
+	if (
+		matched.id === location.id &&
+		matched.category === location.category &&
+		matched.name === location.name &&
+		matched.description === location.description
+	) {
+		return location;
+	}
+	return {
+		id: matched.id,
+		category: matched.category,
+		name: matched.name,
+		description: matched.description
+	};
 }
 
 /**
