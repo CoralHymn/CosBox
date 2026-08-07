@@ -868,6 +868,49 @@ describe('OpenAiCompatibleClient', () => {
 		expect(result.content).toBe('回答');
 	});
 
+	it('流式响应：保留思考/正文交替顺序为 segments（interleaved thinking）', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"reasoning_content":"第一段思考"}}]}\n\n',
+				'data: {"choices":[{"delta":{"content":"第一段正文"}}]}\n\n',
+				'data: {"choices":[{"delta":{"reasoning_content":"第二段思考"}}]}\n\n',
+				'data: {"choices":[{"delta":{"content":"第二段正文"}}]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chat([], { ...config, stream: true });
+		// 思考与正文各自仍按原逻辑合并，同时保留交错顺序供气泡分段展示。
+		expect(result.thinking).toBe('第一段思考第二段思考');
+		expect(result.content).toBe('第一段正文第二段正文');
+		expect(result.segments).toEqual([
+			{ kind: 'thinking', content: '第一段思考' },
+			{ kind: 'text', content: '第一段正文' },
+			{ kind: 'thinking', content: '第二段思考' },
+			{ kind: 'text', content: '第二段正文' }
+		]);
+	});
+
+	it('流式响应：tool_calls delta 函数名为空时标记 malformedToolCall', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"reasoning_content":"我要调用工具"}}]}\n\n',
+				'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"","arguments":"{}"}}]}}]}\n\n',
+				'data: {"choices":[{"delta":{"content":"正文"}}]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const result = await client.chatWithTools([], TOOL_SCHEMAS, { ...config, stream: true });
+		expect(result.toolCalls).toEqual([]);
+		expect(result.malformedToolCall).toBe(true);
+		expect(result.content).toBe('正文');
+	});
+
 	it('流式响应：思考增量通过 onThinkingDelta 回调实时输出', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(

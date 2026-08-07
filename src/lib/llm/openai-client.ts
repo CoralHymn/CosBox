@@ -1,4 +1,5 @@
 import { LlmError } from '../core/errors';
+import type { MessageSegment } from '../core/types';
 import { annotateWorldTime } from './message-time';
 import { isDeepSeekModel } from './providers';
 import type {
@@ -122,15 +123,28 @@ function buildChatResult(data: unknown): LlmChatResult {
 	const usage = extractUsage(data);
 	const thinking = extractThinking(data);
 	const finishReason = extractFinishReason(data);
+	// 响应里带 tool_calls 数组但没有任何合法条目（函数名为空/结构残缺）：
+	// 说明模型试图调用工具但格式无效，标记给上层回写错误提示，而不是静默当作普通回复。
+	const malformedToolCall = hasToolCallEntries(data) && toolCalls.length === 0;
+	// 非流式响应只有一个 thinking + 一个 content，不存在交错；仍按段返回方便气泡统一渲染。
+	const segments = buildSimpleSegments(thinking, content);
 	if (toolCalls.length > 0) {
-		return { content, toolCalls, usage, thinking, finishReason };
+		return { content, toolCalls, usage, thinking, finishReason, segments, malformedToolCall };
 	}
 	if (content !== null) {
 		const inline = extractInlineToolCall(content);
 		if (inline.length > 0) {
-			return { content: null, toolCalls: inline, usage, thinking, finishReason };
+			return {
+				content: null,
+				toolCalls: inline,
+				usage,
+				thinking,
+				finishReason,
+				segments,
+				malformedToolCall
+			};
 		}
-		return { content, toolCalls: [], usage, thinking, finishReason };
+		return { content, toolCalls: [], usage, thinking, finishReason, segments, malformedToolCall };
 	}
 	// content 为 null/缺失但响应结构里有 choices[0].message：这是合法的「空回复」
 	// （仅思考过程 / 命中长度上限 / 模型没说话），按空正文处理，不再误报协议错误。
@@ -140,7 +154,15 @@ function buildChatResult(data: unknown): LlmChatResult {
 		);
 	}
 	if (hasMessageRecord(data)) {
-		return { content: '', toolCalls: [], usage, thinking, finishReason };
+		return {
+			content: '',
+			toolCalls: [],
+			usage,
+			thinking,
+			finishReason,
+			segments,
+			malformedToolCall
+		};
 	}
 	throw new LlmError(`模型响应缺少 choices[0].message：${summarizeResponse(data)}`);
 }
@@ -157,9 +179,14 @@ async function parseStreamedResult(
 ): Promise<LlmChatResult> {
 	let content = '';
 	const thinkingParts: string[] = [];
+	// 按流中实际顺序记录思考/正文段落（interleaved thinking），供气泡分段展示。
+	const segments: MessageSegment[] = [];
+	let lastSegmentKind: 'thinking' | 'text' | null = null;
 	let usage: TokenUsage | undefined;
 	let finishReason: string | undefined;
 	const toolMap = new Map<number, { id: string; name: string; argumentsRaw: string }>();
+	// 流中是否出现过 tool_calls delta（即使全部无效也记一次，用于判定「尝试调用但失败」）。
+	let sawToolCallDeltas = false;
 	let sawEvent = false;
 	let sawMeaningfulEvent = false;
 	let rawText = '';
@@ -184,12 +211,25 @@ async function parseStreamedResult(
 			if (delta.content !== undefined && delta.content !== '') {
 				content += delta.content;
 				onDelta?.(delta.content);
+				if (lastSegmentKind === 'text' && segments.length > 0) {
+					segments[segments.length - 1]!.content += delta.content;
+				} else {
+					segments.push({ kind: 'text', content: delta.content });
+					lastSegmentKind = 'text';
+				}
 			}
 			if (delta.thinking !== undefined && delta.thinking !== '') {
 				thinkingParts.push(delta.thinking);
 				onThinkingDelta?.(delta.thinking);
+				if (lastSegmentKind === 'thinking' && segments.length > 0) {
+					segments[segments.length - 1]!.content += delta.thinking;
+				} else {
+					segments.push({ kind: 'thinking', content: delta.thinking });
+					lastSegmentKind = 'thinking';
+				}
 			}
 			if (delta.toolCalls !== undefined) {
+				sawToolCallDeltas = true;
 				accumulateStreamToolCalls(toolMap, delta.toolCalls);
 			}
 			if (delta.usage !== undefined) {
@@ -218,8 +258,8 @@ async function parseStreamedResult(
 		return buildChatResult(data);
 	}
 
-	const toolCalls = [...toolMap.entries()]
-		.sort((a, b) => a[0] - b[0])
+	const toolEntries = [...toolMap.entries()].sort((a, b) => a[0] - b[0]);
+	const toolCalls = toolEntries
 		.map(([index, entry]) =>
 			entry.name === ''
 				? null
@@ -230,6 +270,11 @@ async function parseStreamedResult(
 					}
 		)
 		.filter((call): call is ToolCall => call !== null);
+	// 出现了 tool_calls delta 却没有任何合法条目（或部分条目函数名为空被丢弃）：
+	// 标记给上层，让模型知道调用没被接收，而不是以为已经生效。
+	const droppedToolEntries = toolEntries.some(([, entry]) => entry.name === '');
+	const malformedToolCall = sawToolCallDeltas && (toolCalls.length === 0 || droppedToolEntries);
+	const finalSegments = segments.length > 0 ? segments : undefined;
 	const thinking = thinkingParts.join('').trim() || undefined;
 	if (toolCalls.length > 0) {
 		return {
@@ -237,20 +282,62 @@ async function parseStreamedResult(
 			toolCalls,
 			usage,
 			thinking,
-			finishReason
+			finishReason,
+			segments: finalSegments,
+			malformedToolCall
 		};
 	}
 	if (content !== '') {
-		return { content, toolCalls: [], usage, thinking, finishReason };
+		return {
+			content,
+			toolCalls: [],
+			usage,
+			thinking,
+			finishReason,
+			segments: finalSegments,
+			malformedToolCall
+		};
 	}
 	// 流中收到过有效数据块（思考/用量等）但最终没有正文：按空回复处理，
 	// 避免「模型只思考不开口」被误判为协议错误。
 	if (sawMeaningfulEvent) {
-		return { content: '', toolCalls: [], usage, thinking, finishReason };
+		return {
+			content: '',
+			toolCalls: [],
+			usage,
+			thinking,
+			finishReason,
+			segments: finalSegments,
+			malformedToolCall
+		};
 	}
 	throw new LlmError(
 		`模型响应缺少 choices[0].message（无有效内容块）：${summarizeResponse(rawText)}`
 	);
+}
+
+/** 非流式结果按「思考在前、正文在后」组装为两段（无思考则只有正文段）。 */
+function buildSimpleSegments(
+	thinking: string | undefined,
+	content: string | null
+): MessageSegment[] | undefined {
+	const segments: MessageSegment[] = [];
+	if (thinking !== undefined && thinking.trim() !== '') {
+		segments.push({ kind: 'thinking', content: thinking });
+	}
+	if (content !== null && content.trim() !== '') {
+		segments.push({ kind: 'text', content });
+	}
+	return segments.length > 0 ? segments : undefined;
+}
+
+/** 响应中是否存在 tool_calls 数组（哪怕全部条目无效）。 */
+function hasToolCallEntries(data: unknown): boolean {
+	if (!isRecord(data) || !Array.isArray(data.choices) || data.choices.length === 0) {
+		return false;
+	}
+	const message = isRecord(data.choices[0]) ? data.choices[0].message : undefined;
+	return isRecord(message) && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
 }
 
 /** 逐行读取 SSE 流，回调每个 data: 载荷；返回是否收到事件与原始文本。 */

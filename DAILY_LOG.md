@@ -2067,6 +2067,46 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 
 - 689 个单元测试全过；check / lint 全绿。
 
+## 2026-08-07（续）：AI「想调用工具却调不出来」根因修复
+
+### 需求
+
+AI 又出现「思考里说要调用工具、实际却没发出 tool_calls」的现象：流式输出表现为
+思考→正文→停顿→思考→正文→长停顿→结束，最终气泡却只剩一段思考 + 一段正文。
+用户猜测停顿是模型在尝试调用工具，只是格式无效且没有收到错误反馈，于是继续输出。
+
+### 排查结论（对照 DeepSeek 官方 tool_calls 文档）
+
+- 代码没有被「改回去」：`reasoning_content` 空串补齐、assistant 工具轮次原样回传、
+  DeepSeek 思考模式跳过 `tool_choice` 均与文档一致（连续 3 个提交都是加强而非回退）。
+- 真正的缺陷在客户端解析层，共三处：
+  1. **交错思考/正文被折叠**：`parseStreamedResult` 把所有 reasoning_content 拼成一段、
+     所有 content 拼成一段，丢失了 interleaved thinking 的顺序，气泡只显示一段思考 + 一段正文；
+  2. **残缺 tool_calls 被静默丢弃**：流中函数名为空的 tool_calls delta 被 filter 掉，
+     模型以为自己调用了工具，宿主却未执行、也不回写任何错误；
+  3. **纯文本 JSON 调用未识别**：DeepSeek V4 已知会把调用写成
+     `{"tool":"...","args":{...}}` 放在 content 里（GitHub issue #1244），
+     旧 `extractTextToolCalls` 只支持 `name(...)` 语法。
+
+### 实现
+
+- `openai-client.ts`：流式解析按「思考→正文→思考→正文」记录 `segments` 交替顺序，
+  并把「收到 tool_calls delta 但函数名为空」标记为 `malformedToolCall`；
+  非流式结果也组装简单 segments（thinking/text）供气泡统一渲染。
+- `chat-service.ts`：新增 `retryMalformedToolCall`——检测到残缺调用时回写
+  「函数名为空或参数格式无效，宿主没收到合法调用」的系统提示并重试一次，
+  只有重试真正发出 tool_calls 才采纳；返回 `replySegments` 供 UI 按序分段。
+- `text-tools.ts`：新增纯文本 JSON 工具调用解析（`tool`/`name`/`function.name` +
+  `args`/`arguments`，支持字符串化 arguments），花括号匹配跳过角色台词误判。
+- `pipeline.ts`：`expandSegmentedMessage` 在交错思考/正文（无工具段）时按思考块
+  flush 成多条 assistant，避免第一段思考/正文被覆盖；工具指引新增
+  「禁止把调用写成纯文本或 JSON 放在正文里」。
+- `+page.svelte`：气泡分段优先使用 `replySegments`，保留交错顺序，且不重复追加 reply。
+
+### 门禁
+
+- 706 个单元测试全过；check / lint 全绿。
+
 ## 2026-08-07（续）：换模型再切回 DeepSeek 思考模式丢失思考——统一补 reasoning_content
 
 ### 需求

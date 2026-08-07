@@ -1211,3 +1211,29 @@ DeepSeek 不再输出思考过程。非思考模型轮次落库的 assistant 消
 
 **代价**：DeepSeek 请求体中每个 assistant 轮次多一个空字段，体积可忽略；
 工具轮次的思考仍原样回传，信息不丢失。
+
+## D85：流式交错思考/正文按段保存 + 残缺 tool_calls 回写错误重试
+
+**背景问题**：AI 在 DeepSeek 思考模式下出现「思考里说要调用工具、实际没发出
+tool_calls」：流式输出表现为思考→正文→停顿→思考→正文，停顿疑似模型在尝试
+调用工具但格式无效。旧实现把所有 reasoning_content 拼成一段、所有 content 拼成
+一段，交错顺序丢失；函数名为空的 tool_calls delta 被静默 filter 掉，模型误以为
+调用已生效，宿主既不执行也不反馈，AI 便继续输出。
+
+**选择**：
+1. `parseStreamedResult` 记录 `segments`（thinking/text 交替顺序），`LlmChatResult`
+   与 `generateReply` 携带 `replySegments`，气泡按序分段展示；
+2. 收到 tool_calls delta 但函数名为空/参数残缺时标记 `malformedToolCall`，
+   `retryMalformedToolCall` 回写「宿主没收到合法调用」提示并重试一次，只采纳
+   真正发出 tool_calls 的结果；
+3. `extractTextToolCalls` 新增纯文本 JSON 调用解析（DeepSeek V4 已知行为，issue #1244），
+   系统提示明确禁止把调用写成纯文本/JSON 放在正文。
+
+**理由**：对齐 DeepSeek 官方 tool_calls 文档与社区 agent 的「调用失败要反馈给模型」
+做法（opencode / langchain 均在工具调用失败后重新调用）；交错思考是思考模型的
+正常输出形态，折叠会丢失语义。对照文档确认客户端序列化（reasoning_content 回传、
+DeepSeek 跳过 tool_choice）未被回退，问题出在解析层。
+
+**代价**：残缺调用会多一次重试请求（成本可控）；JSON 文本调用解析有极小概率把
+剧情台词里的花括号误判为调用，已用「工具名白名单 + args 必须为对象」双重约束降低；
+交错思考在历史回放时按思考块拆成多条 assistant 消息，与模型原始输出结构一致。

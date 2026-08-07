@@ -1508,6 +1508,80 @@ describe('serializeDebugPrompt', () => {
 		expect(text).toContain('[user]（周一 09:00） 好了快穿上吧');
 		expect(text).not.toContain('【世界时间：');
 	});
+
+	it('工具路径：流中 malformedToolCall 时回写错误提示重试一次', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '正文',
+				toolCalls: [],
+				malformedToolCall: true,
+				thinking: '我要调用工具'
+			})
+			.mockResolvedValueOnce({
+				content: null,
+				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 30 } }]
+			})
+			.mockResolvedValueOnce({ content: '时间推进了', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { reply, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('时间推进了');
+		expect(executedTools).toHaveLength(1);
+		expect(executedTools[0]!.name).toBe('advance_time');
+		expect(chatWithTools).toHaveBeenCalledTimes(3);
+		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
+		expect(
+			retryMessages.some((message) => message.content.includes('函数名为空或参数格式无效'))
+		).toBe(true);
+	});
+
+	it('工具路径：malformedToolCall 重试仍无 tool_calls 时保留原回复并返回 replySegments', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '第一段正文',
+				toolCalls: [],
+				malformedToolCall: true,
+				thinking: '第一段思考',
+				segments: [
+					{ kind: 'thinking', content: '第一段思考' },
+					{ kind: 'text', content: '第一段正文' },
+					{ kind: 'thinking', content: '第二段思考' },
+					{ kind: 'text', content: '第二段正文' }
+				]
+			})
+			.mockResolvedValueOnce({ content: '重试正文', toolCalls: [], thinking: '重试思考' })
+			.mockResolvedValueOnce({ content: '强制重试正文', toolCalls: [], thinking: '强制思考' });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { reply, replySegments, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		// 重试只产出正文、没有 tool_calls：不采纳，保留原交错段供气泡展示。
+		expect(reply).toBe('第一段正文');
+		expect(executedTools).toHaveLength(0);
+		expect(replySegments).toEqual([
+			{ kind: 'thinking', content: '第一段思考' },
+			{ kind: 'text', content: '第一段正文' },
+			{ kind: 'thinking', content: '第二段思考' },
+			{ kind: 'text', content: '第二段正文' }
+		]);
+		// 流式一档 + 非流式二档都未发出 tool_calls，重试放弃，保留原结果。
+		expect(chatWithTools).toHaveBeenCalledTimes(3);
+	});
 });
 
 describe('resolveTimeAdvance', () => {

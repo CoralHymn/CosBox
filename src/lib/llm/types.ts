@@ -1,4 +1,4 @@
-import type { MessageRole, WorldTime } from '../core/types';
+import type { MessageRole, MessageSegment, WorldTime } from '../core/types';
 import { DEFAULT_WEB_SEARCH_CONFIG, type WebSearchConfig } from '../search/types';
 import { DEFAULT_COMPACT_THRESHOLD } from './compaction';
 
@@ -138,6 +138,18 @@ export interface LlmChatResult {
 	finishReason?: string;
 	/** API 返回或本地估算的 token 用量；部分端点不提供时为 undefined。 */
 	usage?: TokenUsage;
+	/**
+	 * 流式响应中思考/正文的交替顺序（DeepSeek 思考模式的 interleaved thinking：
+	 * 思考→正文→思考→正文，通常在工具调用尝试之间出现）。按序分段供气泡展示，
+	 * 避免把所有思考拼成一段、所有正文拼成一段而丢失中间停顿的语义。
+	 */
+	segments?: MessageSegment[];
+	/**
+	 * 流中出现了 tool_calls delta 但最终未解析出合法调用（函数名为空等）。
+	 * 说明模型确实试图调用工具但格式无效，宿主应回写错误提示让模型重新发出，
+	 * 而不是静默丢弃后让它误以为调用已生效。
+	 */
+	malformedToolCall?: boolean;
 }
 
 /** 统一的 LLM 客户端接口。chatWithTools 可选：客户端不支持工具时退化为纯文本对话。 */

@@ -1,5 +1,5 @@
 import { addMinutes, formatWorldTime, minutesSinceMidnight } from '../core/state';
-import type { CharacterState, ChatMessageView, WorldTime } from '../core/types';
+import type { CharacterState, ChatMessageView, MessageSegment, WorldTime } from '../core/types';
 import { buildContext, type ContextBundle, type ContextPipelineInput } from '../context/pipeline';
 import { excludeFromContext } from '../context/history';
 import {
@@ -121,6 +121,11 @@ const THINKING_ONLY_NUDGE =
 const TIME_CLAIM_NUDGE =
 	'【系统提示】你的回复描述了时间流逝或推进到具体时刻，但没有调用 advance_time 同步世界时间。' +
 	'请先调用 advance_time（minutes 为具体分钟数），然后再输出正文。';
+/** 流中出现 tool_calls delta 但格式无效（函数名为空等）时的补发提示。 */
+const MALFORMED_TOOL_NUDGE =
+	'【系统提示】你上一轮试图发出 tool_calls，但函数名为空或参数格式无效，宿主没有收到任何合法调用。' +
+	'如果剧情需要调用工具，请重新发出结构化的 tool_calls：函数名必须是非空字符串（advance_time / goto_location / set_outfit / set_attribute），' +
+	'参数必须是合法 JSON 对象；不要只把调用写在思考或正文里。';
 
 /**
  * 对话服务：把「状态 + 历史 + 世界信息」组装为上下文，再调用 LLM。
@@ -150,6 +155,8 @@ export class ChatService {
 		judgeDebug: JudgeDebugView | null;
 		/** 工具调用轮次（按顺序；每轮含叙事文本与工具反馈，最终回复在 reply）。 */
 		rounds: ReplyRound[];
+		/** 最终回复的思考/正文交替顺序（interleaved thinking），供气泡按序分段展示。 */
+		replySegments?: MessageSegment[];
 	}> {
 		let usage: TokenUsage | undefined;
 		let compaction: CompactionState | null = options.compaction?.state ?? null;
@@ -222,6 +229,20 @@ export class ChatService {
 					const roundNarrative =
 						result.content !== null && result.content.trim() !== '' ? result.content : '';
 					const roundThinking = result.thinking;
+					// 流中出现了 tool_calls delta 但格式无效（函数名为空等）：模型确实试图调用，
+					// 但静默丢弃会让它误以为调用已生效。回写失败提示重试一次，让它重新发出。
+					if (result.malformedToolCall === true && result.toolCalls.length === 0) {
+						const retried = await this.retryMalformedToolCall(
+							messages,
+							config,
+							options,
+							signal
+						);
+						usage = mergeUsage(usage, retried?.usage);
+						if (retried !== null) {
+							result = retried;
+						}
+					}
 					// 结构化 tool_calls 缺失时，尝试从正文/思考中解析文本形式的工具调用
 					// （DeepSeek 等思考模型有时把调用写进 reasoning 而不发 tool_calls）。
 					if (result.toolCalls.length === 0) {
@@ -346,7 +367,8 @@ export class ChatService {
 							thinking: preferThinking(result.thinking, firstResultThinking),
 							finishReason: result.finishReason,
 							judgeDebug,
-							rounds
+							rounds,
+							replySegments: result.segments
 						};
 					}
 					const toolMessages: ChatMessage[] = [];
@@ -406,7 +428,8 @@ export class ChatService {
 					thinking: undefined,
 					finishReason: undefined,
 					judgeDebug: null,
-					rounds
+					rounds,
+					replySegments: undefined
 				};
 			}
 		}
@@ -455,7 +478,8 @@ export class ChatService {
 			thinking: preferThinking(result.thinking, firstResultThinking),
 			finishReason: result.finishReason,
 			judgeDebug,
-			rounds
+			rounds,
+			replySegments: result.segments
 		};
 	}
 
@@ -642,6 +666,55 @@ export class ChatService {
 		// （部分代理只在流式转发时丢失 tool_calls，非流式可绕开）。
 		// DeepSeek V4 思考模式不接受 tool_choice（400），第二档退化为「强提示 + 非流式」，
 		// 仍保留非流式绕过代理丢调用的价值；只采纳真正发出 tool_calls 的结果。
+		const first = await attempt(false, config.stream === true);
+		if (first && first.toolCalls.length > 0) {
+			return first;
+		}
+		const forced = await attempt(!isDeepSeekModel(config), false);
+		return forced && forced.toolCalls.length > 0 ? forced : null;
+	}
+
+	/**
+	 * 流中出现 tool_calls delta 但格式无效（函数名为空等）时补发重试：
+	 * 追加「宿主没收到合法调用」的系统提示，让模型重新发出结构化 tool_calls。
+	 * 第一档流式 + 第二档非流式（DeepSeek 思考模式跳过 tool_choice），
+	 * 只采纳真正发出 tool_calls 的结果，避免把普通正文当调用。
+	 */
+	private async retryMalformedToolCall(
+		messages: ReadonlyArray<ChatMessage>,
+		config: LlmConfig,
+		options: GenerateReplyOptions,
+		signal?: AbortSignal
+	): Promise<LlmChatResult | null> {
+		const retryMessages: ChatMessage[] = [
+			...messages,
+			{ role: 'system', content: MALFORMED_TOOL_NUDGE }
+		];
+		const attempt = async (
+			forceToolCall: boolean,
+			stream: boolean
+		): Promise<LlmChatResult | null> => {
+			if (
+				this.client.chatWithTools === undefined ||
+				options.tools === undefined ||
+				options.tools.length === 0 ||
+				options.toolContext === undefined
+			) {
+				return null;
+			}
+			try {
+				return await this.client.chatWithTools(
+					retryMessages,
+					options.tools,
+					{ ...config, stream },
+					signal,
+					options.onDelta,
+					{ forceToolCall, onThinkingDelta: options.onThinkingDelta }
+				);
+			} catch {
+				return null;
+			}
+		};
 		const first = await attempt(false, config.stream === true);
 		if (first && first.toolCalls.length > 0) {
 			return first;

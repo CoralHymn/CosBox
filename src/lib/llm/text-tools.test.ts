@@ -53,4 +53,38 @@ describe('extractTextToolCalls', () => {
 			[]
 		);
 	});
+
+	it('解析正文里的纯文本 JSON 工具调用（{"tool","args"}）', () => {
+		expect(extractTextToolCalls('{"tool":"advance_time","args":{"minutes":30}}')).toEqual([
+			{ id: 'text_call_0', name: 'advance_time', arguments: { minutes: 30 } }
+		]);
+	});
+
+	it('解析纯文本 JSON 的 {"name","arguments"} 形态', () => {
+		expect(
+			extractTextToolCalls('{"name":"set_outfit","arguments":{"slot":"top","item":"白色衬衫"}}')
+		).toEqual([
+			{
+				id: 'text_call_0',
+				name: 'set_outfit',
+				arguments: { slot: 'top', item: '白色衬衫' }
+			}
+		]);
+	});
+
+	it('解析 OpenAI 风格 {"function":{"name","arguments"}}（arguments 为 JSON 字符串）', () => {
+		expect(
+			extractTextToolCalls(
+				'{"function":{"name":"goto_location","arguments":"{\\"name\\":\\"食堂\\"}"}}'
+			)
+		).toEqual([
+			{ id: 'text_call_0', name: 'goto_location', arguments: { name: '食堂' } }
+		]);
+	});
+
+	it('JSON 对象缺 args 或工具名非法时不解析', () => {
+		expect(extractTextToolCalls('{"tool":"advance_time"}')).toEqual([]);
+		expect(extractTextToolCalls('{"tool":"fly_to_moon","args":{"x":1}}')).toEqual([]);
+		expect(extractTextToolCalls('（她打开地图看了看）{我们出发吧}')).toEqual([]);
+	});
 });
