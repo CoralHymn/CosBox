@@ -5,6 +5,7 @@ import type { ContextPipelineInput } from '../context/pipeline';
 import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
 import {
 	ChatService,
+	detectThinkingLoop,
 	ensureFirstThinkingInSegments,
 	resolveTimeAdvance,
 	serializeDebugPrompt,
@@ -108,6 +109,32 @@ describe('ChatService', () => {
 		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
 		expect(retryMessages.some((message) => message.content.includes('正文必不可少'))).toBe(true);
 		expect(debug.lastResponse?.hasContent).toBe(true);
+	});
+
+	it('工具路径：思考陷入重复循环时注入「停止重复」提示并重试', async () => {
+		const loopedThinking =
+			'让我详细描写。让我自然地描写。让我自然地回应。让我详细描写。让我自然地描写。让我自然地回应。' +
+			'让我详细描写。让我自然地描写。让我自然地回应。';
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: loopedThinking })
+			.mockResolvedValueOnce({ content: '（自然回应）我们走吧。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('（自然回应）我们走吧。');
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
+		expect(
+			retryMessages.some((message) => message.content.includes('重复循环'))
+		).toBe(true);
 	});
 
 	it('工具路径：重试仍只输出思考时保留原空回复，不无限重试', async () => {
@@ -1700,6 +1727,33 @@ describe('ensureFirstThinkingInSegments', () => {
 		const segments = [{ kind: 'text' as const, content: '正文' }];
 		expect(ensureFirstThinkingInSegments(segments, '   ')).toBe(segments);
 		expect(ensureFirstThinkingInSegments(undefined, undefined)).toBeUndefined();
+	});
+});
+
+describe('detectThinkingLoop', () => {
+	it('识别「让我详细描写…」式循环思考', () => {
+		const loop =
+			'让我详细描写。让我自然地描写。让我自然地回应。让我详细描写。让我自然地描写。让我自然地回应。' +
+			'让我详细描写。让我自然地描写。让我自然地回应。让我详细描写。让我自然地描写。让我自然地回应。';
+		expect(detectThinkingLoop(loop)).toBe(true);
+	});
+
+	it('识别同一句连续重复 3 次', () => {
+		expect(detectThinkingLoop('好的。好的。好的。')).toBe(true);
+		expect(detectThinkingLoop('嗯。嗯。嗯。')).toBe(true);
+	});
+
+	it('正常思考不误报', () => {
+		expect(
+			detectThinkingLoop('她应该先穿上衣服，再自然地回应。窗外下着雨，天色有些暗。')
+		).toBe(false);
+		expect(detectThinkingLoop('重复两次。重复两次。')).toBe(false);
+	});
+
+	it('空思考不误报', () => {
+		expect(detectThinkingLoop(undefined)).toBe(false);
+		expect(detectThinkingLoop('   ')).toBe(false);
+		expect(detectThinkingLoop('短句')).toBe(false);
 	});
 });
 

@@ -117,6 +117,10 @@ const DEFAULT_MAX_TOOL_TURNS = 4;
 const THINKING_ONLY_NUDGE =
 	'【系统提示】你上一轮只输出了思考过程，没有输出正文。请直接输出正文回复，' +
 	'正文必不可少；如果剧情需要调用状态工具，请先正常调用工具，再输出正文。';
+/** 思考陷入重复循环（同一句/同一段反复出现）时的重试提示：停止重复并尽快输出正文。 */
+const REPETITION_NUDGE =
+	'【系统提示】你上一轮的思考过程陷入了重复循环：同一句话或同一段话反复出现多遍。' +
+	'请立即停止重复，思考完成后直接输出正文；如果剧情需要调用状态工具，先发出 tool_calls 再输出正文，正文同样不得重复。';
 /** 正文描述了时间流逝/推进但未调用 advance_time 时的补调提示。 */
 const TIME_CLAIM_NUDGE =
 	'【系统提示】你的回复描述了时间流逝或推进到具体时刻，但没有调用 advance_time 同步世界时间。' +
@@ -288,7 +292,10 @@ export class ChatService {
 					// 思考型模型偶发「只思考、不输出正文」（finish_reason=stop）：
 					// 追加正文必填提示重试一次，重试成功则采用重试结果（可能继续走工具轮）。
 					if (isThinkingOnlyReply(result)) {
-						const retried = await this.retryThinkingOnly(messages, config, options, signal);
+						const loopDetected = detectThinkingLoop(result.thinking);
+						const retried = loopDetected
+							? await this.retryThinkingLoop(messages, config, options, signal)
+							: await this.retryThinkingOnly(messages, config, options, signal);
 						usage = mergeUsage(usage, retried?.usage);
 						if (retried !== null) {
 							result = retried;
@@ -445,7 +452,10 @@ export class ChatService {
 		const firstResultThinking = result.thinking;
 		// 纯文本路径同样兜底一次「只思考不输出正文」。
 		if (isThinkingOnlyReply(result)) {
-			const retried = await this.retryThinkingOnly(messages, config, options, signal);
+			const loopDetected = detectThinkingLoop(result.thinking);
+			const retried = loopDetected
+				? await this.retryThinkingLoop(messages, config, options, signal)
+				: await this.retryThinkingOnly(messages, config, options, signal);
 			usage = mergeUsage(usage, retried?.usage);
 			if (retried !== null) {
 				result = retried;
@@ -567,6 +577,46 @@ export class ChatService {
 		const retryMessages: ChatMessage[] = [
 			...messages,
 			{ role: 'system', content: THINKING_ONLY_NUDGE }
+		];
+		try {
+			const result =
+				options.tools !== undefined &&
+				options.tools.length > 0 &&
+				options.toolContext !== undefined &&
+				this.client.chatWithTools !== undefined
+					? await this.client.chatWithTools(
+							retryMessages,
+							options.tools,
+							config,
+							signal,
+							options.onDelta,
+							{ onThinkingDelta: options.onThinkingDelta }
+						)
+					: await this.client.chat(retryMessages, config, signal, options.onDelta, {
+							onThinkingDelta: options.onThinkingDelta
+						});
+			return result.toolCalls.length > 0 ||
+				(result.content !== null && result.content.trim() !== '')
+				? result
+				: null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * 思考陷入重复循环（同一句/同一段反复出现）时重试一次：追加「停止重复、
+	 * 尽快输出正文」的提示后重新请求。重试产出正文或工具调用即采用，否则返回 null。
+	 */
+	private async retryThinkingLoop(
+		messages: ReadonlyArray<ChatMessage>,
+		config: LlmConfig,
+		options: GenerateReplyOptions,
+		signal?: AbortSignal
+	): Promise<LlmChatResult | null> {
+		const retryMessages: ChatMessage[] = [
+			...messages,
+			{ role: 'system', content: REPETITION_NUDGE }
 		];
 		try {
 			const result =
@@ -1012,6 +1062,62 @@ function isThinkingOnlyReply(result: LlmChatResult): boolean {
 		result.thinking !== undefined &&
 		result.thinking.trim() !== ''
 	);
+}
+
+/** 把思考文本切分为句段（中英文句末标点 + 换行），用于重复检测。 */
+function splitThinkingUnits(text: string): string[] {
+	return text
+		.split(/[。！？!?；;\n]+/)
+		.map((unit) => unit.trim())
+		.filter((unit) => unit !== '');
+}
+
+/**
+ * 检测思考是否陷入重复循环：同一句段连续出现 ≥3 次，或长度 1-3 的句段序列
+ * 完整重复 ≥3 轮（如「让我详细描写。让我自然地描写。让我自然地回应。」循环）。
+ * DeepSeek 思考模式偶发此问题，命中后在重试提示中要求停止重复并尽快输出正文。
+ */
+export function detectThinkingLoop(thinking: string | undefined): boolean {
+	if (thinking === undefined || thinking.trim() === '') {
+		return false;
+	}
+	const units = splitThinkingUnits(thinking);
+	if (units.length < 3) {
+		return false;
+	}
+	// 同一句段连续重复 ≥3 次。
+	let consecutive = 1;
+	for (let index = 1; index < units.length; index += 1) {
+		if (units[index] === units[index - 1]) {
+			consecutive += 1;
+			if (consecutive >= 3) {
+				return true;
+			}
+		} else {
+			consecutive = 1;
+		}
+	}
+	// 句段序列循环：模式长度 1-3，完整重复 ≥3 轮。
+	for (let length = 1; length <= 3; length += 1) {
+		for (let start = 0; start + length * 3 <= units.length; start += 1) {
+			const pattern = units.slice(start, start + length);
+			let repeats = 1;
+			let position = start + length;
+			while (position + length <= units.length) {
+				const candidate = units.slice(position, position + length);
+				if (candidate.every((unit, offset) => unit === pattern[offset])) {
+					repeats += 1;
+					position += length;
+				} else {
+					break;
+				}
+			}
+			if (repeats >= 3) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 /** 从思考/正文中识别「明确打算调用」的工具：命中英文工具名或中文意图措辞。 */
