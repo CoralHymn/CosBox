@@ -157,6 +157,8 @@
 	function roleConfig(role: ModelRole): LlmConfig {
 		return resolveServiceConfig(settings.config, role);
 	}
+	/** 当前实际使用的对话模型配置（上下文用量面板按它展示模型/窗口/费用）。 */
+	const activeChatConfig = $derived(roleConfig('chat'));
 
 	const providerLabel = $derived.by(() => {
 		const chat = roleConfig('chat');
@@ -938,6 +940,17 @@
 		}
 	}
 
+	/** 模型服务管理的即时保存（换绑/保存服务/调温度等），静默持久化、失败才提示。 */
+	async function handleAutoSaveConfig(
+		config: Parameters<typeof settings.saveConfig>[0]
+	): Promise<void> {
+		try {
+			await settings.saveConfig(config);
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
 	async function handleSaveProfile(profile: AppProfile): Promise<void> {
 		try {
 			await settings.saveProfile(profile);
@@ -1237,7 +1250,7 @@
 			<div class="mobile-state-body">
 				<StatePreview characterState={session.state} />
 				<ContextPanel
-					config={settings.config}
+					config={activeChatConfig}
 					context={lastContext.bundle}
 					usage={lastContext.usage}
 					restored={restoredContextSummary}
@@ -1276,7 +1289,7 @@
 				<ChatPanel
 					conversation={session.conversation}
 					characterState={session.state}
-					config={settings.config}
+					config={activeChatConfig}
 					context={lastContext.bundle}
 					usage={lastContext.usage}
 					restored={restoredContextSummary}
@@ -1383,6 +1396,7 @@
 					onSyncNow={handleSyncNow}
 					theme={settings.theme}
 					onSaveTheme={handleSaveTheme}
+					onAutoSaveConfig={handleAutoSaveConfig}
 					onFetchModels={handleFetchModels}
 					onTestConnection={handleTestConnection}
 					onExportWorkspace={handleExportWorkspace}
