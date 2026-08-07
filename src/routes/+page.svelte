@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import type {
 		ChatMessageView,
 		ConfigPatch,
@@ -96,6 +96,9 @@
 	import WardrobePanel from '../lib/components/WardrobePanel.svelte';
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
 
+	/** 自动记忆提取的防抖窗口：对话静默该时长后运行一次（快速连续对话合并为一次调用）。 */
+	const AUTO_MEMORY_DEBOUNCE_MS = 45_000;
+
 	const db = getDb();
 	const kv = new KvRepository(db);
 	const snapshotRepo = new SnapshotRepository(db);
@@ -126,6 +129,10 @@
 	let searching = $state(false);
 	/** LLM 记忆提取进行中（面板按钮与自动提取共用）。 */
 	let memoryExtracting = $state(false);
+	/** 自动记忆提取的防抖计时器：对话静默期合并多次提取（LangMem ReflectionExecutor 同款思路）。 */
+	let memoryDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+	/** 最近一次成功提取已覆盖的非系统消息数，避免无新消息时重复调用 LLM。 */
+	let lastAutoExtractCount = 0;
 	let ready = $state(false);
 	/** 开发者模式下展示的最近一次发送给 AI 的完整提示词。 */
 	let debugPrompt = $state<DebugPromptView | null>(null);
@@ -256,6 +263,13 @@
 			toasts.error(err);
 		} finally {
 			ready = true;
+		}
+	});
+
+	onDestroy(() => {
+		if (memoryDebounceTimer !== undefined) {
+			clearTimeout(memoryDebounceTimer);
+			memoryDebounceTimer = undefined;
 		}
 	});
 
@@ -503,9 +517,7 @@
 				.markUsed(bundle.recalledMemories.map((entry) => entry.id))
 				.catch(() => undefined);
 		}
-		if (settings.config.memoryEnabled === true && settings.config.memoryAutoExtract === true) {
-			void runAutoMemoryExtract();
-		}
+		scheduleAutoMemoryExtract();
 	}
 
 	/** 消息重试（用户气泡）：回溯到该条用户消息并重新生成其回复；旧分支保留为备选。 */
@@ -729,6 +741,9 @@
 				existing: memoryStore.entries,
 				stateSummary: summarizeState(session.state)
 			});
+			lastAutoExtractCount = session.conversation.filter(
+				(message) => message.role !== 'system'
+			).length;
 			if (result.items.length === 0) {
 				toasts.push('info', '未从最近对话中提取到新的记忆');
 				return null;
@@ -760,9 +775,33 @@
 		}
 	}
 
-	/** 自动提取：回复落库后在后台运行，重复条目自动跳过；失败仅提示一次。 */
+	/**
+	 * 调度自动记忆提取：防抖等待对话静默期再运行，连续快速对话只合并为一次
+	 * 调用（对齐 LangMem ReflectionExecutor 的延迟处理思路，降低 token 消耗）。
+	 */
+	function scheduleAutoMemoryExtract(): void {
+		if (settings.config.memoryEnabled !== true || settings.config.memoryAutoExtract !== true) {
+			return;
+		}
+		if (memoryDebounceTimer !== undefined) {
+			clearTimeout(memoryDebounceTimer);
+		}
+		memoryDebounceTimer = setTimeout(() => {
+			memoryDebounceTimer = undefined;
+			void runAutoMemoryExtract();
+		}, AUTO_MEMORY_DEBOUNCE_MS);
+	}
+
+	/** 自动提取：对话静默后运行，重复条目自动跳过；失败仅提示一次。 */
 	async function runAutoMemoryExtract(): Promise<void> {
 		if (memoryExtracting) {
+			return;
+		}
+		// 自上次成功提取后没有新对话：不重复调用 LLM（记忆窗口无变化）。
+		const nonSystemCount = session.conversation.filter(
+			(message) => message.role !== 'system'
+		).length;
+		if (nonSystemCount <= lastAutoExtractCount) {
 			return;
 		}
 		memoryExtracting = true;
@@ -777,6 +816,7 @@
 				existing: memoryStore.entries,
 				stateSummary: summarizeState(session.state)
 			});
+			lastAutoExtractCount = nonSystemCount;
 			if (result.items.length > 0) {
 				const imported = await memoryStore.importExtracted(result.items);
 				if (imported.imported > 0) {
