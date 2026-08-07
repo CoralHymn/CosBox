@@ -27,6 +27,17 @@ export class DemoLlmClient implements LlmClient {
 		await delay(250, signal);
 		void _onDelta;
 		void _options;
+		const system = messages.find((message) => message.role === 'system')?.content ?? '';
+		// 记忆提取：演示模式不产出真实记忆，返回合法的空结果避免误报解析失败。
+		if (system.includes('CosBox 的长期记忆管理员')) {
+			const content = '{"memories": []}';
+			return {
+				content,
+				toolCalls: [],
+				usage: demoUsage(messages, content),
+				thinking: undefined
+			};
+		}
 		const content = buildDemoReply(messages);
 		return {
 			content,
