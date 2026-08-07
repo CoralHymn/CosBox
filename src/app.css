@@ -453,6 +453,12 @@ button:disabled {
 	color: #0e1016;
 }
 
+.btn-stop {
+	background: var(--err);
+	border-color: var(--err);
+	color: #0e1016;
+}
+
 .btn-primary:hover:not(:disabled) {
 	background: #93adff;
 }

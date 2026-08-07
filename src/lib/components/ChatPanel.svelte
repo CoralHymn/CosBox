@@ -55,6 +55,8 @@
 		onExportLog: () => void;
 		/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
 		streamingDraft: string | null;
+		/** 流式思考草稿：实时展示 AI 思考过程（reasoning_content）。 */
+		streamingThinking: string;
 		/** 全部分支 tip（用于消息气泡下方的分支切换）。 */
 		branches: BranchSummary[];
 		/** 全部快照节点（用于计算分支备选路径）。 */
@@ -69,6 +71,8 @@
 		onConfirmState: (id: string) => void;
 		/** 切换到指定分支 tip。 */
 		onSwitchBranch: (tipId: string) => void;
+		/** 打断生成（busy 时发送按钮变为「停止」）。 */
+		onStop: () => void;
 	}
 
 	let {
@@ -94,13 +98,15 @@
 		recentLog,
 		onExportLog,
 		streamingDraft,
+		streamingThinking,
 		branches,
 		snapshots,
 		headId,
 		allowStateTools,
 		onRetry,
 		onConfirmState,
-		onSwitchBranch
+		onSwitchBranch,
+		onStop
 	}: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
 	/** 输入框当前草稿（供预览）。 */
@@ -206,6 +212,7 @@
 	$effect(() => {
 		void conversation;
 		void streamingDraft;
+		void streamingThinking;
 		if (listEl !== null) {
 			listEl.scrollTop = listEl.scrollHeight;
 		}
@@ -300,7 +307,10 @@
 							id: 'stream-draft',
 							role: 'assistant',
 							content: streamingDraft,
-							timestamp: Date.now()
+							timestamp: Date.now(),
+							...(streamingThinking.trim() !== ''
+								? { thinking: streamingThinking }
+								: {})
 						}}
 					/>
 				{/if}
@@ -422,12 +432,14 @@
 		{/if}
 		<ChatInput
 			disabled={busy}
+			{busy}
 			{searchSupported}
 			{searching}
 			places={characterState.places}
 			wardrobe={characterState.outfit.wardrobe}
 			onTextChange={(text) => (draftText = text)}
 			{onSend}
+			{onStop}
 		/>
 	</div>
 	<aside class="side-preview">

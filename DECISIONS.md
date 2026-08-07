@@ -1093,3 +1093,23 @@ conversation 重建会让 `message` prop 变化并重跑 `$effect`，把用户�
 与 `--bg` 背景色互相干扰；data URL 方案纯客户端零后端依赖。
 **代价**：背景图以 base64 存入 IndexedDB，体积较大时占用存储（提示使用压缩图）；
 `accent-dim` 等 rgba 变量无法用取色器，保留文本输入。
+
+## D79：打断生成 + 流式思考展示
+
+**问题**：AI 思考/生成时用户只能干等，无法中途打断；思考型模型
+（DeepSeek 等）思考阶段没有正文输出，流式界面看起来像「卡住」。
+
+**选择**：
+
+1. **打断**：每次生成创建 `AbortController` 并作为 `signal` 传入
+   `generateReply`（穿透到 fetch/SSE）；busy 时输入区发送按钮变为红色
+   「⏹ 停止」，点击即 `abort()`，请求按 AbortError 结束；中止不弹错误提示、
+   不落 assistant 快照，恢复输入框。
+2. **流式思考**：客户端 options 新增 `onThinkingDelta` 回调，SSE 解析到
+   `reasoning_content` / `reasoning` 增量时实时回调；`GenerateReplyOptions`
+   透传到 `+page`，累积为 `streamingThinking` 传给聊天区流式气泡的
+   「思考过程」区；完成后思考随消息落库保留。补调/重试路径同样透传。
+
+**理由**：打断是对齐主流 AI chat 的基本交互（同按钮切换）；流式思考让用户
+看到 AI 确实在推理而不是卡死，也便于排查「只思考不输出」的问题。
+**代价**：思考增量回调增加了流式路径的参数透传；打断后最近日志保留到中断点。
