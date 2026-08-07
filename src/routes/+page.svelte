@@ -719,11 +719,12 @@
 		}
 		memoryExtracting = true;
 		try {
-			const genConfig = roleConfig('generator');
-			const client = genConfig.provider === 'demo' ? demoClient : openAiClient;
+			// 记忆由对话模型管理（生成模型仅用于地点/衣柜/日程生成）。
+			const chatConfig = roleConfig('chat');
+			const client = chatConfig.provider === 'demo' ? demoClient : openAiClient;
 			const result = await extractMemoriesFromConversation({
 				client,
-				config: genConfig,
+				config: chatConfig,
 				conversation: session.conversation.slice(-12),
 				existing: memoryStore.entries,
 				stateSummary: summarizeState(session.state)
@@ -766,11 +767,12 @@
 		}
 		memoryExtracting = true;
 		try {
-			const genConfig = roleConfig('generator');
-			const client = genConfig.provider === 'demo' ? demoClient : openAiClient;
+			// 记忆由对话模型管理（生成模型仅用于地点/衣柜/日程生成）。
+			const chatConfig = roleConfig('chat');
+			const client = chatConfig.provider === 'demo' ? demoClient : openAiClient;
 			const result = await extractMemoriesFromConversation({
 				client,
-				config: genConfig,
+				config: chatConfig,
 				conversation: session.conversation.slice(-8),
 				existing: memoryStore.entries,
 				stateSummary: summarizeState(session.state)
