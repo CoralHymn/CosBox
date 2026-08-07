@@ -1,5 +1,7 @@
 import type { CharacterState, ChatMessageView, WorldInfoEntry } from '../core/types';
 import type { ChatMessage } from '../llm/types';
+import type { MemoryEntry } from '../memory/types';
+import { recallMemories } from '../memory/recall';
 import type { SearchResult } from '../search/types';
 import {
 	excludeFromContext,
@@ -9,6 +11,9 @@ import {
 } from './history';
 import { summarizeState } from './state-summary';
 import { findWorldInfoHits, type WorldInfoHit } from './world-info';
+
+/** 单次请求默认注入的长期记忆条数上限。 */
+export const DEFAULT_MEMORY_INJECT_LIMIT = 5;
 
 /** 上下文管道的输入：当前状态 + 最近对话 + 世界信息。 */
 export interface ContextPipelineInput {
@@ -27,6 +32,10 @@ export interface ContextPipelineInput {
 	toolFeedback?: string;
 	/** 可选的网络搜索结果，命中时注入系统提示。 */
 	searchResults?: ReadonlyArray<SearchResult>;
+	/** 长期记忆库：按最近对话召回后注入系统提示，弥补压缩丢失的细节。 */
+	memories?: ReadonlyArray<MemoryEntry>;
+	/** 单次请求最多注入的记忆条数（默认 5）。 */
+	memoryLimit?: number;
 }
 
 /** 上下文管道的结构化输出。 */
@@ -41,6 +50,8 @@ export interface ContextBundle {
 	history: ChatMessageView[];
 	compressedCount: number;
 	searchResults: SearchResult[];
+	/** 本次实际召回注入的记忆条目（供 UI 标记使用情况）。 */
+	recalledMemories: MemoryEntry[];
 }
 
 /** 默认角色扮演系统提示模板。 */
@@ -99,11 +110,22 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		contextConversation.map((message) => message.content),
 		input.worldInfo
 	);
+	const recalledMemories = recallMemories(
+		input.memories ?? [],
+		[...contextConversation.map((message) => message.content), stateSummary],
+		input.memoryLimit ?? DEFAULT_MEMORY_INJECT_LIMIT
+	);
 	const searchResults = [...(input.searchResults ?? [])];
 
 	const worldInfoBlock =
 		worldInfoHits.length > 0
 			? `\n【世界设定】\n${worldInfoHits.map((hit) => `- ${hit.content}`).join('\n')}`
+			: '';
+	const memoryBlock =
+		recalledMemories.length > 0
+			? `\n【长期记忆】\n${recalledMemories
+					.map((entry) => `- [${entry.category}] ${entry.content}`)
+					.join('\n')}\n以上是角色过往经历中值得记住的事实，剧情需要时自然引用，不要生硬复述。`
 			: '';
 	const basePrompt = input.systemPrompt?.trim() || defaultSystemPrompt(name);
 	const searchBlock =
@@ -117,7 +139,7 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		input.toolFeedback !== undefined && input.toolFeedback.trim() !== ''
 			? `\n\n${input.toolFeedback.trim()}`
 			: '';
-	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${searchBlock}${toolBlock}${feedbackBlock}\n\n${TIME_MARKER_GUIDANCE}`;
+	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${memoryBlock}${searchBlock}${toolBlock}${feedbackBlock}\n\n${TIME_MARKER_GUIDANCE}`;
 	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
 		role: message.role,
 		content: message.content,
@@ -136,6 +158,7 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		worldInfoHits,
 		history: historyResult.messages,
 		compressedCount: historyResult.compressedCount,
-		searchResults
+		searchResults,
+		recalledMemories
 	};
 }

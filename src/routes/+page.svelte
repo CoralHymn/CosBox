@@ -4,10 +4,13 @@
 	import { formatWorldTime } from '../lib/core/state';
 	import {
 		buildContext,
+		DEFAULT_MEMORY_INJECT_LIMIT,
 		type ContextBundle,
 		type ContextPipelineInput
 	} from '../lib/context/pipeline';
+	import { summarizeState } from '../lib/context/state-summary';
 	import { KvRepository } from '../lib/db/kv-repo';
+	import { MemoryRepository } from '../lib/db/memory-repo';
 	import { getDb } from '../lib/db/schema';
 	import { SnapshotRepository } from '../lib/db/snapshot-repo';
 	import { WorldInfoRepository } from '../lib/db/world-info-repo';
@@ -45,6 +48,8 @@
 		type GeneratorKind
 	} from '../lib/llm/generator';
 	import { estimateMessagesTokens, resolveContextWindow } from '../lib/llm/model-info';
+	import { extractMemoriesFromConversation } from '../lib/memory/extract';
+	import type { ExtractedMemory, MemoryEntry } from '../lib/memory/types';
 	import { sanitizeAssistantText } from '../lib/llm/message-time';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
@@ -64,6 +69,7 @@
 	import { applySlashCommand, parseSlashCommand, type SlashCommand } from '../lib/utils/slash';
 	import { createCharacterSession } from '../lib/stores/character.svelte';
 	import { createContextUsageStore } from '../lib/stores/context-usage.svelte';
+	import { createMemoryStore } from '../lib/stores/memory.svelte';
 	import { createSettingsStore } from '../lib/stores/settings.svelte';
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
@@ -72,6 +78,7 @@
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
 	import LocationsPanel from '../lib/components/LocationsPanel.svelte';
+	import MemoryPanel from '../lib/components/MemoryPanel.svelte';
 	import NavRail from '../lib/components/NavRail.svelte';
 	import SchedulePanel from '../lib/components/SchedulePanel.svelte';
 	import SettingsPanel from '../lib/components/SettingsPanel.svelte';
@@ -90,6 +97,8 @@
 		kv
 	});
 	const contextUsage = createContextUsageStore(kv);
+	const memoryRepo = new MemoryRepository(db);
+	const memoryStore = createMemoryStore(memoryRepo);
 	const session = createCharacterSession(manager);
 	const settings = createSettingsStore(kv);
 	const worldInfo = createWorldInfoStore(new WorldInfoRepository(db));
@@ -108,6 +117,8 @@
 	let mobileStateOpen = $state(false);
 	let busy = $state(false);
 	let searching = $state(false);
+	/** LLM 记忆提取进行中（面板按钮与自动提取共用）。 */
+	let memoryExtracting = $state(false);
 	let ready = $state(false);
 	/** 开发者模式下展示的最近一次发送给 AI 的完整提示词。 */
 	let debugPrompt = $state<DebugPromptView | null>(null);
@@ -209,6 +220,7 @@
 			await worldInfo.init();
 			await settings.load();
 			await contextUsage.load();
+			await memoryStore.load();
 			const restored = contextUsage.usage;
 			if (restored !== null) {
 				// 重启后恢复上次请求的用量面板：上下文包不落库（含完整消息数组），
@@ -303,6 +315,9 @@
 			state: session.state,
 			conversation: session.conversation,
 			worldInfo: worldInfo.entries,
+			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
+			memoryLimit:
+				settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
 			enableStateTools: settings.config.allowAiStateTools === true,
 			characterName:
 				settings.profile.name ||
@@ -432,6 +447,15 @@
 		}
 		if (additions.length > 0) {
 			recentLog += `\n\n${additions.join('\n\n')}`;
+		}
+		// 记忆：标记本次召回注入的条目（供排序衰减），并按设置后台自动提取新事实。
+		if (bundle.recalledMemories.length > 0) {
+			void memoryStore
+				.markUsed(bundle.recalledMemories.map((entry) => entry.id))
+				.catch(() => undefined);
+		}
+		if (settings.config.memoryEnabled === true && settings.config.memoryAutoExtract === true) {
+			void runAutoMemoryExtract();
 		}
 	}
 
@@ -593,6 +617,123 @@
 		} catch (err) {
 			// 用量持久化失败不阻断聊天流程，仅提示用户。
 			toasts.error(err);
+		}
+	}
+
+	/** 手动添加一条记忆。 */
+	async function handleMemoryAdd(draft: {
+		content: string;
+		category: string;
+		keywords: string[];
+		importance: number;
+		pinned: boolean;
+	}): Promise<void> {
+		try {
+			await memoryStore.add(draft);
+			toasts.success('记忆已保存');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 局部更新一条记忆。 */
+	async function handleMemoryUpdate(
+		id: string,
+		patch: Partial<Omit<MemoryEntry, 'id'>>
+	): Promise<void> {
+		try {
+			await memoryStore.update(id, patch);
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 删除一条记忆。 */
+	async function handleMemoryRemove(id: string): Promise<void> {
+		try {
+			await memoryStore.remove(id);
+			toasts.success('记忆已删除');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 触发 LLM 从最近对话提取候选记忆；失败或取消返回 null。 */
+	async function handleMemoryExtract(): Promise<ExtractedMemory[] | null> {
+		if (memoryExtracting) {
+			return null;
+		}
+		memoryExtracting = true;
+		try {
+			const client = settings.config.provider === 'demo' ? demoClient : openAiClient;
+			const result = await extractMemoriesFromConversation({
+				client,
+				config: settings.config,
+				conversation: session.conversation.slice(-12),
+				existing: memoryStore.entries,
+				stateSummary: summarizeState(session.state)
+			});
+			if (result.items.length === 0) {
+				toasts.push('info', '未从最近对话中提取到新的记忆');
+				return null;
+			}
+			return result.items;
+		} catch (err) {
+			toasts.error(err);
+			return null;
+		} finally {
+			memoryExtracting = false;
+		}
+	}
+
+	/** 导入勾选的提取候选；返回导入/跳过数量供面板提示。 */
+	async function handleMemoryImportExtracted(
+		items: ExtractedMemory[]
+	): Promise<{ imported: number; skipped: number }> {
+		try {
+			const result = await memoryStore.importExtracted(items);
+			toasts.success(
+				result.skipped > 0
+					? `已导入 ${result.imported} 条记忆，跳过重复 ${result.skipped} 条`
+					: `已导入 ${result.imported} 条记忆`
+			);
+			return result;
+		} catch (err) {
+			toasts.error(err);
+			return { imported: 0, skipped: 0 };
+		}
+	}
+
+	/** 自动提取：回复落库后在后台运行，重复条目自动跳过；失败仅提示一次。 */
+	async function runAutoMemoryExtract(): Promise<void> {
+		if (memoryExtracting) {
+			return;
+		}
+		memoryExtracting = true;
+		try {
+			const client = settings.config.provider === 'demo' ? demoClient : openAiClient;
+			const result = await extractMemoriesFromConversation({
+				client,
+				config: settings.config,
+				conversation: session.conversation.slice(-8),
+				existing: memoryStore.entries,
+				stateSummary: summarizeState(session.state)
+			});
+			if (result.items.length > 0) {
+				const imported = await memoryStore.importExtracted(result.items);
+				if (imported.imported > 0) {
+					toasts.push(
+						'info',
+						`已自动记录 ${imported.imported} 条新记忆${
+							imported.skipped > 0 ? `，跳过重复 ${imported.skipped} 条` : ''
+						}`
+					);
+				}
+			}
+		} catch (err) {
+			toasts.push('info', `自动记忆提取失败：${err instanceof Error ? err.message : '未知错误'}`);
+		} finally {
+			memoryExtracting = false;
 		}
 	}
 
@@ -1204,6 +1345,16 @@
 					entries={worldInfo.entries}
 					onUpsert={handleWorldUpsert}
 					onRemove={handleWorldRemove}
+				/>
+			{:else if tab === 'memory'}
+				<MemoryPanel
+					entries={memoryStore.sorted}
+					extracting={memoryExtracting}
+					onAdd={handleMemoryAdd}
+					onUpdate={handleMemoryUpdate}
+					onRemove={handleMemoryRemove}
+					onExtract={handleMemoryExtract}
+					onImportExtracted={handleMemoryImportExtracted}
 				/>
 			{:else if tab === 'transfer'}
 				<ImportExportPanel onImport={handleImport} onExport={handleExport} />
