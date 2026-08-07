@@ -135,4 +135,30 @@ describe('normalizeLlmConfig', () => {
 		expect(normalizeLlmConfig({ stream: true }).stream).toBe(true);
 		expect(normalizeLlmConfig({}).stream).toBe(false);
 	});
+
+	it('保留模型服务列表与三角色绑定，缺省时为空', () => {
+		const service = {
+			id: 's1',
+			label: '服务',
+			provider: 'openai-compatible' as const,
+			providerId: 'deepseek',
+			baseUrl: 'https://api.deepseek.com/v1',
+			apiKey: 'k',
+			model: 'deepseek-v4-flash',
+			createdAt: 1
+		};
+		const result = normalizeLlmConfig({
+			modelServices: [service],
+			chatModelId: 's1',
+			judgeModelId: 's1',
+			generatorModelId: 's1'
+		});
+		expect(result.modelServices).toEqual([service]);
+		expect(result.chatModelId).toBe('s1');
+		expect(result.judgeModelId).toBe('s1');
+		expect(result.generatorModelId).toBe('s1');
+		const empty = normalizeLlmConfig({});
+		expect(empty.modelServices).toEqual([]);
+		expect(empty.chatModelId).toBe('');
+	});
 });

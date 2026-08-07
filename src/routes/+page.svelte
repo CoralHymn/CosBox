@@ -53,10 +53,11 @@
 	import { sanitizeAssistantText } from '../lib/llm/message-time';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
+	import { resolveServiceConfig } from '../lib/llm/model-services';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
 	import type { JudgeDebugView } from '../lib/llm/state-judge';
 	import { STATE_TOOLS } from '../lib/llm/state-tools';
-	import type { LlmConfig, TokenUsage } from '../lib/llm/types';
+	import type { LlmConfig, ModelRole, TokenUsage } from '../lib/llm/types';
 	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
 	import type { SyncSettings } from '../lib/sync/types';
 	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
@@ -152,15 +153,21 @@
 	/** 最近一次 LLM 状态判断的调试视图（开发者模式查看）。 */
 	let lastJudgeDebug = $state<JudgeDebugView | null>(null);
 
+	/** 按角色解析出实际请求配置：角色绑定服务优先，未绑定/服务缺失时回退主配置。 */
+	function roleConfig(role: ModelRole): LlmConfig {
+		return resolveServiceConfig(settings.config, role);
+	}
+
 	const providerLabel = $derived.by(() => {
-		if (settings.config.provider === 'demo') {
+		const chat = roleConfig('chat');
+		if (chat.provider === 'demo') {
 			return '演示模式';
 		}
-		const preset = findProviderPreset(settings.config.providerId);
+		const preset = findProviderPreset(chat.providerId);
 		if (preset) {
-			return `${preset.label} · ${settings.config.model}`;
+			return `${preset.label} · ${chat.model}`;
 		}
-		return settings.config.model || 'OpenAI-compatible';
+		return chat.model || 'OpenAI-compatible';
 	});
 
 	const searchSupported = $derived(
@@ -327,18 +334,17 @@
 			systemPrompt: settings.profile.systemPrompt ?? undefined,
 			...(searchResults !== undefined ? { searchResults } : {})
 		};
-		const service = new ChatService(
-			settings.config.provider === 'demo' ? demoClient : openAiClient
-		);
+		const chatConfig = roleConfig('chat');
+		const service = new ChatService(chatConfig.provider === 'demo' ? demoClient : openAiClient);
 		const contextWindow = resolveContextWindow(
-			settings.config.modelContextWindow,
-			settings.config.model
+			chatConfig.modelContextWindow,
+			chatConfig.model
 		);
 		const compactionOptions =
-			settings.config.autoCompact === true
+			chatConfig.autoCompact === true
 				? {
 						contextWindow,
-						threshold: settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD,
+						threshold: chatConfig.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD,
 						keepRecent: DEFAULT_KEEP_RECENT,
 						state: compactState
 					}
@@ -355,7 +361,7 @@
 			rounds
 		} = await service.generateReply(
 			input,
-			settings.config,
+			chatConfig,
 			{
 				onDelta: (delta) => {
 					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
@@ -375,6 +381,7 @@
 					advanceTime: (minutes) => session.advanceTime(minutes)
 				},
 				enableStateJudge: settings.config.llmStateConfirm === true,
+				judgeConfig: roleConfig('judge'),
 				...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
 			},
 			controller.signal
@@ -506,14 +513,13 @@
 		try {
 			// 用该轮发生时的状态（含世界配置覆盖）做判断，避免被后续消息污染。
 			const stateAt = await session.getStateAt(assistant.id);
-			const service = new ChatService(
-				settings.config.provider === 'demo' ? demoClient : openAiClient
-			);
+			const judgeConfig = roleConfig('judge');
+			const service = new ChatService(judgeConfig.provider === 'demo' ? demoClient : openAiClient);
 			const { executed, debug } = await service.confirmStateForTurn({
 				state: stateAt,
 				lastUser,
 				lastAssistant: assistant,
-				config: settings.config,
+				config: judgeConfig,
 				tools: [...STATE_TOOLS],
 				toolContext: {
 					getState: () => session.state,
@@ -558,10 +564,9 @@
 		}
 		compacting = true;
 		try {
-			const service = new ChatService(
-				settings.config.provider === 'demo' ? demoClient : openAiClient
-			);
-			const result = await service.compactConversation(session.conversation, settings.config, {
+			const chatConfig = roleConfig('chat');
+			const service = new ChatService(chatConfig.provider === 'demo' ? demoClient : openAiClient);
+			const result = await service.compactConversation(session.conversation, chatConfig, {
 				state: compactState,
 				keepRecent: DEFAULT_KEEP_RECENT
 			});
@@ -665,10 +670,11 @@
 		}
 		memoryExtracting = true;
 		try {
-			const client = settings.config.provider === 'demo' ? demoClient : openAiClient;
+			const genConfig = roleConfig('generator');
+			const client = genConfig.provider === 'demo' ? demoClient : openAiClient;
 			const result = await extractMemoriesFromConversation({
 				client,
-				config: settings.config,
+				config: genConfig,
 				conversation: session.conversation.slice(-12),
 				existing: memoryStore.entries,
 				stateSummary: summarizeState(session.state)
@@ -711,10 +717,11 @@
 		}
 		memoryExtracting = true;
 		try {
-			const client = settings.config.provider === 'demo' ? demoClient : openAiClient;
+			const genConfig = roleConfig('generator');
+			const client = genConfig.provider === 'demo' ? demoClient : openAiClient;
 			const result = await extractMemoriesFromConversation({
 				client,
-				config: settings.config,
+				config: genConfig,
 				conversation: session.conversation.slice(-8),
 				existing: memoryStore.entries,
 				stateSummary: summarizeState(session.state)
@@ -765,6 +772,9 @@
 			state: session.state,
 			conversation,
 			worldInfo: worldInfo.entries,
+			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
+			memoryLimit:
+				settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
 			characterName:
 				settings.profile.name ||
 				(typeof session.state.attributes.name === 'string'
@@ -774,8 +784,9 @@
 			historyOptions: { maxMessages: Math.max(1, conversation.length) }
 		};
 		const bundle = buildContext(input);
+		const chatConfig = roleConfig('chat');
 		const notes: string[] = [];
-		if (settings.config.autoCompact === true) {
+		if (chatConfig.autoCompact === true) {
 			notes.push('若发送时达到压缩阈值，系统消息前还会插入模型生成的上下文摘要（预览未包含）。');
 		}
 		if (searchSupported) {
@@ -787,10 +798,10 @@
 				systemMessage: bundle.systemMessage,
 				messages: [{ role: 'system', content: bundle.systemMessage }, ...bundle.messages],
 				request: {
-					model: settings.config.model,
-					maxTokens: settings.config.maxTokens,
-					stream: settings.config.stream === true,
-					toolsEnabled: settings.config.allowAiStateTools === true
+					model: chatConfig.model,
+					maxTokens: chatConfig.maxTokens,
+					stream: chatConfig.stream === true,
+					toolsEnabled: chatConfig.allowAiStateTools === true
 				}
 			},
 			note: notes.join('\n')
@@ -1030,10 +1041,9 @@
 
 	/** AI 生成（地点/衣柜/日程）：走当前模型服务 + review_generation 审查循环。 */
 	async function handleAiGenerate(request: GenerationRequest): Promise<GenerationResult> {
-		const service = new GeneratorService(
-			settings.config.provider === 'demo' ? demoClient : openAiClient
-		);
-		return service.generate(request, settings.config);
+		const genConfig = roleConfig('generator');
+		const service = new GeneratorService(genConfig.provider === 'demo' ? demoClient : openAiClient);
+		return service.generate(request, genConfig);
 	}
 
 	/** AI 生成结果批量导入：合并去重后作为世界配置（不生成快照）。 */

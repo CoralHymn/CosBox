@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { findModelInfo } from '../llm/model-info';
+	import { MODEL_ROLE_LABELS, normalizeModelService } from '../llm/model-services';
 	import type { FetchedModel } from '../llm/model-service';
 	import { CUSTOM_PROVIDER_ID, findProviderPreset, LLM_PROVIDER_PRESETS } from '../llm/providers';
-	import { DEFAULT_LLM_CONFIG, type LlmConfig } from '../llm/types';
+	import { DEFAULT_LLM_CONFIG, type LlmConfig, type ModelRole, type ModelService } from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
 	import type { AppProfile } from '../stores/settings.svelte';
 	import type { SyncResult } from '../sync/sync-service';
@@ -94,6 +95,18 @@
 	/** 「获取模型列表」拉取到的模型 id 与上下文窗口。 */
 	let availableModels = $state<string[]>([]);
 	let modelContexts = $state<Record<string, number>>({});
+	/** 已保存的模型服务列表与三角色绑定（角色 → 服务 id）。 */
+	let services = $state<ModelService[]>([]);
+	let chatModelId = $state('');
+	let judgeModelId = $state('');
+	let generatorModelId = $state('');
+	/** 服务编辑草稿（复用 provider/baseUrl/apiKey/model 等字段）。 */
+	let serviceEditorOpen = $state(false);
+	let editingServiceId = $state<string | null>(null);
+	let serviceLabel = $state('');
+	let serviceNote = $state('');
+	let serviceMaxTokens = $state<number | undefined>(undefined);
+	let savingService = $state(false);
 
 	/** 主题颜色项：rgba 项只能文本输入，其余用取色器。 */
 	const themeColorKeys: { key: ThemeColorKey; label: string; rgba: boolean }[] = [
@@ -147,6 +160,10 @@
 		memoryEnabled = config.memoryEnabled !== false;
 		memoryInjectLimit = config.memoryInjectLimit ?? 5;
 		memoryAutoExtract = config.memoryAutoExtract === true;
+		services = (config.modelServices ?? []).map((service) => ({ ...service }));
+		chatModelId = config.chatModelId ?? '';
+		judgeModelId = config.judgeModelId ?? '';
+		generatorModelId = config.generatorModelId ?? '';
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
 		searchApiKey = config.webSearch.apiKey;
@@ -275,6 +292,10 @@
 			memoryEnabled,
 			memoryInjectLimit,
 			memoryAutoExtract,
+			modelServices: services.map((service) => ({ ...service })),
+			chatModelId,
+			judgeModelId,
+			generatorModelId,
 			webSearch: {
 				enabled: searchEnabled,
 				provider: searchProvider,
@@ -347,7 +368,7 @@
 		}
 		fetchingModels = true;
 		try {
-			const models = await onFetchModels(buildConfig());
+			const models = await onFetchModels(buildServiceDraftConfig());
 			availableModels = models.map((entry) => entry.id);
 			const contexts: Record<string, number> = {};
 			for (const entry of models) {
@@ -372,10 +393,162 @@
 		}
 		testingConnection = true;
 		try {
-			await onTestConnection(buildConfig());
+			await onTestConnection(buildServiceDraftConfig());
 		} finally {
 			testingConnection = false;
 		}
+	}
+
+	/** 把「服务编辑草稿」合成一份配置，供获取模型列表 / 连接测试使用。 */
+	function buildServiceDraftConfig(): LlmConfig {
+		return {
+			...buildConfig(),
+			provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
+			providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
+			baseUrl: baseUrl.trim(),
+			apiKey: apiKey.trim(),
+			model: model.trim() || DEFAULT_LLM_CONFIG.model,
+			modelContextWindow,
+			maxTokens: Math.max(1, Math.floor(serviceMaxTokens ?? maxTokens))
+		};
+	}
+
+	/** 打开新增表单，或回填某个服务进行编辑。 */
+	function openServiceEditor(service: ModelService | null): void {
+		editingServiceId = service?.id ?? null;
+		serviceLabel = service?.label ?? '';
+		serviceNote = service?.notes ?? '';
+		if (service === null) {
+			presetSelection = CUSTOM_PROVIDER_ID;
+			baseUrl = '';
+			apiKey = '';
+			model = '';
+			modelContextWindow = undefined;
+			serviceMaxTokens = undefined;
+		} else {
+			presetSelection =
+				service.provider === 'demo'
+					? 'demo'
+					: findProviderPreset(service.providerId)
+						? service.providerId
+						: CUSTOM_PROVIDER_ID;
+			baseUrl = service.baseUrl;
+			apiKey = service.apiKey;
+			model = service.model;
+			modelContextWindow = service.contextWindow;
+			serviceMaxTokens = service.maxTokens;
+		}
+		availableModels = [];
+		modelContexts = {};
+		serviceEditorOpen = true;
+	}
+
+	/** 保存（新增或更新）一个模型服务；首个服务自动绑定全部角色。 */
+	async function saveService(): Promise<void> {
+		if (savingService || model.trim() === '') {
+			return;
+		}
+		savingService = true;
+		try {
+			const draft = {
+				id: editingServiceId ?? undefined,
+				label: serviceLabel,
+				provider: (presetSelection === 'demo' ? 'demo' : 'openai-compatible') as ModelService['provider'],
+				providerId: presetSelection,
+				baseUrl,
+				apiKey,
+				model,
+				contextWindow: modelContextWindow,
+				maxTokens: serviceMaxTokens ?? undefined,
+				notes: serviceNote
+			};
+			const normalized = normalizeModelService(draft);
+			if (editingServiceId === null) {
+				services = [...services, normalized];
+				if (services.length === 1) {
+					chatModelId = normalized.id;
+					judgeModelId = normalized.id;
+					generatorModelId = normalized.id;
+				}
+			} else {
+				services = services.map((service) => (service.id === normalized.id ? normalized : service));
+			}
+			serviceEditorOpen = false;
+			editingServiceId = null;
+		} finally {
+			savingService = false;
+		}
+	}
+
+	/** 删除服务；若某个角色正指向它，改绑到剩余第一条服务。 */
+	async function deleteService(service: ModelService): Promise<void> {
+		if (!window.confirm(`确定删除模型服务「${service.label}」？${service.apiKey ? '其 API Key 将一并移除。' : ''}`)) {
+			return;
+		}
+		const remaining = services.filter((item) => item.id !== service.id);
+		services = remaining;
+		const fallback = remaining[0]?.id ?? '';
+		if (chatModelId === service.id) {
+			chatModelId = fallback;
+		}
+		if (judgeModelId === service.id) {
+			judgeModelId = fallback;
+		}
+		if (generatorModelId === service.id) {
+			generatorModelId = fallback;
+		}
+		if (editingServiceId === service.id) {
+			serviceEditorOpen = false;
+			editingServiceId = null;
+		}
+	}
+
+	/** 角色绑定：下拉选择服务 id。 */
+	function setRole(role: ModelRole, id: string): void {
+		if (role === 'chat') {
+			chatModelId = id;
+		} else if (role === 'judge') {
+			judgeModelId = id;
+		} else {
+			generatorModelId = id;
+		}
+	}
+
+	/** 某服务被哪些角色使用（徽标展示）。 */
+	function rolesForService(serviceId: string): ModelRole[] {
+		const roles: ModelRole[] = [];
+		if (chatModelId === serviceId) {
+			roles.push('chat');
+		}
+		if (judgeModelId === serviceId) {
+			roles.push('judge');
+		}
+		if (generatorModelId === serviceId) {
+			roles.push('generator');
+		}
+		return roles;
+	}
+
+	/** 全部角色（分配区遍历用）。 */
+	const ALL_ROLES: ModelRole[] = ['chat', 'judge', 'generator'];
+
+	/** 角色当前绑定的服务 id。 */
+	function roleId(role: ModelRole): string {
+		if (role === 'chat') {
+			return chatModelId;
+		}
+		if (role === 'judge') {
+			return judgeModelId;
+		}
+		return generatorModelId;
+	}
+
+	/** 服务商展示名。 */
+	function providerLabelFor(service: ModelService): string {
+		if (service.provider === 'demo') {
+			return '演示模式';
+		}
+		return findProviderPreset(service.providerId)?.label ?? '自定义';
 	}
 
 	async function onImportFile(event: Event): Promise<void> {
@@ -434,107 +607,213 @@
 	</p>
 
 	<div class="card">
-		<h3 class="card-title">模型服务</h3>
+		<h3 class="card-title">模型服务管理</h3>
+		<p class="muted" style="margin: 0 0 12px;">
+			把「服务商 + Key + 模型」保存为可复用的模型服务，再为三类任务分配不同模型：
+			对话用强模型、状态判断与生成用便宜模型，便于控制 token 与消费。API Key 仅保存在本地，
+			不会随工作区导出或同步到服务器。
+		</p>
+
 		<div class="field">
-			<label for="llm-provider">服务商</label>
-			<select
-				id="llm-provider"
-				class="select"
-				value={presetSelection}
-				onchange={(event) => selectProvider((event.currentTarget as HTMLSelectElement).value)}
-			>
-				<option value="demo">内置演示（离线）</option>
-				{#each LLM_PROVIDER_PRESETS as preset (preset.id)}
-					<option value={preset.id}>{preset.label}</option>
+			<span class="muted" style="display: block; margin-bottom: 4px;">任务角色分配（快速切换 = 换绑服务）</span>
+			<div class="row-actions" style="flex-wrap: wrap; gap: 8px;">
+				{#each ALL_ROLES as role (role)}
+					<div class="field" style="flex: 1; min-width: 180px;">
+						<label for={`role-${role}`} class="muted">{MODEL_ROLE_LABELS[role]}</label>
+						<select
+							id={`role-${role}`}
+							class="select"
+							value={roleId(role)}
+							onchange={(event) =>
+								setRole(role, (event.currentTarget as HTMLSelectElement).value)}
+						>
+							{#each services as service (service.id)}
+								<option value={service.id}>
+									{service.label}（{service.model}）
+								</option>
+							{/each}
+						</select>
+					</div>
 				{/each}
-				<option value={CUSTOM_PROVIDER_ID}>自定义（OpenAI-compatible）</option>
-			</select>
+			</div>
 		</div>
 
-		{#if presetSelection !== 'demo'}
-			<div class="field">
-				<label for="llm-base-url">Base URL（OpenAI 兼容端点）</label>
-				<input
-					id="llm-base-url"
-					class="input"
-					bind:value={baseUrl}
-					placeholder="https://api.example.com/v1"
-				/>
-			</div>
-			<div class="field">
-				<label for="llm-api-key">API Key</label>
-				<input
-					id="llm-api-key"
-					class="input"
-					type="password"
-					bind:value={apiKey}
-					placeholder={currentPreset?.requiresApiKey === false
-						? '本地服务通常无需 Key'
-						: 'your-api-key'}
-				/>
-			</div>
-			<div class="field">
-				<label for="llm-model">模型</label>
-				<ModelCombobox
-					value={model}
-					candidates={modelCandidates}
-					inputId="llm-model"
-					placeholder="模型 id（点击选择或直接输入）"
-					onChange={onModelChange}
-				/>
-				<p class="muted" style="margin-top: 2px;">
-					上下文窗口：{modelContextWindow ?? findModelInfo(model.trim())?.contextWindow ?? '未知'} tokens
-				</p>
-			</div>
-			{#if currentPreset?.notes}
-				<p class="muted" style="margin-top: 2px;">{currentPreset.notes}</p>
-			{/if}
-			<div class="row-actions" style="margin-bottom: 10px;">
-				<button
-					class="btn btn-small"
-					onclick={fetchModels}
-					disabled={fetchingModels || testingConnection}
-				>
-					{fetchingModels ? '获取中…' : '获取模型列表'}
-				</button>
-				<button class="btn btn-small" onclick={test} disabled={fetchingModels || testingConnection}>
-					{testingConnection ? '测试中…' : '连接测试'}
-				</button>
-			</div>
-			{#if availableModels.length > 0}
-				<p class="muted" style="margin: 0 0 10px;">
-					已获取 {availableModels.length} 个模型；选择或输入已知模型后自动填充上下文窗口。
-				</p>
+		<div class="field">
+			<span class="muted" style="display: block; margin-bottom: 4px;">已保存的模型服务</span>
+			{#each services as service (service.id)}
+				<div class="service-row">
+					<div style="flex: 1; min-width: 0;">
+						<div class="row-actions" style="gap: 6px;">
+							<span class="service-name">{service.label}</span>
+							{#each rolesForService(service.id) as role (role)}
+								<span class="role-badge">{MODEL_ROLE_LABELS[role]}</span>
+							{/each}
+						</div>
+						<p class="muted" style="margin: 3px 0 0; font-size: 12px;">
+							{providerLabelFor(service)} · {service.model}
+							{#if service.maxTokens !== undefined} · Max {service.maxTokens}{/if}
+						</p>
+					</div>
+					<div class="row-actions" style="gap: 4px;">
+						<button class="btn btn-small" onclick={() => openServiceEditor(service)}>编辑</button>
+						<button
+							class="btn btn-danger btn-small"
+							onclick={() => deleteService(service)}
+							aria-label={`删除服务 ${service.label}`}>✕</button
+						>
+					</div>
+				</div>
 			{:else}
-				<p class="muted" style="margin: 0 0 10px;">
-					获取模型列表将拉取该端点支持的模型并替代写死的候选列表；连接测试用于验证地址与 Key
-					是否有效。
-				</p>
-			{/if}
+				<p class="empty-hint">还没有模型服务。点击下方「添加模型服务」创建第一个服务。</p>
+			{/each}
+		</div>
+
+		{#if serviceEditorOpen}
+			<div class="service-editor">
+				<h3 class="card-title" style="margin-top: 0;">
+					{editingServiceId === null ? '添加模型服务' : '编辑模型服务'}
+				</h3>
+				<div class="field">
+					<label for="svc-label">名称（便于区分，如「DeepSeek 主模型」）</label>
+					<input id="svc-label" class="input" bind:value={serviceLabel} placeholder="我的服务" />
+				</div>
+				<div class="field">
+					<label for="svc-provider">服务商</label>
+					<select
+						id="svc-provider"
+						class="select"
+						value={presetSelection}
+						onchange={(event) => selectProvider((event.currentTarget as HTMLSelectElement).value)}
+					>
+						<option value="demo">内置演示（离线）</option>
+						{#each LLM_PROVIDER_PRESETS as preset (preset.id)}
+							<option value={preset.id}>{preset.label}</option>
+						{/each}
+						<option value={CUSTOM_PROVIDER_ID}>自定义（OpenAI-compatible）</option>
+					</select>
+				</div>
+				{#if presetSelection !== 'demo'}
+					<div class="field">
+						<label for="svc-base-url">Base URL（OpenAI 兼容端点）</label>
+						<input
+							id="svc-base-url"
+							class="input"
+							bind:value={baseUrl}
+							placeholder="https://api.example.com/v1"
+						/>
+					</div>
+					<div class="field">
+						<label for="svc-api-key">API Key</label>
+						<input
+							id="svc-api-key"
+							class="input"
+							type="password"
+							bind:value={apiKey}
+							placeholder={currentPreset?.requiresApiKey === false
+								? '本地服务通常无需 Key'
+								: 'your-api-key'}
+						/>
+					</div>
+					<div class="field">
+						<label for="svc-model">模型</label>
+						<ModelCombobox
+							value={model}
+							candidates={modelCandidates}
+							inputId="svc-model"
+							placeholder="模型 id（点击选择或直接输入）"
+							onChange={onModelChange}
+						/>
+						<p class="muted" style="margin-top: 2px;">
+							上下文窗口：{modelContextWindow ?? findModelInfo(model.trim())?.contextWindow ?? '未知'} tokens
+						</p>
+					</div>
+					{#if currentPreset?.notes}
+						<p class="muted" style="margin-top: 2px;">{currentPreset.notes}</p>
+					{/if}
+					<div class="grid-2">
+						<div class="field">
+							<label for="svc-context">上下文窗口（token，可选）</label>
+							<input
+								id="svc-context"
+								class="input"
+								type="number"
+								value={modelContextWindow ?? ''}
+								onchange={(event) =>
+									(modelContextWindow = Number((event.currentTarget as HTMLInputElement).value) > 0
+										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+										: undefined)}
+								placeholder="未知留空"
+							/>
+						</div>
+						<div class="field">
+							<label for="svc-max-tokens">Max Tokens（可选，缺省用全局）</label>
+							<input
+								id="svc-max-tokens"
+								class="input"
+								type="number"
+								value={serviceMaxTokens ?? ''}
+								onchange={(event) =>
+									(serviceMaxTokens = Number((event.currentTarget as HTMLInputElement).value) > 0
+										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+										: undefined)}
+								placeholder="全局 {maxTokens}"
+							/>
+						</div>
+					</div>
+					<div class="row-actions" style="margin-bottom: 10px;">
+						<button
+							class="btn btn-small"
+							onclick={fetchModels}
+							disabled={fetchingModels || testingConnection}
+						>
+							{fetchingModels ? '获取中…' : '获取模型列表'}
+						</button>
+						<button class="btn btn-small" onclick={test} disabled={fetchingModels || testingConnection}>
+							{testingConnection ? '测试中…' : '连接测试'}
+						</button>
+					</div>
+					{#if availableModels.length > 0}
+						<p class="muted" style="margin: 0 0 10px;">
+							已获取 {availableModels.length} 个模型；选择或输入已知模型后自动填充上下文窗口。
+						</p>
+					{/if}
+				{/if}
+				<div class="field">
+					<label for="svc-note">备注（可选）</label>
+					<input id="svc-note" class="input" bind:value={serviceNote} placeholder="用途说明" />
+				</div>
+				<div class="row-actions" style="gap: 6px;">
+					<button class="btn btn-small" onclick={saveService} disabled={savingService || model.trim() === ''}>
+						{savingService ? '保存中…' : '保存服务'}
+					</button>
+					<button
+						class="btn btn-small"
+						onclick={() => {
+							serviceEditorOpen = false;
+							editingServiceId = null;
+						}}>取消</button
+					>
+				</div>
+			</div>
+		{:else}
+			<button class="btn btn-small" onclick={() => openServiceEditor(null)}>＋ 添加模型服务</button>
 		{/if}
 
-		<div class="grid-2">
-			<div class="field">
-				<label for="llm-temperature">Temperature（{temperature.toFixed(1)}）</label>
-				<input
-					id="llm-temperature"
-					type="range"
-					min="0"
-					max="2"
-					step="0.1"
-					bind:value={temperature}
-					style="width: 100%;"
-				/>
-			</div>
-			<div class="field">
-				<label for="llm-max-tokens">Max Tokens（单次回复最大输出）</label>
-				<input id="llm-max-tokens" class="input" type="number" bind:value={maxTokens} />
-				<p class="muted" style="margin-top: 2px;">
-					限制一次回复最多生成的 token 数（请求中的 max_tokens），不是上下文总长度；
-					自动压缩时也会预留这么多作为输出预算。思考型模型（如 DeepSeek R1）的
-					思考与正文共享该预算：设置过小（如 1024）会导致思考耗尽预算、正文为空， 建议 4096 以上。
-				</p>
-			</div>
+		<div class="field" style="margin-top: 14px;">
+			<label for="llm-temperature">全局 Temperature（{temperature.toFixed(1)}）</label>
+			<input
+				id="llm-temperature"
+				type="range"
+				min="0"
+				max="2"
+				step="0.1"
+				bind:value={temperature}
+				style="width: 100%;"
+			/>
+			<p class="muted" style="margin-top: 2px;">
+				全局 Max Tokens（{maxTokens}）作为各服务未单独设置时的回退值；
+				压缩触发时同样按该服务的预算预留输出空间。
+			</p>
 		</div>
 	</div>
 
@@ -884,3 +1163,34 @@
 
 	<button class="btn btn-primary" onclick={save} disabled={saving}>保存设置</button>
 </div>
+
+<style>
+	.service-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px 0;
+		border-bottom: 1px solid var(--border);
+	}
+	.service-row:last-of-type {
+		border-bottom: none;
+	}
+	.service-name {
+		font-weight: 600;
+	}
+	.role-badge {
+		font-size: 11px;
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--accent) 15%, transparent);
+		color: var(--accent);
+		border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+	}
+	.service-editor {
+		margin: 12px 0;
+		padding: 12px;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		background: var(--panel-2);
+	}
+</style>

@@ -1,4 +1,5 @@
 import { SvelteSet } from 'svelte/reactivity';
+import { ensureModelServiceBindings } from '../llm/model-services';
 import { normalizeLlmConfig } from '../llm/providers';
 import { DEFAULT_LLM_CONFIG, type LlmConfig } from '../llm/types';
 import { defaultSystemPrompt } from '../context/pipeline';
@@ -50,7 +51,14 @@ export function createSettingsStore(kv: KvRepository) {
 			kv.get<ThemeConfig>(THEME_KEY)
 		]);
 		if (savedConfig) {
-			config = normalizeLlmConfig(savedConfig);
+			const normalized = normalizeLlmConfig(savedConfig);
+			// 老存档迁移：无模型服务列表时用主配置生成「默认模型」服务并绑定三个角色；
+			// 迁移结果与存档不同则写回，保证后续保存不丢角色绑定。
+			const migrated = ensureModelServiceBindings(normalized);
+			config = migrated;
+			if (JSON.stringify(migrated) !== JSON.stringify(normalized)) {
+				await kv.set(LLM_KEY, migrated);
+			}
 		}
 		if (savedProfile) {
 			profile = savedProfile;

@@ -643,6 +643,37 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
 	});
 
+	it('LLM 状态确认：judgeConfig 指定的独立模型配置被用于判断请求', async () => {
+		const chatWithTools = vi.fn().mockResolvedValueOnce({ content: '嗯嗯。', toolCalls: [] });
+		const chat = vi.fn().mockResolvedValueOnce({ content: 'False', toolCalls: [] });
+		const client: LlmClient = { chat, chatWithTools };
+		const service = new ChatService(client);
+		const judgeConfig = {
+			...config,
+			model: 'cheap-judge',
+			maxTokens: 64,
+			apiKey: 'judge-key'
+		};
+		await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [{ id: '1', role: 'user', content: '你好', timestamp: 1 }],
+				worldInfo: []
+			},
+			config,
+			{
+				tools: [...STATE_TOOLS],
+				toolContext: makeToolContext(),
+				enableStateJudge: true,
+				judgeConfig
+			}
+		);
+		const [, judgeConfigArg] = chat.mock.calls[0]! as [ChatMessage[], typeof config];
+		expect(judgeConfigArg.model).toBe('cheap-judge');
+		expect(judgeConfigArg.maxTokens).toBe(64);
+		expect(judgeConfigArg.apiKey).toBe('judge-key');
+	});
+
 	it('LLM 状态确认：判断输入使用本次回复而非上一条历史回复', async () => {
 		const chatWithTools = vi
 			.fn()
