@@ -7,6 +7,13 @@
 	import type { AppProfile } from '../stores/settings.svelte';
 	import type { SyncResult } from '../sync/sync-service';
 	import type { SyncSettings } from '../sync/types';
+	import {
+		DEFAULT_THEME_CONFIG,
+		THEME_PRESETS,
+		findThemePreset,
+		type ThemeColorKey,
+		type ThemeConfig
+	} from '../theme/theme';
 	import ModelCombobox from './ModelCombobox.svelte';
 
 	interface Props {
@@ -14,11 +21,13 @@
 		profile: AppProfile;
 		developerMode: boolean;
 		syncSettings: SyncSettings;
+		theme: ThemeConfig;
 		onSaveConfig: (config: LlmConfig) => Promise<void>;
 		onSaveProfile: (profile: AppProfile) => Promise<void>;
 		onResetProfile: () => Promise<void>;
 		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
 		onSaveSync: (settings: SyncSettings) => Promise<void>;
+		onSaveTheme: (theme: ThemeConfig) => Promise<void>;
 		onTestSync: (draft: SyncSettings) => Promise<SyncResult>;
 		onSyncNow: () => Promise<SyncResult>;
 		onFetchModels: (draft: LlmConfig) => Promise<FetchedModel[]>;
@@ -32,11 +41,13 @@
 		profile,
 		developerMode,
 		syncSettings,
+		theme,
 		onSaveConfig,
 		onSaveProfile,
 		onResetProfile,
 		onSaveDeveloperMode,
 		onSaveSync,
+		onSaveTheme,
 		onTestSync,
 		onSyncNow,
 		onFetchModels,
@@ -64,6 +75,12 @@
 	let syncServerKey = $state('');
 	let syncStatus = $state('');
 	let syncBusy = $state(false);
+	let themePresetId = $state(DEFAULT_THEME_CONFIG.presetId);
+	let themeColors = $state<Partial<Record<ThemeColorKey, string>>>({});
+	let themeBackground = $state('');
+	let themeOpacity = $state(1);
+	let themeBusy = $state(false);
+	let themeInput = $state<HTMLInputElement | null>(null);
 	let profileName = $state('');
 	let systemPrompt = $state('');
 	let saving = $state(false);
@@ -73,6 +90,25 @@
 	/** 「获取模型列表」拉取到的模型 id 与上下文窗口。 */
 	let availableModels = $state<string[]>([]);
 	let modelContexts = $state<Record<string, number>>({});
+
+	/** 主题颜色项：rgba 项只能文本输入，其余用取色器。 */
+	const themeColorKeys: { key: ThemeColorKey; label: string; rgba: boolean }[] = [
+		{ key: 'bg', label: '页面背景', rgba: false },
+		{ key: 'bg-elevated', label: '顶栏 / 浮层背景', rgba: false },
+		{ key: 'panel', label: '卡片背景', rgba: false },
+		{ key: 'panel-2', label: '次级面板背景', rgba: false },
+		{ key: 'border', label: '边框', rgba: false },
+		{ key: 'border-strong', label: '强调边框', rgba: false },
+		{ key: 'text', label: '正文文字', rgba: false },
+		{ key: 'text-dim', label: '次级文字', rgba: false },
+		{ key: 'text-faint', label: '弱化文字', rgba: false },
+		{ key: 'accent', label: '主色', rgba: false },
+		{ key: 'accent-dim', label: '主色淡背景', rgba: true },
+		{ key: 'accent-2', label: '辅助主色', rgba: false },
+		{ key: 'ok', label: '成功', rgba: false },
+		{ key: 'warn', label: '警告', rgba: false },
+		{ key: 'err', label: '错误', rgba: false }
+	];
 
 	/** 网络搜索配置草稿。 */
 	let searchEnabled = $state(false);
@@ -114,7 +150,76 @@
 		syncEnabled = syncSettings.enabled;
 		syncServerUrl = syncSettings.serverUrl;
 		syncServerKey = syncSettings.serverKey;
+		themePresetId = theme.presetId;
+		themeColors = { ...theme.colors };
+		themeBackground = theme.backgroundImage;
+		themeOpacity = theme.backgroundOpacity;
 	});
+
+	/** 当前主题草稿（颜色合并预设默认值，保证变量齐全）。 */
+	function buildThemeDraft(): ThemeConfig {
+		const base = findThemePreset(themePresetId)?.colors ?? {};
+		return {
+			presetId: themePresetId,
+			colors: { ...base, ...themeColors },
+			backgroundImage: themeBackground,
+			backgroundOpacity: themeOpacity
+		};
+	}
+
+	/** 主题修改即时保存（与其它设置走「保存设置」不同，主题需要实时预览）。 */
+	async function persistTheme(): Promise<void> {
+		if (themeBusy) {
+			return;
+		}
+		themeBusy = true;
+		try {
+			await onSaveTheme(buildThemeDraft());
+		} finally {
+			themeBusy = false;
+		}
+	}
+
+	/** 选择预设：用预设完整颜色覆盖并保存。 */
+	function selectThemePreset(id: string): void {
+		const preset = findThemePreset(id);
+		themePresetId = id;
+		themeColors = preset ? { ...preset.colors } : {};
+		void persistTheme();
+	}
+
+	/** 修改单个颜色：切到自定义并即时保存。 */
+	function setThemeColor(key: ThemeColorKey, value: string): void {
+		themePresetId = 'custom';
+		themeColors = { ...themeColors, [key]: value.trim() };
+		void persistTheme();
+	}
+
+	/** 选择背景图：读取为 data URL 并即时保存。 */
+	async function pickThemeBackground(): Promise<void> {
+		const file = themeInput?.files?.[0];
+		if (file === undefined) {
+			return;
+		}
+		const dataUrl = await readFileAsDataUrl(file);
+		themeBackground = dataUrl;
+		void persistTheme();
+	}
+
+	/** 移除背景图。 */
+	function removeThemeBackground(): void {
+		themeBackground = '';
+		void persistTheme();
+	}
+
+	/** 恢复默认主题（颜色 + 移除背景图）。 */
+	function resetTheme(): void {
+		themePresetId = DEFAULT_THEME_CONFIG.presetId;
+		themeColors = {};
+		themeBackground = '';
+		themeOpacity = 1;
+		void persistTheme();
+	}
 
 	/** 切换服务商：选中预设时自动填充地址与默认模型。 */
 	function selectProvider(id: string): void {
@@ -273,6 +378,32 @@
 		if (known !== undefined) {
 			modelContextWindow = known;
 		}
+	}
+
+	/** 把图片文件读为 data URL（背景图以 base64 随设置持久化）。 */
+	function readFileAsDataUrl(file: File): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+			reader.onerror = () => reject(new Error('读取图片失败'));
+			reader.readAsDataURL(file);
+		});
+	}
+
+	/** 取色器需要 #rrggbb：归一化 hex，非法值回退黑色。 */
+	function toHex(value: string): string {
+		const trimmed = value.trim();
+		if (/^#[0-9a-f]{6}$/i.test(trimmed)) {
+			return trimmed.toLowerCase();
+		}
+		if (/^#[0-9a-f]{3}$/i.test(trimmed)) {
+			return `#${trimmed
+				.slice(1)
+				.split('')
+				.map((char) => char + char)
+				.join('')}`;
+		}
+		return '#000000';
 	}
 </script>
 
@@ -495,6 +626,101 @@
 			延续摘要（保留角色关系、关键事件等细节），最近 20 条消息原样保留；
 			聊天记录与快照不受影响，可随时在对话页侧栏「立即压缩」。
 		</p>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">主题</h3>
+		<p class="muted" style="margin: 0 0 10px;">
+			高度自定义外观：预设、背景图与透明度、颜色变量。修改即时生效并自动保存。
+		</p>
+		<div class="field">
+			<label for="theme-preset">预设</label>
+			<select
+				id="theme-preset"
+				class="select"
+				value={themePresetId}
+				onchange={(event) =>
+					selectThemePreset((event.currentTarget as HTMLSelectElement).value)}
+			>
+				{#each THEME_PRESETS as preset (preset.id)}
+					<option value={preset.id}>{preset.label}</option>
+				{/each}
+				<option value="custom">自定义…</option>
+			</select>
+			<p class="muted" style="margin-top: 2px;">
+				{findThemePreset(themePresetId)?.description ?? '已进入自定义模式：改动任何颜色即生效。'}
+			</p>
+		</div>
+
+		<div class="field">
+			<label for="theme-bg-file">背景图</label>
+			<div class="row-actions">
+				<button class="btn btn-small" onclick={() => themeInput?.click()}>
+					{themeBackground === '' ? '选择背景图' : '更换背景图'}
+				</button>
+				{#if themeBackground !== ''}
+					<button class="btn btn-small btn-danger" onclick={removeThemeBackground}>
+						移除背景图
+					</button>
+				{/if}
+				<input
+					id="theme-bg-file"
+					bind:this={themeInput}
+					type="file"
+					accept="image/*"
+					style="display: none;"
+					onchange={pickThemeBackground}
+				/>
+			</div>
+			{#if themeBackground !== ''}
+				<p class="muted" style="margin: 4px 0 0;">已启用背景图（建议使用压缩后的图片，base64 会随设置持久化）。</p>
+				<div class="field">
+					<label for="theme-bg-opacity">背景图透明度：{Math.round(themeOpacity * 100)}%</label>
+					<input
+						id="theme-bg-opacity"
+						type="range"
+						min="0"
+						max="100"
+						value={Math.round(themeOpacity * 100)}
+						oninput={(event) => {
+							themeOpacity = Number((event.currentTarget as HTMLInputElement).value) / 100;
+							void persistTheme();
+						}}
+					/>
+				</div>
+			{/if}
+		</div>
+
+		<div class="theme-grid">
+			{#each themeColorKeys as item (item.key)}
+				<div class="field theme-color-field">
+					<label for={`theme-color-${item.key}`}>{item.label}</label>
+					<div style="display: flex; gap: 6px; align-items: center;">
+						{#if !item.rgba}
+							<input
+								id={`theme-color-${item.key}`}
+								class="color-input"
+								type="color"
+								value={toHex(themeColors[item.key] ?? '')}
+								oninput={(event) =>
+									setThemeColor(item.key, (event.currentTarget as HTMLInputElement).value)}
+							/>
+						{/if}
+						<input
+							class="input"
+							value={themeColors[item.key] ?? ''}
+							placeholder={item.rgba ? 'rgba(…)' : '#rrggbb'}
+							onchange={(event) =>
+								setThemeColor(item.key, (event.currentTarget as HTMLInputElement).value)}
+						/>
+					</div>
+				</div>
+			{/each}
+		</div>
+		<div class="row-actions" style="margin-top: 10px;">
+			<button class="btn btn-small" onclick={resetTheme} disabled={themeBusy}>恢复默认主题</button>
+			{#if themeBusy}<span class="muted">保存中…</span>{/if}
+		</div>
 	</div>
 
 	<div class="card">

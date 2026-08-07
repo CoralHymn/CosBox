@@ -54,6 +54,7 @@
 	import type { LlmConfig, TokenUsage } from '../lib/llm/types';
 	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
 	import type { SyncSettings } from '../lib/sync/types';
+	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
 	import { rebuildFromNodes } from '../lib/core/snapshot';
 	import { createInitialState } from '../lib/core/state';
 	import type { SearchResult } from '../lib/search/types';
@@ -155,6 +156,11 @@
 		update();
 		query.addEventListener('change', update);
 		return () => query.removeEventListener('change', update);
+	});
+
+	/** 主题（颜色变量 + 背景图）即时应用到文档根节点。 */
+	$effect(() => {
+		applyThemeToDocument(settings.theme);
 	});
 
 	/** 移动端抽屉打开时支持 Esc 关闭。 */
@@ -715,6 +721,15 @@
 		}
 	}
 
+	/** 保存主题（即时生效，SettingsPanel 在每次修改时调用）。 */
+	async function handleSaveTheme(next: ThemeConfig): Promise<void> {
+		try {
+			await settings.saveTheme(next);
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
 	/** 连接测试：用当前草稿配置验证服务器可用。 */
 	async function handleTestSync(draft: SyncSettings): Promise<SyncResult> {
 		return syncService.testConnection(draft);
@@ -1091,6 +1106,8 @@
 					onSaveSync={handleSaveSync}
 					onTestSync={handleTestSync}
 					onSyncNow={handleSyncNow}
+					theme={settings.theme}
+					onSaveTheme={handleSaveTheme}
 					onFetchModels={handleFetchModels}
 					onTestConnection={handleTestConnection}
 					onExportWorkspace={handleExportWorkspace}

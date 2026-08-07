@@ -435,6 +435,39 @@ test('设置：角色档案默认显示、保存不回清、回到默认、开�
 	await expect(promptModal).not.toBeVisible();
 });
 
+test('设置：主题预设即时生效并持久化，背景图透明度可调', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+
+	const bgVar = () =>
+		page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+
+	// 默认主题
+	await expect(page.locator('#theme-preset')).toHaveValue('default');
+	await expect.poll(bgVar).toBe('#0e1016');
+
+	// 切换到 Discord 预设：即时应用
+	await page.locator('#theme-preset').selectOption('discord');
+	await expect.poll(bgVar).toBe('#0a0d3a');
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
+			)
+		)
+		.toBe('#5865f2');
+
+	// 刷新后主题持久化
+	await page.reload();
+	await page.getByRole('button', { name: /设置/ }).click();
+	await expect(page.locator('#theme-preset')).toHaveValue('discord');
+	await expect.poll(bgVar).toBe('#0a0d3a');
+
+	// 恢复默认主题
+	await page.getByRole('button', { name: '恢复默认主题' }).click();
+	await expect.poll(bgVar).toBe('#0e1016');
+});
+
 test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
