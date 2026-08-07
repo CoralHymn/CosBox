@@ -259,6 +259,9 @@ export interface LlmConfigPatch {
 	stream?: boolean;
 	allowAiStateTools?: boolean;
 	llmStateConfirm?: boolean;
+	memoryEnabled?: boolean;
+	memoryInjectLimit?: number;
+	memoryAutoExtract?: boolean;
 	webSearch?: Partial<WebSearchConfig>;
 }
 
@@ -289,6 +292,9 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		stream: partial.stream ?? defaults.stream ?? false,
 		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
 		llmStateConfirm: partial.llmStateConfirm ?? defaults.llmStateConfirm ?? false,
+		memoryEnabled: partial.memoryEnabled ?? defaults.memoryEnabled ?? true,
+		memoryInjectLimit: partial.memoryInjectLimit ?? defaults.memoryInjectLimit ?? 5,
+		memoryAutoExtract: partial.memoryAutoExtract ?? defaults.memoryAutoExtract ?? false,
 		webSearch: search
 	};
 }

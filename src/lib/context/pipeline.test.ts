@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState } from '../core/state';
 import type { ChatMessageView, WorldInfoEntry } from '../core/types';
+import type { MemoryEntry } from '../memory/types';
 import {
 	buildContext,
 	buildToolGuidance,
@@ -265,5 +266,53 @@ describe('buildContext', () => {
 			toolFeedback: '   '
 		});
 		expect(bundle.systemMessage).not.toContain('【工具执行反馈】');
+	});
+
+	it('按关键词召回长期记忆并注入【长期记忆】块', () => {
+		const conversation = [
+			{ id: '1', role: 'user' as const, content: '晚上要打雷了，我有点怕', timestamp: 1 },
+			{ id: '2', role: 'assistant' as const, content: '别怕', timestamp: 2 }
+		];
+		const hit: MemoryEntry = {
+			id: 'm1',
+			content: '绫音怕打雷，打雷时会躲进主角怀里',
+			category: '角色偏好',
+			keywords: ['打雷'],
+			importance: 4,
+			pinned: false,
+			source: 'extract',
+			createdAt: 1,
+			updatedAt: 1,
+			lastUsedAt: 0,
+			useCount: 0
+		};
+		const miss: MemoryEntry = {
+			...hit,
+			id: 'm2',
+			content: '绫音喜欢草莓蛋糕',
+			keywords: ['草莓']
+		};
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: [],
+			memories: [miss, hit],
+			memoryLimit: 5
+		});
+		expect(bundle.systemMessage).toContain('【长期记忆】');
+		expect(bundle.systemMessage).toContain('绫音怕打雷');
+		expect(bundle.systemMessage).not.toContain('草莓蛋糕');
+		expect(bundle.recalledMemories.map((entry) => entry.id)).toEqual(['m1']);
+	});
+
+	it('记忆关闭（空数组）时注入块不出现', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: [],
+			worldInfo: [],
+			memories: []
+		});
+		expect(bundle.systemMessage).not.toContain('【长期记忆】');
+		expect(bundle.recalledMemories).toEqual([]);
 	});
 });

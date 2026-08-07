@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { SnapshotNode, WorldInfoEntry } from '../core/types';
+import type { MemoryEntry } from '../memory/types';
 
 /** kv 表记录：应用级键值（设置、上次 checkout 的 head 等）。 */
 export interface KvRecord {
@@ -16,6 +17,7 @@ export interface KvRecord {
 export class CosBoxDatabase extends Dexie {
 	snapshots!: Table<SnapshotNode, string>;
 	worldInfo!: Table<WorldInfoEntry, string>;
+	memories!: Table<MemoryEntry, string>;
 	kv!: Table<KvRecord, string>;
 
 	constructor(name = 'cosbox') {
@@ -23,6 +25,13 @@ export class CosBoxDatabase extends Dexie {
 		this.version(1).stores({
 			snapshots: 'id, [parentId+timestamp], parentId, timestamp',
 			worldInfo: 'id',
+			kv: 'key'
+		});
+		// v2：新增长期记忆表。
+		this.version(2).stores({
+			snapshots: 'id, [parentId+timestamp], parentId, timestamp',
+			worldInfo: 'id',
+			memories: 'id, pinned, category',
 			kv: 'key'
 		});
 	}

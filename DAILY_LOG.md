@@ -1959,3 +1959,53 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 ### 门禁
 
 - 45 条 e2e 全过；636 个单元测试全过；check / lint 全绿。
+
+## 2026-08-07（续）：DeepSeek 用量修复 + 上下文用量持久化 + 长期记忆
+
+### 需求
+
+1. 上下文用量与 opencode 对不上：DeepSeek 的缓存命中一直显示 0、费用按未缓存价误算；
+2. 「上下文用量」面板每次打开应用就消失（只存在内存里）；
+3. 新增记忆功能区：压缩会丢记忆，需要把「值得记住的事实」持久化并自动召回。
+
+### DeepSeek 用量修复
+
+- `extractUsage` 只读 OpenAI 标准的 `prompt_tokens_details.cached_tokens`，
+  DeepSeek 原生 API 在 `usage` 顶层返回 `prompt_cache_hit_tokens / prompt_cache_miss_tokens`
+  （官方 KV Cache 文档确认）。现在两个字段都读，OpenAI 字段存在时优先。
+- 定价核对：deepseek-v4-flash（$0.0028 / $0.14 / $0.28）与 v4-pro（$0.003625 / $0.435 / $0.87）
+  与官方定价页一致；8-05 官方预告涨价但未生效，暂不改。
+- 新增 3 条 DeepSeek usage 解析单测。
+
+### 上下文用量持久化
+
+- 新 store `context-usage.svelte.ts`：把最近一次请求的 `usage + compaction + keptRecent`
+  写入 IndexedDB kv（不落完整消息数组）；启动时恢复并校验形状，损坏数据自动忽略。
+- API 未返回 usage 时，保存时用本地估算填充输入 token，保证重启后面板不为空。
+- `ContextPanel` 新增 `restored` 透传（ChatPanel 同步），重启后显示上次请求而非空占位。
+
+### 长期记忆（记忆功能区）
+
+- 调研结论（详见 DECISIONS D82）：Claude Code 用 MEMORY.md 索引 + 主题文件按需读取 +
+  Dreams 合并整理；opencode 生态用 SQLite+向量（opencode-mem）/ 召回注入（AutoMemory）；
+  Mem0 = 提取+检索+合并。CosBox 采用「LLM 提取 + 关键词召回 + 手动置顶」，
+  不引入向量库，确定性、可测试、与现有 World Info 模式一致。
+- 新表 `memories`（schema v2）；`MemoryRepository` + `memory.svelte.ts` store；
+  召回纯函数 `recallMemories`（置顶必注入 + 关键词命中才注入，避免无关记忆污染上下文）；
+  LLM 提取 `extractMemoriesFromConversation`（jsonMode，输出候选列表供勾选导入）。
+- 上下文管线注入 `【长期记忆】` 块；`ContextBundle.recalledMemories` 供统计召回次数。
+- 设置新增「长期记忆」卡片：启用召回 / 自动提取 / 注入条数（1-12）。
+- 「记忆」面板：增删改、置顶、重要度、分类、关键词、从对话提取（候选勾选导入）、
+  自动提取（回复后后台运行、重复自动跳过）。
+- 测试：recall / dedupe / extract / memory-repo / memory store / pipeline 注入共 34 条新增。
+
+### 记录
+
+- `.svelte.ts` 中漏写 `function` 关键字（`async importExtracted(...)`）会被 TS 当作
+  表达式语句解析报 TS1434，已修正为 `async function importExtracted(...)`。
+- 覆盖率基线：chat-service / state-judge / manager / text-tools 的缺口在本次之前已存在
+  （stash 基线对比确认），memory-repo 新增用例后 100%。
+
+### 门禁
+
+- 672 个单元测试全过；check / lint 全绿。

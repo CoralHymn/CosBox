@@ -25,6 +25,12 @@ export interface LlmConfig {
 	allowAiStateTools?: boolean;
 	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
 	llmStateConfirm?: boolean;
+	/** 长期记忆：启用召回注入（缺失视为开启）。 */
+	memoryEnabled?: boolean;
+	/** 长期记忆：单次请求最多注入的条数（默认 5）。 */
+	memoryInjectLimit?: number;
+	/** 长期记忆：每次回复后自动提取新记忆（默认关闭，避免频繁消耗 token）。 */
+	memoryAutoExtract?: boolean;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
 	webSearch: WebSearchConfig;
 }
@@ -136,6 +142,9 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	stream: false,
 	allowAiStateTools: false,
 	llmStateConfirm: false,
+	memoryEnabled: true,
+	memoryInjectLimit: 5,
+	memoryAutoExtract: false,
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
 

@@ -69,6 +69,9 @@
 	let stream = $state(false);
 	let allowAiStateTools = $state(false);
 	let llmStateConfirm = $state(false);
+	let memoryEnabled = $state(true);
+	let memoryInjectLimit = $state(5);
+	let memoryAutoExtract = $state(false);
 	let devMode = $state(false);
 	let syncEnabled = $state(false);
 	let syncServerUrl = $state('');
@@ -141,6 +144,9 @@
 		stream = config.stream === true;
 		allowAiStateTools = config.allowAiStateTools === true;
 		llmStateConfirm = config.llmStateConfirm === true;
+		memoryEnabled = config.memoryEnabled !== false;
+		memoryInjectLimit = config.memoryInjectLimit ?? 5;
+		memoryAutoExtract = config.memoryAutoExtract === true;
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
 		searchApiKey = config.webSearch.apiKey;
@@ -266,6 +272,9 @@
 			stream,
 			allowAiStateTools,
 			llmStateConfirm,
+			memoryEnabled,
+			memoryInjectLimit,
+			memoryAutoExtract,
 			webSearch: {
 				enabled: searchEnabled,
 				provider: searchProvider,
@@ -605,6 +614,50 @@
 		<p class="muted" style="margin: 0;">
 			开启后，AI
 			可在剧情中自行调用工具更新状态并生成快照，你可以在版本页回溯；关闭则保持纯文本回复。
+		</p>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">长期记忆</h3>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input
+				id="memory-enabled"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={memoryEnabled}
+			/>
+			<label for="memory-enabled" class="muted"
+				>启用记忆召回（按关键词与重要度把相关记忆注入上下文）</label
+			>
+		</div>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input
+				id="memory-auto-extract"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={memoryAutoExtract}
+				disabled={!memoryEnabled}
+			/>
+			<label for="memory-auto-extract" class="muted"
+				>每次回复后自动提取新记忆（消耗少量 token，可在「记忆」页审核导入）</label
+			>
+		</div>
+		<div class="field">
+			<label for="memory-inject-limit">单次请求最多注入 {memoryInjectLimit} 条记忆</label>
+			<input
+				id="memory-inject-limit"
+				type="range"
+				min="1"
+				max="12"
+				step="1"
+				bind:value={memoryInjectLimit}
+				disabled={!memoryEnabled}
+				style="width: 100%;"
+			/>
+		</div>
+		<p class="muted" style="margin: 0;">
+			上下文压缩只会保留摘要，长期记忆能把「值得记住的事实」从对话中抽取并持久化，
+			下次请求时自动召回，避免压缩后丢失角色关系、偏好与重要约定。可在「记忆」页手动增删、置顶与编辑。
 		</p>
 	</div>
 
