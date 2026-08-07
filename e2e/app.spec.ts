@@ -466,6 +466,35 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 	// 恢复默认主题
 	await page.getByRole('button', { name: '恢复默认主题' }).click();
 	await expect.poll(bgVar).toBe('#0e1016');
+
+	// 背景图：上传后 body 透明、::before 图层承载图片（不被不透明 body 背景遮挡）
+	const svg =
+		"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect width='8' height='8' fill='#ff0000'/></svg>";
+	await page
+		.locator('#theme-bg-file')
+		.setInputFiles({ name: 'bg.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg, 'utf8') });
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() => getComputedStyle(document.body, '::before').backgroundImage
+			)
+		)
+		.toContain('data:image/svg+xml');
+	await expect
+		.poll(() =>
+			page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+		)
+		.toBe('rgba(0, 0, 0, 0)');
+	// 透明度滑杆存在且可调
+	await expect(page.locator('#theme-bg-opacity')).toBeVisible();
+	await page.locator('#theme-bg-opacity').fill('50');
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				document.documentElement.style.getPropertyValue('--bg-image-opacity')
+			)
+		)
+		.toBe('0.5');
 });
 
 test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {
