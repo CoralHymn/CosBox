@@ -106,12 +106,16 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 		expect(vars['--panel']).toBe(DEFAULT_THEME_COLORS.panel);
 		expect(vars['--bg-image']).toBe('url("data:image/png;base64,abc")');
 		expect(vars['--bg-image-opacity']).toBe('0.4');
+		expect(vars['--bg-app-header']).toBe('transparent');
+		expect(vars['--bg-app-panel']).toBe('transparent');
 	});
 
 	it('无背景图时不输出背景图变量', () => {
 		const vars = resolveThemeCss({ ...DEFAULT_THEME_CONFIG, colors: { bg: '#000000' } });
 		expect(vars['--bg-image']).toBeUndefined();
 		expect(vars['--bg-image-opacity']).toBeUndefined();
+		expect(vars['--bg-app-header']).toBeUndefined();
+		expect(vars['--bg-app-panel']).toBeUndefined();
 		expect(vars['--bg']).toBe('#000000');
 	});
 

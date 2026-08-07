@@ -1073,8 +1073,13 @@ conversation 重建会让 `message` prop 变化并重跑 `$effect`，把用户�
 3. 背景图以 `body::before` 固定全屏图层渲染，`--bg-image-opacity` 控制透明度，
    不改变布局结构。**关键约束**：实色背景只能放在 `html`（画布层），`body`
    自身必须透明——否则按 CSS 绘制顺序，`body` 的不透明背景会绘制在负
-   z-index 的 `::before` 背景图之后，把图片完全盖住。
-4. 主题随设置持久化到 IndexedDB；不含模型配置与 API Key，也不进入工作区导出。
+    z-index 的 `::before` 背景图之后，把图片完全盖住。
+4. **结构面透明化**：启用背景图时，通过 `--bg-app-header` / `--bg-app-panel`
+   变量把顶栏、导航栏、输入条、侧栏与面板背景置为 `transparent`，让背景图
+   铺满全屏；卡片与消息气泡保持不透明以保证可读性。图片透明度继续由
+   `body::before` 图层的 `--bg-image-opacity` 控制（不放 `.app` 上，
+   否则整个 UI 会跟着半透明）。
+5. 主题随设置持久化到 IndexedDB；不含模型配置与 API Key，也不进入工作区导出。
 
 **理由**：颜色全部走 CSS 变量，改动一处即可全量换肤；背景图用独立图层避免
 与 `--bg` 背景色互相干扰；data URL 方案纯客户端零后端依赖。

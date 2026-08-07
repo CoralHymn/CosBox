@@ -177,6 +177,9 @@ export function resolveThemeCss(theme: ThemeConfig): Record<string, string> {
 	if (theme.backgroundImage.trim() !== '') {
 		vars['--bg-image'] = `url("${theme.backgroundImage}")`;
 		vars['--bg-image-opacity'] = String(clampOpacity(theme.backgroundOpacity));
+		// 有背景图时让顶栏/导航/输入条/侧栏等结构面透明，背景图铺满全屏。
+		vars['--bg-app-header'] = 'transparent';
+		vars['--bg-app-panel'] = 'transparent';
 	}
 	return vars;
 }
@@ -193,6 +196,8 @@ export function applyThemeToDocument(theme: ThemeConfig): void {
 	if (theme.backgroundImage.trim() === '') {
 		root.style.removeProperty('--bg-image');
 		root.style.removeProperty('--bg-image-opacity');
+		root.style.removeProperty('--bg-app-header');
+		root.style.removeProperty('--bg-app-panel');
 	}
 }
 
