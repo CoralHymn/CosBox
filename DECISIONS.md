@@ -1077,10 +1077,15 @@ conversation 重建会让 `message` prop 变化并重跑 `$effect`，把用户�
    背景图之后，把图片完全盖住。
 4. **结构面透明化**：启用背景图时，通过 `--bg-app-header` / `--bg-app-panel`
    变量把顶栏、导航栏、输入条、侧栏与面板背景置为 `transparent`，让背景图
-   铺满全屏；卡片与消息气泡保持不透明以保证可读性。图片透明度继续由
-   `body::before` 图层的 `--bg-image-opacity` 控制（不放 `.app` 上，
-   否则整个 UI 会跟着半透明）。
-5. 主题随设置持久化到 IndexedDB；不含模型配置与 API Key，也不进入工作区导出。
+   铺满全屏。图片透明度由 `.app::before` 图层的 `--bg-image-opacity` 控制
+   （不放 `.app` 本体，否则整个 UI 会跟着半透明）。
+5. **内容面半透明**：仅透明结构面后，卡片/气泡/按钮/输入框等仍大面积遮挡
+   图片。新增 `--bg-app-surface` / `--bg-app-surface-2` / `--bg-app-surface-3`，
+   启用背景图时按当前主题色（panel / panel-2 / bg）动态换算 rgba（alpha 0.72）
+   应用到 `.card`、`.message.assistant/system`、`.thinking`、`.btn`、
+   `.input/.textarea/.select`、`.chip`、下拉弹窗——图片大面积透出的同时保留
+   底色可读性；无背景图时移除变量，外观不变。
+6. 主题随设置持久化到 IndexedDB；不含模型配置与 API Key，也不进入工作区导出。
 
 **理由**：颜色全部走 CSS 变量，改动一处即可全量换肤；背景图用独立图层避免
 与 `--bg` 背景色互相干扰；data URL 方案纯客户端零后端依赖。
