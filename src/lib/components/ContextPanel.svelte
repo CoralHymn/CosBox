@@ -15,6 +15,8 @@
 		context: ContextBundle | null;
 		/** 最近一次请求的 token 用量（API 返回或本地估算）。 */
 		usage: TokenUsage | null;
+		/** 应用重启后从本地恢复的上次请求摘要；context 为 null 但仍有用量数据时展示。 */
+		restored?: { keptRecent: number } | null;
 		/** 最近一次请求使用的压缩状态；null = 未压缩。 */
 		compaction: CompactionState | null;
 		/** 自动压缩开关（只读展示，配置在设置页）。 */
@@ -30,6 +32,7 @@
 		config,
 		context,
 		usage,
+		restored = null,
 		compaction,
 		autoCompact,
 		compactThreshold,
@@ -71,7 +74,7 @@
 	/** 摘要之外原样保留的最近消息数（从上次请求的历史中数出）。 */
 	const keptRecent = $derived(
 		context === null
-			? 0
+			? restored?.keptRecent ?? 0
 			: context.history.filter((message) => message.id !== 'context-summary').length
 	);
 	const statusText = $derived.by(() => {
@@ -87,7 +90,7 @@
 
 <div class="context-panel">
 	<p class="card-title">上下文用量（估算）</p>
-	{#if context === null}
+	{#if context === null && restored === null}
 		<p class="muted" style="margin: 0;">发送一条消息后显示本次请求的 token 用量与费用。</p>
 	{:else}
 		<div class="ctx-row">

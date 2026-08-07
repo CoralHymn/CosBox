@@ -28,6 +28,8 @@
 		context: ContextBundle | null;
 		/** 最近一次请求的 token 用量。 */
 		usage: TokenUsage | null;
+		/** 应用重启后从本地恢复的上次请求摘要；context 为 null 但仍有用量数据时展示。 */
+		restored?: { keptRecent: number } | null;
 		/** 最近一次请求使用的压缩状态。 */
 		compaction: CompactionState | null;
 		/** 自动压缩开关（配置持久化在设置页，此处只读展示）。 */
@@ -81,6 +83,7 @@
 		config,
 		context,
 		usage,
+		restored = null,
 		compaction,
 		autoCompact,
 		compactThreshold,
@@ -448,6 +451,7 @@
 			{config}
 			{context}
 			{usage}
+			{restored}
 			{compaction}
 			{autoCompact}
 			{compactThreshold}
