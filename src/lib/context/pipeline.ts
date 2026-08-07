@@ -90,18 +90,23 @@ const TIME_FLOW_HINT_PATTERNS: readonly RegExp[] = [
 	/已经(?:是)?(?:下午|傍晚|晚上|入夜|深夜|凌晨|中午|黄昏|天黑)/,
 	/过了?(?:一|两|几|\d+)?\s*(?:分钟|小时|钟头)/,
 	/(?:一|两|几|\d+)\s*(?:分钟|小时|钟头)/,
-	/(?:起床|睡觉|睡醒|晚安|早上好|中午好|放学|下课|午休|天黑了)/
+	/(?:起床|睡觉|睡醒|晚安|早上好|中午好|放学|下课|午休|天黑了)/,
+	/(?:快进|快转|跳到|来到|到了|已是|已经是|到了第)?(?:第二天|次日|隔天|过了一天|过了一夜|新的一天)/,
+	/(?:快进|快转|跳到)(?:到)?(?:了)?(?:第?[一二三四五六日天]\s*天)?\s*(?:早上|上午|中午|下午|傍晚|晚上|凌晨|深夜|清晨)/,
+	/天亮了|天亮|晨曦|黄昏|入夜|夜深/
 ];
 
 /** 用户发言中的地点变化信号。 */
 const LOCATION_HINT_PATTERNS: readonly RegExp[] = [
 	/(?:去|回|离开|前往|来到|到达|出发|走出|走进|进了|去了|回家了?|回宿舍|回学校)/,
-	/(?:到|去)(?:了)?(?:学校|教室|食堂|宿舍|图书馆|操场|游泳馆|家|商场|商店|超市|公园|医院|车站|咖啡|电影院|天台|走廊|校门)/
+	/(?:到|去)(?:了)?(?:学校|教室|食堂|宿舍|图书馆|操场|游泳馆|家|商场|商店|超市|公园|医院|车站|咖啡|电影院|天台|走廊|校门)/,
+	/(?:到了|赶到|冲向|跑向|走向|走回|回到|离开)(?:了)?/
 ];
 
 /** 用户发言中的穿着变化信号。 */
 const OUTFIT_HINT_PATTERNS: readonly RegExp[] = [
-	/(?:穿上|脱下|脱掉|换上|换下|换掉|穿好|披上|系上|戴上|摘下|没穿|光着|不穿|穿着|衣服|衬衫|裙子|外套|袜子|鞋子|帽子|内衣|内裤|泳衣|校服|制服|睡衣)/
+	/(?:穿上|脱下|脱掉|换上|换下|换掉|穿好|披上|系上|戴上|摘下|没穿|光着|不穿|穿着|衣服|衬衫|裙子|外套|袜子|鞋子|帽子|内衣|内裤|泳衣|校服|制服|睡衣)/,
+	/(?:换了|脱了|穿了|换了衣服|换衣服|衣衫|裤子|上衣|围巾|领带|手套|耳环|项链|发卡|发带|腰带)/
 ];
 
 /**
@@ -198,10 +203,14 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 					.join('\n')}`
 		: '';
 	const toolBlock = input.enableStateTools === true ? `\n\n${buildToolGuidance()}` : '';
-	const turnReminderBlock =
+	// 每轮工具提醒默认附在最后一条用户消息里（对齐 opencode：提醒紧贴本次发言，
+	// 模型读到最新输入时注意力最强）；仅当上下文没有用户消息时回退到系统提示。
+	const reminderText =
 		input.enableStateTools === true
-			? `\n\n${buildPerTurnToolReminder(lastUserMessage?.content)}`
+			? buildPerTurnToolReminder(lastUserMessage?.content)
 			: '';
+	const turnReminderBlock =
+		reminderText !== '' && lastUserMessage === undefined ? `\n\n${reminderText}` : '';
 	const feedbackBlock =
 		input.toolFeedback !== undefined && input.toolFeedback.trim() !== ''
 			? `\n\n${input.toolFeedback.trim()}`
@@ -229,6 +238,23 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 				? { reasoning: message.thinking }
 				: {})
 		});
+	}
+	// 把每轮提醒附到请求中的最后一条用户消息（仅影响本次发送，不落库）。
+	if (reminderText !== '' && lastUserMessage !== undefined) {
+		let lastUserIndex = -1;
+		for (let index = messages.length - 1; index >= 0; index -= 1) {
+			if (messages[index]!.role === 'user') {
+				lastUserIndex = index;
+				break;
+			}
+		}
+		if (lastUserIndex !== -1) {
+			const target = messages[lastUserIndex]!;
+			messages[lastUserIndex] = {
+				...target,
+				content: `${target.content}\n\n${reminderText}`
+			};
+		}
 	}
 
 	return {

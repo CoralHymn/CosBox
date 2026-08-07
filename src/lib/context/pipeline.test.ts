@@ -70,8 +70,25 @@ describe('buildPerTurnToolReminder', () => {
 		expect(text).toContain('涉及时间流逝');
 	});
 
+	it('「时间快进到第二天早上」命中时间提醒', () => {
+		const text = buildPerTurnToolReminder('（时间快进到第二天早上）');
+		expect(text).toContain('advance_time');
+		expect(text).toContain('涉及时间流逝');
+	});
+
+	it('「过了一天/第二天」命中时间提醒', () => {
+		expect(buildPerTurnToolReminder('过了一天，又是新的一天')).toContain('advance_time');
+		expect(buildPerTurnToolReminder('第二天早上')).toContain('advance_time');
+	});
+
 	it('用户发言命中地点变化时追加 goto_location 提醒', () => {
 		const text = buildPerTurnToolReminder('我们回宿舍吧');
+		expect(text).toContain('goto_location');
+		expect(text).toContain('涉及地点变化');
+	});
+
+	it('「我们到食堂了」命中地点提醒', () => {
+		const text = buildPerTurnToolReminder('我们到食堂了');
 		expect(text).toContain('goto_location');
 		expect(text).toContain('涉及地点变化');
 	});
@@ -302,7 +319,9 @@ describe('buildContext', () => {
 		});
 		expect(bundle.systemMessage).toContain('【工具使用】');
 		expect(bundle.systemMessage).toContain('set_outfit');
-		expect(bundle.systemMessage).toContain('<system-reminder>');
+		// 每轮提醒附在最后一条用户消息（opencode 式），而非系统消息。
+		const userMessage = bundle.messages.find((message) => message.role === 'user');
+		expect(userMessage?.content).toContain('<system-reminder>');
 	});
 
 	it('启用状态工具且用户发言命中状态信号时注入针对性提醒', () => {
@@ -312,8 +331,10 @@ describe('buildContext', () => {
 			worldInfo: [],
 			enableStateTools: true
 		});
-		expect(bundle.systemMessage).toContain('<system-reminder>');
-		expect(bundle.systemMessage).toContain('goto_location');
+		expect(bundle.systemMessage).not.toContain('<system-reminder>');
+		const userMessage = bundle.messages.find((message) => message.role === 'user');
+		expect(userMessage?.content).toContain('<system-reminder>');
+		expect(userMessage?.content).toContain('goto_location');
 	});
 
 	it('skipContext 的系统消息不参与每轮提醒的用户发言判定', () => {
@@ -332,8 +353,9 @@ describe('buildContext', () => {
 			worldInfo: [],
 			enableStateTools: true
 		});
-		expect(bundle.systemMessage).toContain('<system-reminder>');
-		expect(bundle.systemMessage).not.toContain('涉及穿着变化');
+		const userMessage = bundle.messages.find((message) => message.role === 'user');
+		expect(userMessage?.content).toContain('<system-reminder>');
+		expect(userMessage?.content).not.toContain('涉及穿着变化');
 	});
 
 	it('未启用状态工具时不注入工具说明', () => {
@@ -344,6 +366,9 @@ describe('buildContext', () => {
 		});
 		expect(bundle.systemMessage).not.toContain('【工具使用】');
 		expect(bundle.systemMessage).not.toContain('<system-reminder>');
+		expect(bundle.messages.find((message) => message.role === 'user')?.content).not.toContain(
+			'<system-reminder>'
+		);
 	});
 
 	it('注入工具执行反馈块', () => {

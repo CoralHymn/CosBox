@@ -256,7 +256,7 @@ export class ChatService {
 					// 思考里明确提到工具名却没发出 tool_calls（DeepSeek V4 常见漏调用）：
 					// 追加「补发调用」提示重试一次，避免「正文都写了、工具却没调用」。
 					if (result.toolCalls.length === 0) {
-						const planned = detectPlannedTool(result.thinking);
+						const planned = detectToolIntent(result.thinking);
 						if (planned !== null) {
 							const retried = await this.retryPlannedTool(
 								messages,
@@ -277,7 +277,7 @@ export class ChatService {
 					if (
 						result.toolCalls.length === 0 &&
 						executedTools.length === 0 &&
-						detectTimeClaim(result.content ?? '')
+						detectTimeClaim(`${result.thinking ?? ''}\n${result.content ?? ''}`)
 					) {
 						const retried = await this.retryTimeClaim(messages, config, options, signal);
 						usage = mergeUsage(usage, retried?.usage);
@@ -1014,14 +1014,49 @@ function isThinkingOnlyReply(result: LlmChatResult): boolean {
 	);
 }
 
+/** 从思考/正文中识别「明确打算调用」的工具：命中英文工具名或中文意图措辞。 */
+const TOOL_INTENT_PATTERNS: ReadonlyArray<{ tool: string; patterns: readonly RegExp[] }> = [
+	{
+		tool: 'advance_time',
+		patterns: [
+			/\badvance_time\b/,
+			/推进时间|时间推进|推进到|拨快|时间流逝|过了一段时间|天黑了|夜深了|入夜了|该推进/,
+			/(?:过|经过|过去)了?(?:一|两|几|\d+)?\s*(?:分钟|小时|钟头|天|夜)/,
+			/(?:到了|已是|已经是)(?:第二天|次日|隔天|早上|上午|中午|下午|傍晚|晚上|凌晨|深夜)/
+		]
+	},
+	{
+		tool: 'goto_location',
+		patterns: [
+			/\bgoto_location\b/,
+			/(?:去|回|离开|前往|来到|走到|回到|赶往)(?:学校|食堂|宿舍|图书馆|操场|游泳馆|家|商店|超市|公园|医院|车站|咖啡|电影院|天台|走廊|校门|教室)/,
+			/回家|回宿舍|离开(?:这里|此地|学校|教室|食堂|宿舍|图书馆|游泳馆|操场)/
+		]
+	},
+	{
+		tool: 'set_outfit',
+		patterns: [
+			/\bset_outfit\b/,
+			/(?:换上|穿上|脱下|脱掉|换下|换掉|换装|穿好|披上|系上|戴上|摘下|脱了|换了)(?:衣服|衬衫|裙子|外套|袜子|鞋子|帽子|内衣|内裤|泳衣|校服|制服|睡衣|运动服)?/
+		]
+	},
+	{
+		tool: 'set_attribute',
+		patterns: [
+			/\bset_attribute\b/,
+			/(?:好感|信任|心情|money|affection|trust|mood|属性).{0,8}(?:增加|减少|提升|下降|提高|降低|改变|更新|修改|设为|上升|好转|回落|变)/
+		]
+	}
+];
+
 /** 从思考中识别「明确提到要调用」的工具名；未提到返回 null。 */
-function detectPlannedTool(thinking: string | undefined): string | null {
+function detectToolIntent(thinking: string | undefined): string | null {
 	if (thinking === undefined || thinking.trim() === '') {
 		return null;
 	}
-	for (const name of ['advance_time', 'goto_location', 'set_outfit', 'set_attribute']) {
-		if (new RegExp(`\\b${name}\\b`).test(thinking)) {
-			return name;
+	for (const entry of TOOL_INTENT_PATTERNS) {
+		if (entry.patterns.some((pattern) => pattern.test(thinking))) {
+			return entry.tool;
 		}
 	}
 	return null;
