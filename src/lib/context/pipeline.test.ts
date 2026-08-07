@@ -4,6 +4,7 @@ import type { ChatMessageView, WorldInfoEntry } from '../core/types';
 import type { MemoryEntry } from '../memory/types';
 import {
 	buildContext,
+	buildPerTurnToolReminder,
 	buildToolGuidance,
 	defaultSystemPrompt,
 	TIME_MARKER_GUIDANCE
@@ -48,6 +49,44 @@ describe('buildToolGuidance', () => {
 		expect(text).toContain('set_outfit');
 		expect(text).toContain('advance_time');
 		expect(text).toContain('set_attribute');
+		expect(text).toContain('先发出 tool_calls');
+		expect(text).toContain('并行');
+		expect(text).toContain('未调用工具 = 状态未同步');
+	});
+});
+
+describe('buildPerTurnToolReminder', () => {
+	it('始终包含通用状态同步提醒', () => {
+		const text = buildPerTurnToolReminder(undefined);
+		expect(text).toContain('<system-reminder>');
+		expect(text).toContain('tool_calls');
+		expect(text).toContain('输出正文前');
+		expect(text).toContain('不属于剧情内容');
+	});
+
+	it('用户发言命中时间流逝时追加 advance_time 针对性提醒', () => {
+		const text = buildPerTurnToolReminder('我排了几分钟队，终于拿到饭了');
+		expect(text).toContain('advance_time');
+		expect(text).toContain('涉及时间流逝');
+	});
+
+	it('用户发言命中地点变化时追加 goto_location 提醒', () => {
+		const text = buildPerTurnToolReminder('我们回宿舍吧');
+		expect(text).toContain('goto_location');
+		expect(text).toContain('涉及地点变化');
+	});
+
+	it('用户发言命中穿着变化时追加 set_outfit 提醒', () => {
+		const text = buildPerTurnToolReminder('快把衬衫穿上');
+		expect(text).toContain('set_outfit');
+		expect(text).toContain('涉及穿着变化');
+	});
+
+	it('无命中时只保留通用提醒', () => {
+		const text = buildPerTurnToolReminder('今天天气真好');
+		expect(text).not.toContain('advance_time');
+		expect(text).not.toContain('goto_location');
+		expect(text).not.toContain('set_outfit');
 	});
 });
 
@@ -263,6 +302,38 @@ describe('buildContext', () => {
 		});
 		expect(bundle.systemMessage).toContain('【工具使用】');
 		expect(bundle.systemMessage).toContain('set_outfit');
+		expect(bundle.systemMessage).toContain('<system-reminder>');
+	});
+
+	it('启用状态工具且用户发言命中状态信号时注入针对性提醒', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: [{ id: '1', role: 'user' as const, content: '我们回宿舍吧', timestamp: 1 }],
+			worldInfo: [],
+			enableStateTools: true
+		});
+		expect(bundle.systemMessage).toContain('<system-reminder>');
+		expect(bundle.systemMessage).toContain('goto_location');
+	});
+
+	it('skipContext 的系统消息不参与每轮提醒的用户发言判定', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: [
+				{
+					id: 'help',
+					role: 'system',
+					content: '可用 RP 快捷命令：/wear 槽位=衣物',
+					timestamp: 0,
+					skipContext: true
+				},
+				{ id: '1', role: 'user' as const, content: '今天天气真好', timestamp: 1 }
+			],
+			worldInfo: [],
+			enableStateTools: true
+		});
+		expect(bundle.systemMessage).toContain('<system-reminder>');
+		expect(bundle.systemMessage).not.toContain('涉及穿着变化');
 	});
 
 	it('未启用状态工具时不注入工具说明', () => {
@@ -272,6 +343,7 @@ describe('buildContext', () => {
 			worldInfo: []
 		});
 		expect(bundle.systemMessage).not.toContain('【工具使用】');
+		expect(bundle.systemMessage).not.toContain('<system-reminder>');
 	});
 
 	it('注入工具执行反馈块', () => {

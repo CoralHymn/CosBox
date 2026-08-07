@@ -69,6 +69,8 @@ export function buildToolGuidance(): string {
 	return [
 		'【工具使用】',
 		'你必须在剧情中主动调用工具来同步状态，不允许只口头描述或假设状态已变化：',
+		'- 调用时机：当剧情需要状态变化时，先发出 tool_calls、收到工具反馈后再写正文；正文中描述的状态变化必须与工具调用结果一致；',
+		'- 允许一次回复并行发出多个工具调用（如同时推进时间 + 换装 + 改地点），不必逐个等待；',
 		'- 只要剧情暗示时间流逝（排队、等待、赶路、闲聊、用餐、入夜等）→ 立即调用 advance_time 推进到合理时刻；',
 		'- 离开某地或到达新地点 → 立即调用 goto_location（优先从【已知地点】中选择）；',
 		'- 穿上/脱下衣物 → 立即调用 set_outfit（必须从【衣柜】中选择，item 用精确名称；用「无」表示脱掉；配饰是多件列表，slot=配饰 可逐件添加、action=remove 移除指定一件）；',
@@ -76,7 +78,66 @@ export function buildToolGuidance(): string {
 		'- 工具调用必须通过 tool_calls 字段发出并带完整参数（advance_time 给 minutes、goto_location 给地点名、set_outfit 给 slot+item、set_attribute 给 key+value）；',
 		'- 思考过程（reasoning）里写「我要调用 xxx」不算数：决定调用后立即在本次回复中发出结构化的 tool_calls。',
 		'- 禁止把工具调用写成纯文本或 JSON 放在正文里（如 {"tool":"..."}）：正文只写台词/旁白，调用一律走 tool_calls 字段。',
+		'- 未调用工具 = 状态未同步：正文中描述的时间/地点/穿着/属性变化若没有对应 tool_calls，将被视为剧情事实错误；',
 		'每次调用工具都会立即生效并返回反馈；「我这就去」「过了几分钟」这类表述不算数，必须真的发出 tool_calls。'
+	].join('\n');
+}
+
+/** 用户发言中的时间流逝信号（每轮提醒的针对性提示触发条件）。 */
+const TIME_FLOW_HINT_PATTERNS: readonly RegExp[] = [
+	/过了一?段时间|过了一?会儿|过了(?:很久|好久|许久|一阵子)/,
+	/等了|等待|排队|赶路|耽误了/,
+	/已经(?:是)?(?:下午|傍晚|晚上|入夜|深夜|凌晨|中午|黄昏|天黑)/,
+	/过了?(?:一|两|几|\d+)?\s*(?:分钟|小时|钟头)/,
+	/(?:一|两|几|\d+)\s*(?:分钟|小时|钟头)/,
+	/(?:起床|睡觉|睡醒|晚安|早上好|中午好|放学|下课|午休|天黑了)/
+];
+
+/** 用户发言中的地点变化信号。 */
+const LOCATION_HINT_PATTERNS: readonly RegExp[] = [
+	/(?:去|回|离开|前往|来到|到达|出发|走出|走进|进了|去了|回家了?|回宿舍|回学校)/,
+	/(?:到|去)(?:了)?(?:学校|教室|食堂|宿舍|图书馆|操场|游泳馆|家|商场|商店|超市|公园|医院|车站|咖啡|电影院|天台|走廊|校门)/
+];
+
+/** 用户发言中的穿着变化信号。 */
+const OUTFIT_HINT_PATTERNS: readonly RegExp[] = [
+	/(?:穿上|脱下|脱掉|换上|换下|换掉|穿好|披上|系上|戴上|摘下|没穿|光着|不穿|穿着|衣服|衬衫|裙子|外套|袜子|鞋子|帽子|内衣|内裤|泳衣|校服|制服|睡衣)/
+];
+
+/**
+ * 每轮工具提醒（对齐 opencode 的逐轮 system-reminder 做法）：
+ * 启用状态工具时，在每次请求注入一段简短提醒，让模型在输出正文前
+ * 先判断本段剧情是否需要同步状态；当用户发言命中明确的状态信号
+ * （时间流逝 / 地点变化 / 穿着变化）时，追加对应工具的针对性提醒。
+ * 采用确定性关键词判断（非 LLM），避免额外请求与误判扩散。
+ */
+export function buildPerTurnToolReminder(lastUserContent: string | undefined): string {
+	const hints: string[] = [];
+	if (lastUserContent !== undefined && lastUserContent.trim() !== '') {
+		if (TIME_FLOW_HINT_PATTERNS.some((pattern) => pattern.test(lastUserContent))) {
+			hints.push(
+				'- 本次发言涉及时间流逝或时段变化 → 请调用 advance_time（minutes 为具体分钟数）后再输出正文；'
+			);
+		}
+		if (LOCATION_HINT_PATTERNS.some((pattern) => pattern.test(lastUserContent))) {
+			hints.push(
+				'- 本次发言涉及地点变化 → 请调用 goto_location（优先从【已知地点】中选择）后再输出正文；'
+			);
+		}
+		if (OUTFIT_HINT_PATTERNS.some((pattern) => pattern.test(lastUserContent))) {
+			hints.push(
+				'- 本次发言涉及穿着变化 → 请调用 set_outfit（item 用【衣柜】中的精确名称，「无」表示脱掉）后再输出正文；'
+			);
+		}
+	}
+	return [
+		'<system-reminder>',
+		'本消息是状态同步提醒，不属于剧情内容：',
+		'- 输出正文前，先判断本段剧情是否发生了时间流逝、地点变化、穿着变化或属性变化；',
+		'- 需要同步状态时，必须先在本次回复中发出对应的工具调用（tool_calls），收到工具反馈后再输出正文；',
+		'- 只口头描述状态变化而不调用工具，视为未完成状态同步，正文中的状态描述将与实际状态不一致。',
+		...hints,
+		'</system-reminder>'
 	].join('\n');
 }
 
@@ -117,6 +178,7 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		input.memoryLimit ?? DEFAULT_MEMORY_INJECT_LIMIT
 	);
 	const searchResults = [...(input.searchResults ?? [])];
+	const lastUserMessage = [...contextConversation].reverse().find((message) => message.role === 'user');
 
 	const worldInfoBlock =
 		worldInfoHits.length > 0
@@ -134,13 +196,17 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 			? `\n【网络搜索结果】\n${searchResults
 					.map((result) => `- ${result.title}：${result.snippet}（${result.url}）`)
 					.join('\n')}`
-			: '';
+		: '';
 	const toolBlock = input.enableStateTools === true ? `\n\n${buildToolGuidance()}` : '';
+	const turnReminderBlock =
+		input.enableStateTools === true
+			? `\n\n${buildPerTurnToolReminder(lastUserMessage?.content)}`
+			: '';
 	const feedbackBlock =
 		input.toolFeedback !== undefined && input.toolFeedback.trim() !== ''
 			? `\n\n${input.toolFeedback.trim()}`
 			: '';
-	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${memoryBlock}${searchBlock}${toolBlock}${feedbackBlock}\n\n${TIME_MARKER_GUIDANCE}`;
+	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${memoryBlock}${searchBlock}${toolBlock}${turnReminderBlock}${feedbackBlock}\n\n${TIME_MARKER_GUIDANCE}`;
 	const messages: ChatMessage[] = [];
 	for (const message of historyResult.messages) {
 		// 分段消息（AI 一轮回复）：把思考/正文合并回 assistant 消息、工具调用还原为
