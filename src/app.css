@@ -30,17 +30,23 @@
 	box-sizing: border-box;
 }
 
-html,
-body {
+html {
 	margin: 0;
 	padding: 0;
 	height: 100%;
 	background: var(--bg);
-	color: var(--text);
 }
 
 body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	color: var(--text);
 	overflow: hidden;
+	/* 实色背景由 html（画布层）承担；body 自身必须透明，
+	   否则 body 的不透明背景会绘制在负 z-index 的 ::before 背景图之上，
+	   把图片完全盖住。 */
+	background: transparent;
 }
 
 /* 主题背景图：固定全屏图层，透明度由 --bg-image-opacity 控制（0-1）。 */
