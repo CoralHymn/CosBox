@@ -33,6 +33,8 @@ export interface ThemeConfig {
 	backgroundImage: string;
 	/** 背景图透明度，0-1（0 = 完全透明不显示，1 = 不透明）。 */
 	backgroundOpacity: number;
+	/** 背景图磨砂（模糊）程度，0-50 px；0 = 清晰。 */
+	backgroundBlur: number;
 }
 
 /** 主题预设：一组完整颜色 + 展示名。 */
@@ -148,7 +150,8 @@ export const DEFAULT_THEME_CONFIG: ThemeConfig = {
 	presetId: 'default',
 	colors: {},
 	backgroundImage: '',
-	backgroundOpacity: 1
+	backgroundOpacity: 1,
+	backgroundBlur: 0
 };
 
 /** 按预设 id 查找预设；不存在返回 undefined。 */
@@ -163,7 +166,8 @@ export function themeFromPreset(presetId: string, base: ThemeConfig = DEFAULT_TH
 		presetId,
 		colors: preset ? { ...preset.colors } : {},
 		backgroundImage: base.backgroundImage,
-		backgroundOpacity: base.backgroundOpacity
+		backgroundOpacity: base.backgroundOpacity,
+		backgroundBlur: base.backgroundBlur
 	};
 }
 
@@ -202,9 +206,15 @@ export function applyThemeToDocument(theme: ThemeConfig): void {
 	if (theme.backgroundImage.trim() !== '') {
 		backdrop?.style.setProperty('background-image', `url("${theme.backgroundImage}")`);
 		backdrop?.style.setProperty('opacity', String(clampOpacity(theme.backgroundOpacity)));
+		const blur = clampBlur(theme.backgroundBlur);
+		// 模糊时轻微放大，避免磨砂边缘出现透明留白。
+		backdrop?.style.setProperty('filter', blur > 0 ? `blur(${blur}px)` : '');
+		backdrop?.style.setProperty('transform', blur > 0 ? 'scale(1.04)' : '');
 	} else {
 		backdrop?.style.removeProperty('background-image');
 		backdrop?.style.removeProperty('opacity');
+		backdrop?.style.removeProperty('filter');
+		backdrop?.style.removeProperty('transform');
 		root.style.removeProperty('--bg-app-header');
 		root.style.removeProperty('--bg-app-panel');
 		root.style.removeProperty('--bg-app-surface');
@@ -219,6 +229,14 @@ export function clampOpacity(value: number): number {
 		return 1;
 	}
 	return Math.min(1, Math.max(0, value));
+}
+
+/** 规范化背景图磨砂程度（0-50 px，非法值回退 0）。 */
+export function clampBlur(value: number): number {
+	if (!Number.isFinite(value)) {
+		return 0;
+	}
+	return Math.min(50, Math.max(0, Math.round(value)));
 }
 
 /** 有背景图时内容面（卡片/气泡/输入框等）的底色不透明度：0.25 让图片透出 75%。 */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	applyThemeToDocument,
+	clampBlur,
 	clampOpacity,
 	DEFAULT_THEME_COLORS,
 	DEFAULT_THEME_CONFIG,
@@ -68,13 +69,15 @@ describe('themeFromPreset', () => {
 			presetId: 'custom',
 			colors: {},
 			backgroundImage: 'data:image/png;base64,xxx',
-			backgroundOpacity: 0.5
+			backgroundOpacity: 0.5,
+			backgroundBlur: 12
 		};
 		const result = themeFromPreset('verge', base);
 		expect(result.presetId).toBe('verge');
 		expect(result.colors.accent).toBe('#3cffd0');
 		expect(result.backgroundImage).toBe(base.backgroundImage);
 		expect(result.backgroundOpacity).toBe(0.5);
+		expect(result.backgroundBlur).toBe(12);
 	});
 
 	it('未知预设回退空颜色（不炸）', () => {
@@ -93,13 +96,24 @@ describe('clampOpacity', () => {
 	});
 });
 
+describe('clampBlur', () => {
+	it('限制在 0-50、取整并处理非法值', () => {
+		expect(clampBlur(0)).toBe(0);
+		expect(clampBlur(12.6)).toBe(13);
+		expect(clampBlur(80)).toBe(50);
+		expect(clampBlur(-5)).toBe(0);
+		expect(clampBlur(Number.NaN)).toBe(0);
+	});
+});
+
 describe('resolveThemeCss / applyThemeToDocument', () => {
 	it('解析 CSS 变量：合并默认值 + 覆盖色 + 背景图与透明度', () => {
 		const vars = resolveThemeCss({
 			presetId: 'custom',
 			colors: { bg: '#123456', accent: '#abcdef' },
 			backgroundImage: 'data:image/png;base64,abc',
-			backgroundOpacity: 0.4
+			backgroundOpacity: 0.4,
+			backgroundBlur: 0
 		});
 		expect(vars['--bg']).toBe('#123456');
 		expect(vars['--accent']).toBe('#abcdef');

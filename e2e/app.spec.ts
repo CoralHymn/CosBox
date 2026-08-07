@@ -507,6 +507,17 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 			)
 		)
 		.toBe('0.5');
+	// 磨砂程度滑杆存在且可调（默认 0 = 清晰）
+	await expect(page.locator('#theme-bg-blur')).toBeVisible();
+	await expect(page.locator('#theme-bg-blur')).toHaveValue('0');
+	await page.locator('#theme-bg-blur').fill('20');
+	await expect
+		.poll(() =>
+			page.evaluate(
+				() => document.querySelector<HTMLElement>('.theme-backdrop')!.style.filter
+			)
+		)
+		.toBe('blur(20px)');
 });
 
 test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {
