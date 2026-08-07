@@ -9,6 +9,7 @@
 	import { groupByCategory } from '../utils/grouping';
 	import { moveItemToTarget } from '../utils/grouping';
 	import { newId } from '../utils/id';
+	import { resolveLocationPlace } from '../core/state';
 	import AiGeneratorPanel from './AiGeneratorPanel.svelte';
 
 	interface Props {
@@ -67,7 +68,8 @@
 			name: place.name,
 			description: place.description
 		}));
-		currentId = places.some((place) => place.id === location.id) ? location.id : 'custom';
+		// 地点回归：id 对不上时按 分类+名称 关联地点库（历史数据 id 可能是名字字符串）。
+		currentId = resolveLocationPlace(location, places)?.id ?? 'custom';
 		customCategory = location.category;
 		customName = location.name;
 		customDescription = location.description;

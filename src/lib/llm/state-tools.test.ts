@@ -91,6 +91,17 @@ describe('gotoLocationTool', () => {
 		expect(ctx.getState().location.description).toContain('热闹');
 	});
 
+	it('name 传「分类 > 名称」整串时也能匹配地点库', async () => {
+		const ctx = makeContext();
+		const output = await gotoLocationTool.execute(
+			call('goto_location', { name: '学校 > 食堂' }).arguments,
+			ctx
+		);
+		expect(output).toContain('学校 > 食堂');
+		expect(ctx.getState().location.id).toBe('cafeteria');
+		expect(ctx.getState().location.description).toContain('热闹');
+	});
+
 	it('缺少 name 与 locationId 时抛错', async () => {
 		const ctx = makeContext();
 		await expect(
