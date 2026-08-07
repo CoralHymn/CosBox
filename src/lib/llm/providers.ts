@@ -264,8 +264,11 @@ export interface LlmConfigPatch {
 	memoryAutoExtract?: boolean;
 	modelServices?: LlmConfig['modelServices'];
 	chatModelId?: string;
+	chatModelEntryId?: string;
 	judgeModelId?: string;
+	judgeModelEntryId?: string;
 	generatorModelId?: string;
+	generatorModelEntryId?: string;
 	webSearch?: Partial<WebSearchConfig>;
 }
 
@@ -301,8 +304,11 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		memoryAutoExtract: partial.memoryAutoExtract ?? defaults.memoryAutoExtract ?? false,
 		modelServices: Array.isArray(partial.modelServices) ? [...partial.modelServices] : [],
 		chatModelId: partial.chatModelId ?? '',
+		chatModelEntryId: partial.chatModelEntryId ?? '',
 		judgeModelId: partial.judgeModelId ?? '',
+		judgeModelEntryId: partial.judgeModelEntryId ?? '',
 		generatorModelId: partial.generatorModelId ?? '',
+		generatorModelEntryId: partial.generatorModelEntryId ?? '',
 		webSearch: search
 	};
 }

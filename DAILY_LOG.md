@@ -2040,3 +2040,29 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 ### 门禁
 
 - 686 个单元测试全过；check / lint 全绿。
+
+## 2026-08-07（续）：模型服务支持服务商下多模型
+
+### 需求
+
+服务商的模型也要可以多选：一个服务商（一套 Key）下挂多个模型，
+快速切换模型不用重复填 Key。
+
+### 实现
+
+- `ModelService` 重构为「服务商连接 + 多模型」：新增 `ModelEntry`
+  （模型 id / 上下文窗口 / Max Tokens），`models` 列表；角色绑定升级为
+  「服务 id + 模型条目 id」两级（`chat/judge/generator ModelEntryId`）。
+- `resolveServiceConfig` 按「服务 + 条目」合成请求配置，条目缺省用服务第一条；
+  `bindingValue`（`服务id::模型id`）作为角色下拉的选项值，切换模型 = 换选项。
+- `ensureModelServiceBindings` 三级迁移：无服务列表 → 生成默认服务；
+  老单模型服务（顶层 model）→ 转成单条模型条目；条目绑定缺失 → 回退第一条。
+- 设置页：角色下拉列出「服务 / 模型」；服务编辑表单支持多模型行
+  （增删改每行的 model/窗口/Max）＋「获取模型列表」勾选批量加入；
+  服务行显示模型 chips 与角色徽标。
+- 测试：normalize 多条目、resolve 按条目合成/回退、迁移三级兼容、
+  bindingValue 往返等。
+
+### 门禁
+
+- 689 个单元测试全过；check / lint 全绿。
