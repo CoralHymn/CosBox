@@ -5,6 +5,7 @@ import type { ContextPipelineInput } from '../context/pipeline';
 import { DEFAULT_WEB_SEARCH_CONFIG } from '../search/types';
 import {
 	ChatService,
+	ensureFirstThinkingInSegments,
 	resolveTimeAdvance,
 	serializeDebugPrompt,
 	type CompactionOptions
@@ -1581,6 +1582,41 @@ describe('serializeDebugPrompt', () => {
 		]);
 		// 流式一档 + 非流式二档都未发出 tool_calls，重试放弃，保留原结果。
 		expect(chatWithTools).toHaveBeenCalledTimes(3);
+	});
+});
+
+describe('ensureFirstThinkingInSegments', () => {
+	it('分段已包含首轮思考时原样返回', () => {
+		const segments = [{ kind: 'thinking' as const, content: '首轮思考' }];
+		expect(ensureFirstThinkingInSegments(segments, '首轮思考')).toBe(segments);
+	});
+
+	it('分段缺失首轮思考时在开头补回', () => {
+		const segments = [{ kind: 'text' as const, content: '正文' }];
+		expect(ensureFirstThinkingInSegments(segments, '首轮思考')).toEqual([
+			{ kind: 'thinking', content: '首轮思考' },
+			{ kind: 'text', content: '正文' }
+		]);
+	});
+
+	it('分段只有新思考时保留两者（首轮思考在前）', () => {
+		const segments = [{ kind: 'thinking' as const, content: '重试思考' }];
+		expect(ensureFirstThinkingInSegments(segments, '首轮思考')).toEqual([
+			{ kind: 'thinking', content: '首轮思考' },
+			{ kind: 'thinking', content: '重试思考' }
+		]);
+	});
+
+	it('无分段但有首轮思考时生成单段', () => {
+		expect(ensureFirstThinkingInSegments(undefined, '首轮思考')).toEqual([
+			{ kind: 'thinking', content: '首轮思考' }
+		]);
+	});
+
+	it('首轮思考为空时原样透传', () => {
+		const segments = [{ kind: 'text' as const, content: '正文' }];
+		expect(ensureFirstThinkingInSegments(segments, '   ')).toBe(segments);
+		expect(ensureFirstThinkingInSegments(undefined, undefined)).toBeUndefined();
 	});
 });
 
