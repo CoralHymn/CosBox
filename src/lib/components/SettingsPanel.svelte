@@ -79,6 +79,7 @@
 	let themeColors = $state<Partial<Record<ThemeColorKey, string>>>({});
 	let themeBackground = $state('');
 	let themeOpacity = $state(1);
+	let themeBlur = $state(0);
 	let themeBusy = $state(false);
 	let themeInput = $state<HTMLInputElement | null>(null);
 	let profileName = $state('');
@@ -154,6 +155,7 @@
 		themeColors = { ...theme.colors };
 		themeBackground = theme.backgroundImage;
 		themeOpacity = theme.backgroundOpacity;
+		themeBlur = theme.backgroundBlur;
 	});
 
 	/** 当前主题草稿（颜色合并预设默认值，保证变量齐全）。 */
@@ -163,7 +165,8 @@
 			presetId: themePresetId,
 			colors: { ...base, ...themeColors },
 			backgroundImage: themeBackground,
-			backgroundOpacity: themeOpacity
+			backgroundOpacity: themeOpacity,
+			backgroundBlur: themeBlur
 		};
 	}
 
@@ -225,6 +228,7 @@
 		themeColors = {};
 		themeBackground = '';
 		themeOpacity = 1;
+		themeBlur = 0;
 		void persistTheme();
 	}
 
@@ -691,6 +695,20 @@
 						value={Math.round(themeOpacity * 100)}
 						oninput={(event) => {
 							themeOpacity = Number((event.currentTarget as HTMLInputElement).value) / 100;
+							void persistTheme();
+						}}
+					/>
+				</div>
+				<div class="field">
+					<label for="theme-bg-blur">磨砂程度：{themeBlur}px</label>
+					<input
+						id="theme-bg-blur"
+						type="range"
+						min="0"
+						max="50"
+						value={themeBlur}
+						oninput={(event) => {
+							themeBlur = Number((event.currentTarget as HTMLInputElement).value);
 							void persistTheme();
 						}}
 					/>

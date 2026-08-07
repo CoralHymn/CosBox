@@ -108,7 +108,8 @@ export function createSettingsStore(kv: KvRepository) {
 			presetId: next.presetId,
 			colors: { ...next.colors },
 			backgroundImage: next.backgroundImage,
-			backgroundOpacity: next.backgroundOpacity
+			backgroundOpacity: next.backgroundOpacity,
+			backgroundBlur: next.backgroundBlur
 		};
 		theme = plain;
 		await kv.set(THEME_KEY, plain);

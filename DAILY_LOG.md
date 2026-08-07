@@ -1916,3 +1916,21 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 - 43 条 e2e 全过；633 个单元测试全过；check / lint / build 全绿；
   592KB 真实 PNG 上传后内联 `background-image` 完整写入（789KB 字符串），
   像素采样呈现测试图红→蓝渐变（顶栏/内容区/侧栏均可见）。
+
+## 2026-08-07（续）：背景图磨砂程度滑块
+
+### 实现
+
+- `ThemeConfig` 新增 `backgroundBlur`（0-50 px，默认 0 = 清晰），
+  随设置持久化；`themeFromPreset` 保留该值。
+- `applyThemeToDocument` 把 `filter: blur(Npx)` 直接写到 `.theme-backdrop`
+  内联样式；模糊 > 0 时轻微 `scale(1.04)` 避免磨砂边缘留白；
+  移除背景图时清空 filter/transform。
+- 设置页「主题」卡片在背景图启用后显示「磨砂程度」滑杆（0-50），
+  即时生效并自动保存；恢复默认主题时归零。
+- 单测：`clampBlur`（0-50 取整、非法回退 0）、`themeFromPreset` 保留 blur；
+  e2e：磨砂滑杆存在、默认 0、调到 20 后 backdrop filter 为 `blur(20px)`。
+
+### 门禁
+
+- 43 条 e2e 全过；634 个单元测试全过；check / lint 全绿。
