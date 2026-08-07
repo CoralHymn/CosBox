@@ -108,6 +108,11 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 		expect(vars['--bg-image-opacity']).toBe('0.4');
 		expect(vars['--bg-app-header']).toBe('transparent');
 		expect(vars['--bg-app-panel']).toBe('transparent');
+		// 内容面半透明：由主题色动态换算 rgba
+		expect(vars['--bg-app-surface']).toBe('rgba(23, 27, 38, 0.72)');
+		expect(vars['--bg-app-surface-2']).toBe('rgba(29, 34, 48, 0.72)');
+		// bg 被覆盖为 #123456，surface-3 按覆盖后的颜色换算
+		expect(vars['--bg-app-surface-3']).toBe('rgba(18, 52, 86, 0.72)');
 	});
 
 	it('无背景图时不输出背景图变量', () => {
@@ -116,7 +121,22 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 		expect(vars['--bg-image-opacity']).toBeUndefined();
 		expect(vars['--bg-app-header']).toBeUndefined();
 		expect(vars['--bg-app-panel']).toBeUndefined();
+		expect(vars['--bg-app-surface']).toBeUndefined();
+		expect(vars['--bg-app-surface-2']).toBeUndefined();
+		expect(vars['--bg-app-surface-3']).toBeUndefined();
 		expect(vars['--bg']).toBe('#000000');
+	});
+
+	it('内容面半透明随自定义主题色换算，非 hex 退化为透明', () => {
+		const vars = resolveThemeCss({
+			...DEFAULT_THEME_CONFIG,
+			backgroundImage: 'data:image/png;base64,abc',
+			backgroundOpacity: 1,
+			colors: { panel: '#ff0000', 'panel-2': '#00ff00', bg: 'rgba(1,2,3,0.5)' }
+		});
+		expect(vars['--bg-app-surface']).toBe('rgba(255, 0, 0, 0.72)');
+		expect(vars['--bg-app-surface-2']).toBe('rgba(0, 255, 0, 0.72)');
+		expect(vars['--bg-app-surface-3']).toBe('transparent');
 	});
 
 	it('无 document 环境下 applyThemeToDocument 安全跳过（node 测试环境）', () => {

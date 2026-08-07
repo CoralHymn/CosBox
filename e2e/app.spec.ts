@@ -491,6 +491,12 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 			page.evaluate(() => getComputedStyle(document.querySelector('.header')!).backgroundColor)
 		)
 		.toBe('rgba(0, 0, 0, 0)');
+	// 内容面（卡片）随主题色变为半透明，让背景图大面积透出
+	await expect
+		.poll(() =>
+			page.evaluate(() => getComputedStyle(document.querySelector('.card')!).backgroundColor)
+		)
+		.toBe('rgba(23, 27, 38, 0.72)');
 	// 透明度滑杆存在且可调
 	await expect(page.locator('#theme-bg-opacity')).toBeVisible();
 	await page.locator('#theme-bg-opacity').fill('50');

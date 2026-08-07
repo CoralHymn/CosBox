@@ -180,6 +180,11 @@ export function resolveThemeCss(theme: ThemeConfig): Record<string, string> {
 		// 有背景图时让顶栏/导航/输入条/侧栏等结构面透明，背景图铺满全屏。
 		vars['--bg-app-header'] = 'transparent';
 		vars['--bg-app-panel'] = 'transparent';
+		// 内容面（卡片/气泡/按钮/输入框等）改为半透明，让背景图大面积透出，
+		// 同时保留底色可读性；颜色从当前主题色动态换算，适配深浅预设。
+		vars['--bg-app-surface'] = hexToRgba(merged.panel ?? '', CONTENT_SURFACE_ALPHA);
+		vars['--bg-app-surface-2'] = hexToRgba(merged['panel-2'] ?? '', CONTENT_SURFACE_ALPHA);
+		vars['--bg-app-surface-3'] = hexToRgba(merged.bg ?? '', CONTENT_SURFACE_ALPHA);
 	}
 	return vars;
 }
@@ -198,6 +203,9 @@ export function applyThemeToDocument(theme: ThemeConfig): void {
 		root.style.removeProperty('--bg-image-opacity');
 		root.style.removeProperty('--bg-app-header');
 		root.style.removeProperty('--bg-app-panel');
+		root.style.removeProperty('--bg-app-surface');
+		root.style.removeProperty('--bg-app-surface-2');
+		root.style.removeProperty('--bg-app-surface-3');
 	}
 }
 
@@ -207,4 +215,23 @@ export function clampOpacity(value: number): number {
 		return 1;
 	}
 	return Math.min(1, Math.max(0, value));
+}
+
+/** 有背景图时内容面（卡片/气泡/输入框等）的底色不透明度。 */
+const CONTENT_SURFACE_ALPHA = 0.72;
+
+/** 把 #rrggbb / #rgb 转为半透明 rgba；非 hex（如自定义 rgba）退化为 transparent。 */
+function hexToRgba(color: string, alpha: number): string {
+	const trimmed = color.trim();
+	const full = trimmed.match(/^#([0-9a-f]{6})$/i);
+	if (full !== null) {
+		const value = parseInt(full[1]!, 16);
+		return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+	}
+	const short = trimmed.match(/^#([0-9a-f]{3})$/i);
+	if (short !== null) {
+		const value = parseInt(short[1]!, 16);
+		return `rgba(${((value >> 8) & 15) * 17}, ${((value >> 4) & 15) * 17}, ${(value & 15) * 17}, ${alpha})`;
+	}
+	return 'transparent';
 }
