@@ -167,17 +167,24 @@
 		};
 	}
 
+	/** 主题保存串行队列：连续修改（如快速切换预设后立刻换图）不丢任何一次。 */
+	let themeSaveChain: Promise<void> = Promise.resolve();
+	let themePending = 0;
+
 	/** 主题修改即时保存（与其它设置走「保存设置」不同，主题需要实时预览）。 */
-	async function persistTheme(): Promise<void> {
-		if (themeBusy) {
-			return;
-		}
+	function persistTheme(): void {
+		const draft = buildThemeDraft();
+		themePending += 1;
 		themeBusy = true;
-		try {
-			await onSaveTheme(buildThemeDraft());
-		} finally {
-			themeBusy = false;
-		}
+		themeSaveChain = themeSaveChain
+			.then(() => onSaveTheme(draft))
+			.catch(() => {})
+			.finally(() => {
+				themePending -= 1;
+				if (themePending === 0) {
+					themeBusy = false;
+				}
+			});
 	}
 
 	/** 选择预设：用预设完整颜色覆盖并保存。 */

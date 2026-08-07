@@ -217,8 +217,8 @@ export function clampOpacity(value: number): number {
 	return Math.min(1, Math.max(0, value));
 }
 
-/** 有背景图时内容面（卡片/气泡/输入框等）的底色不透明度：0.5 让图片透出 50%。 */
-const CONTENT_SURFACE_ALPHA = 0.5;
+/** 有背景图时内容面（卡片/气泡/输入框等）的底色不透明度：0.25 让图片透出 75%。 */
+const CONTENT_SURFACE_ALPHA = 0.25;
 
 /** 把 #rrggbb / #rgb 转为半透明 rgba；非 hex（如自定义 rgba）退化为 transparent。 */
 function hexToRgba(color: string, alpha: number): string {
