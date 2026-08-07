@@ -2252,3 +2252,29 @@ LLM 状态确认等兜底链，DeepSeek V4 仍偶发「思考里说要调用 adv
 ### 门禁
 
 - 713 个单元测试全过（新增 7 个）；check / lint 全绿。
+
+## 2026-08-07（续）：修复自动记忆提取失败——JSON 模式与数组提示词冲突
+
+### 需求
+
+设置里开启自动记忆后稳定复现「自动记忆提取失败：记忆提取返回格式不是
+JSON 数组」。
+
+### 根因
+
+提取请求同时开了 `response_format: json_object` 又要求模型输出裸数组——
+OpenAI / DeepSeek 的 JSON 模式保证输出是**对象**，模型返回 `{"memories": [...]}`，
+解析层「不是数组」直接抛错。报错文案「不是 JSON 数组」恰好证明返回可解析、只是
+形态不对。
+
+### 实现
+
+- 提示词改为 `{"memories": [...]}`，与 json_object 模式语义一致；
+- `parseExtractedMemories` 兼容裸数组 / 对象包装（memories、items、results、data）/
+  散落叙述中的 JSON 块；新增平衡括号扫描，容忍 maxTokens 截断的候选块；
+- 正文为空但思考内容含 JSON 时回退解析 `reasoning_content`（思考模型已知行为）；
+- `response_format` 被端点拒绝时回退普通请求（对齐 LLM 状态判断的既有做法）。
+
+### 门禁
+
+- 718 个单元测试全过（新增 5 个）；check / lint 全绿。
