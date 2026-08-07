@@ -3,6 +3,7 @@ import type {
 	CharacterState,
 	ChatMessageView,
 	ConfigPatch,
+	MessageSegment,
 	MessageRole,
 	SnapshotNode,
 	StatePatch
@@ -22,10 +23,12 @@ export interface CharacterSessionStore {
 	addMessage: (
 		role: MessageRole,
 		content: string,
-		options?: { skipContext?: boolean; thinking?: string }
+		options?: { skipContext?: boolean; thinking?: string; segments?: MessageSegment[] }
 	) => Promise<SnapshotNode>;
 	/** 原地编辑一条消息快照的正文（不新增快照）。 */
 	editMessage: (id: string, content: string) => Promise<void>;
+	/** 向一条已有消息追加分段（如手动状态确认补执行工具），原地改写不新增快照。 */
+	appendSegments: (id: string, segments: MessageSegment[]) => Promise<void>;
 	checkout: (targetId: string) => Promise<void>;
 	advanceTime: (minutes: number) => Promise<SnapshotNode>;
 	addCheckpoint: (desc: string) => Promise<SnapshotNode>;
@@ -77,6 +80,7 @@ export function createCharacterSession(manager: CharacterManager): CharacterSess
 		update: (patch, metadata) => manager.update(patch, metadata),
 		addMessage: (role, content, options) => manager.addMessage(role, content, options),
 		editMessage: (id, content) => manager.editMessage(id, content),
+		appendSegments: (id, segments) => manager.appendSegments(id, segments),
 		checkout: (targetId) => manager.checkout(targetId),
 		advanceTime: (minutes) => manager.advanceTime(minutes),
 		addCheckpoint: (desc) => manager.addCheckpoint(desc),

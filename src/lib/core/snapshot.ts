@@ -125,6 +125,9 @@ export function rebuildFromNodes(
 				...(delta.thinking !== undefined && delta.thinking !== ''
 					? { thinking: delta.thinking }
 					: {}),
+				...(delta.segments !== undefined && delta.segments.length > 0
+					? { segments: delta.segments }
+					: {}),
 				...(delta.skipContext === true ? { skipContext: true } : {})
 			});
 		}

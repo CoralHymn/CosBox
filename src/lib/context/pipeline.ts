@@ -140,16 +140,29 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 			? `\n\n${input.toolFeedback.trim()}`
 			: '';
 	const systemMessage = `${basePrompt}\n\n${stateSummary}${worldInfoBlock}${memoryBlock}${searchBlock}${toolBlock}${feedbackBlock}\n\n${TIME_MARKER_GUIDANCE}`;
-	const messages: ChatMessage[] = historyResult.messages.map((message) => ({
-		role: message.role,
-		content: message.content,
-		...(message.worldTime !== undefined ? { worldTime: message.worldTime } : {}),
-		// DeepSeek V4 思考模式要求历史中的 assistant 消息尽量带 reasoning_content
-		// （部分部署对缺失字段会续答异常）；把落库的思考原样回传，非 DeepSeek 端点忽略。
-		...(message.role === 'assistant' && message.thinking !== undefined
-			? { reasoning: message.thinking }
-			: {})
-	}));
+	const messages: ChatMessage[] = [];
+	for (const message of historyResult.messages) {
+		// 分段消息（AI 一轮回复）：把思考/正文合并回 assistant 消息、工具调用还原为
+		// 系统反馈，保持与旧落库一致的发送结构（assistant + 【工具调用】system）。
+		if (
+			message.role === 'assistant' &&
+			message.segments !== undefined &&
+			message.segments.length > 0
+		) {
+			messages.push(...expandSegmentedMessage(message));
+			continue;
+		}
+		messages.push({
+			role: message.role,
+			content: message.content,
+			...(message.worldTime !== undefined ? { worldTime: message.worldTime } : {}),
+			// DeepSeek V4 思考模式要求历史中的 assistant 消息尽量带 reasoning_content
+			// （部分部署对缺失字段会续答异常）；把落库的思考原样回传，非 DeepSeek 端点忽略。
+			...(message.role === 'assistant' && message.thinking !== undefined
+				? { reasoning: message.thinking }
+				: {})
+		});
+	}
 
 	return {
 		systemMessage,
@@ -161,4 +174,49 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		searchResults,
 		recalledMemories
 	};
+}
+
+/**
+ * 把一条分段 assistant 消息展开为发送给 LLM 的消息序列：
+ * - 相邻的思考 + 正文合并为一条 assistant（思考挂 reasoning，序列化时回传）；
+ * - 工具调用段还原为系统反馈消息（格式与旧落库一致），供模型感知状态已更新。
+ * 世界时间标注与原实现一致：跟随消息注入。
+ */
+function expandSegmentedMessage(message: ChatMessageView): ChatMessage[] {
+	const result: ChatMessage[] = [];
+	let text = '';
+	let reasoning: string | undefined;
+	const worldTime = message.worldTime;
+	for (const segment of message.segments ?? []) {
+		if (segment.kind === 'thinking') {
+			reasoning = segment.content;
+		} else if (segment.kind === 'text') {
+			text = segment.content;
+		} else if (segment.kind === 'tool') {
+			if (text.trim() !== '' || reasoning !== undefined) {
+				result.push({
+					role: 'assistant',
+					content: text,
+					...(worldTime !== undefined ? { worldTime } : {}),
+					...(reasoning !== undefined ? { reasoning } : {})
+				});
+				text = '';
+				reasoning = undefined;
+			}
+			result.push({
+				role: 'system',
+				content: `【工具调用】${segment.toolName ?? ''}：${segment.content}`,
+				...(worldTime !== undefined ? { worldTime } : {})
+			});
+		}
+	}
+	if (text.trim() !== '' || reasoning !== undefined) {
+		result.push({
+			role: 'assistant',
+			content: text,
+			...(worldTime !== undefined ? { worldTime } : {}),
+			...(reasoning !== undefined ? { reasoning } : {})
+		});
+	}
+	return result;
 }

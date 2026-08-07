@@ -145,6 +145,47 @@ describe('CharacterManager', () => {
 		expect(manager.getConversation()[0]!.thinking).toBe('让我想想');
 	});
 
+	it('addMessage 带 segments 时保存分段并重建会话', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '正文', {
+			segments: [
+				{ kind: 'thinking', content: '先想' },
+				{ kind: 'text', content: '正文' },
+				{ kind: 'tool', content: '已把上衣更换为「白色衬衫」', toolName: 'set_outfit' }
+			]
+		});
+		const message = manager.getConversation()[0]!;
+		expect(message.content).toBe('正文');
+		expect(message.segments).toHaveLength(3);
+		expect(message.segments?.[2]).toMatchObject({
+			kind: 'tool',
+			content: '已把上衣更换为「白色衬衫」',
+			toolName: 'set_outfit'
+		});
+		const reloaded = createManager();
+		await reloaded.init();
+		expect(reloaded.getConversation()[0]!.segments).toEqual(message.segments);
+	});
+
+	it('editMessage 编辑分段消息时替换首个 text 段并保留思考/工具段', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '原正文', {
+			segments: [
+				{ kind: 'thinking', content: '思考' },
+				{ kind: 'text', content: '原正文' },
+				{ kind: 'tool', content: '已推进时间', toolName: 'advance_time' }
+			]
+		});
+		await manager.editMessage(manager.getHeadId()!, '改后的正文');
+		const message = manager.getConversation()[0]!;
+		expect(message.content).toBe('改后的正文');
+		expect(message.segments?.[0]).toEqual({ kind: 'thinking', content: '思考' });
+		expect(message.segments?.[1]).toEqual({ kind: 'text', content: '改后的正文' });
+		expect(message.segments?.[2]).toMatchObject({ kind: 'tool', toolName: 'advance_time' });
+	});
+
 	it('editMessage 原地改写正文并保留 thinking 与 worldTime', async () => {
 		const manager = createManager();
 		await manager.init();

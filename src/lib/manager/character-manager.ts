@@ -14,6 +14,7 @@ import type {
 	ChatMessageView,
 	ConfigOverrides,
 	ConfigPatch,
+	MessageSegment,
 	MessageRole,
 	SnapshotNode,
 	StatePatch
@@ -223,7 +224,7 @@ export class CharacterManager {
 	addMessage(
 		role: MessageRole,
 		content: string,
-		options: { skipContext?: boolean; thinking?: string } = {}
+		options: { skipContext?: boolean; thinking?: string; segments?: MessageSegment[] } = {}
 	): Promise<SnapshotNode> {
 		return this.enqueue(() => this.doAddMessage(role, content, options));
 	}
@@ -231,14 +232,15 @@ export class CharacterManager {
 	private async doAddMessage(
 		role: MessageRole,
 		content: string,
-		options: { skipContext?: boolean; thinking?: string }
+		options: { skipContext?: boolean; thinking?: string; segments?: MessageSegment[] }
 	): Promise<SnapshotNode> {
 		await this.ensureInit();
 		const trimmed = content.trim();
 		const hasThinking = options.thinking !== undefined && options.thinking.trim() !== '';
+		const hasSegments = (options.segments ?? []).length > 0;
 		// 模型可能只输出思考过程、正文为空：此时允许空正文消息保留思考内容；
-		// 其余情况空消息仍视为非法，防止脏数据进快照链。
-		if (trimmed === '' && !hasThinking) {
+		// 分段消息（思考/工具调用/正文）同样允许空正文，防止脏数据进快照链。
+		if (trimmed === '' && !hasThinking && !hasSegments) {
 			throw new StateValidationError('消息内容不能为空');
 		}
 		const roleLabel = role === 'user' ? '用户消息' : role === 'assistant' ? '角色消息' : '系统消息';
@@ -253,6 +255,7 @@ export class CharacterManager {
 				...(options.thinking !== undefined && options.thinking.trim() !== ''
 					? { thinking: options.thinking.trim() }
 					: {}),
+				...(hasSegments ? { segments: options.segments } : {}),
 				...(options.skipContext === true ? { skipContext: true } : {})
 			},
 			timestamp: this.now()
@@ -271,6 +274,44 @@ export class CharacterManager {
 		return this.enqueue(() => this.doEditMessage(id, content));
 	}
 
+	/** 向一条已有消息追加分段（手动状态确认补执行工具时使用，原地改写不新增快照）。 */
+	appendSegments(id: string, segments: MessageSegment[]): Promise<void> {
+		return this.enqueue(() => this.doAppendSegments(id, segments));
+	}
+
+	private async doAppendSegments(id: string, segments: MessageSegment[]): Promise<void> {
+		await this.ensureInit();
+		const clean = segments.filter((segment) => segment.content.trim() !== '');
+		if (clean.length === 0) {
+			return;
+		}
+		const node = await this.deps.snapshots.getNode(id);
+		if (node === undefined) {
+			throw new SnapshotError(`快照不存在：${id}`);
+		}
+		if (node.delta === null || node.delta.kind !== 'message') {
+			throw new SnapshotError('只能向消息快照追加分段');
+		}
+		// 旧消息（无 segments）首次追加时，把原 thinking/content 转成分段，避免展示丢失。
+		let existing = node.delta.segments;
+		if (existing === undefined || existing.length === 0) {
+			existing = [];
+			if (node.delta.thinking !== undefined && node.delta.thinking.trim() !== '') {
+				existing.push({ kind: 'thinking', content: node.delta.thinking });
+			}
+			if (node.delta.content.trim() !== '') {
+				existing.push({ kind: 'text', content: node.delta.content });
+			}
+		}
+		const updated: SnapshotNode = {
+			...node,
+			metadata: { ...node.metadata, desc: '追加工具分段' },
+			delta: { ...node.delta, segments: [...existing, ...clean] }
+		};
+		await this.deps.snapshots.updateNode(updated);
+		await this.refresh();
+	}
+
 	private async doEditMessage(id: string, content: string): Promise<void> {
 		await this.ensureInit();
 		const trimmed = content.trim();
@@ -284,10 +325,26 @@ export class CharacterManager {
 		if (node.delta === null || node.delta.kind !== 'message') {
 			throw new SnapshotError('只能编辑消息快照');
 		}
+		const delta = node.delta;
+		const segments = delta.segments;
+		let nextDelta = delta;
+		if (segments !== undefined && segments.length > 0) {
+			// 分段消息：编辑正文时替换首个 text 段，其余段（思考/工具调用）原样保留。
+			const textIndex = segments.findIndex((segment) => segment.kind === 'text');
+			const nextSegments = [...segments];
+			if (textIndex >= 0) {
+				nextSegments[textIndex] = { ...nextSegments[textIndex]!, content: trimmed };
+			} else {
+				nextSegments.push({ kind: 'text', content: trimmed });
+			}
+			nextDelta = { ...delta, content: trimmed, segments: nextSegments };
+		} else {
+			nextDelta = { ...delta, content: trimmed };
+		}
 		const updated: SnapshotNode = {
 			...node,
 			metadata: { ...node.metadata, desc: '编辑消息' },
-			delta: { ...node.delta, content: trimmed }
+			delta: nextDelta
 		};
 		await this.deps.snapshots.updateNode(updated);
 		await this.refresh();

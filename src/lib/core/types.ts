@@ -149,6 +149,15 @@ export type ConfigPatch = {
 /** 消息角色。 */
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+/** AI 一轮回复内的一个展示段：思考 / 正文 / 工具调用。 */
+export interface MessageSegment {
+	kind: 'thinking' | 'text' | 'tool';
+	/** 段落内容（思考文本 / 对话正文 / 工具执行反馈）。 */
+	content: string;
+	/** 工具段：工具名（如 advance_time / set_outfit），展示用。 */
+	toolName?: string;
+}
+
 /** 会话中展示用的消息视图（由快照链重建而来）。 */
 export interface ChatMessageView {
 	id: string;
@@ -159,6 +168,11 @@ export interface ChatMessageView {
 	worldTime?: WorldTime;
 	/** 模型的思考过程（reasoning_content / reasoning），仅展示不发送。 */
 	thinking?: string;
+	/**
+	 * AI 一轮回复的分段内容（思考 / 正文 / 工具调用按序排列）。
+	 * 存在时气泡按段渲染；旧数据无此字段时回退到 thinking + content。
+	 */
+	segments?: MessageSegment[];
 	/** 仅用于界面展示、不进入发送给 LLM 的上下文（如 /help 帮助文本）。 */
 	skipContext?: boolean;
 }
@@ -179,6 +193,7 @@ export type SnapshotDelta =
 			content: string;
 			worldTime?: WorldTime;
 			thinking?: string;
+			segments?: MessageSegment[];
 			skipContext?: boolean;
 	  }
 	| null;

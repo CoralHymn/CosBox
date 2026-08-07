@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
 /** 示例角色卡 JSON（chara_card_v3 规范）。 */
@@ -11,6 +11,16 @@ const SAMPLE_CARD = JSON.stringify({
 		first_mes: '你好，我是测试角色。'
 	}
 });
+
+/** 在当前设置页通过「模型服务管理」添加一个 DeepSeek 服务并绑定全部角色。 */
+async function addDeepSeekService(page: Page): Promise<void> {
+	await page.getByRole('button', { name: /添加模型服务/ }).click();
+	await page.locator('#svc-provider').selectOption('deepseek');
+	await page.locator('#svc-api-key').fill('test-key');
+	await page.locator('#svc-model').fill('deepseek-v4-flash');
+	await page.getByRole('button', { name: /^＋ 加入/ }).click();
+	await page.getByRole('button', { name: '保存服务' }).click();
+}
 
 test('应用加载并展示初始角色状态', async ({ page }) => {
 	await page.goto('/');
@@ -142,7 +152,8 @@ test('手动 LLM 状态确认：灯泡按钮补执行状态工具', async ({ pag
 	const bubble = page.locator('.message.assistant').first();
 	await expect(bubble.getByText(/演示模式回应/)).toBeVisible();
 
-	const toolFeedback = page.locator('.message.system', { hasText: '【工具调用】' });
+	const assistantBubble = page.locator('.message.assistant').first();
+	const toolFeedback = assistantBubble.locator('.tool-segment');
 	// 原生 demo 已按关键词调用一次 advance_time
 	await expect(toolFeedback).toHaveCount(1);
 
@@ -372,21 +383,20 @@ test('导入 SillyTavern V3 角色卡并写入世界书', async ({ page }) => {
 test('设置页选择主流服务商预设自动填充地址与模型', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
-	await page.locator('#llm-provider').selectOption('deepseek');
-	await expect(page.locator('#llm-base-url')).toHaveValue('https://api.deepseek.com/v1');
-	await expect(page.locator('#llm-model')).toHaveValue('deepseek-v4-flash');
+	await page.getByRole('button', { name: /添加模型服务/ }).click();
+	await page.locator('#svc-provider').selectOption('deepseek');
+	await expect(page.locator('#svc-base-url')).toHaveValue('https://api.deepseek.com/v1');
 
-	// 点击模型输入框弹出候选下拉，可用键盘选择
-	await page.locator('#llm-model').click();
+	// 点击模型输入框弹出预设候选下拉
+	await page.locator('#svc-model').click();
 	await expect(
 		page.locator('.combobox-item').filter({ hasText: 'deepseek-v4-flash' })
 	).toBeVisible();
 	await expect(page.locator('.combobox-item').filter({ hasText: 'deepseek-v4-pro' })).toBeVisible();
 	await page.keyboard.press('Escape');
 
-	await page.locator('#llm-provider').selectOption('ollama');
-	await expect(page.locator('#llm-base-url')).toHaveValue('http://localhost:11434/v1');
-	await expect(page.locator('#llm-model')).toHaveValue('qwen3:8b');
+	await page.locator('#svc-provider').selectOption('ollama');
+	await expect(page.locator('#svc-base-url')).toHaveValue('http://localhost:11434/v1');
 
 	// 上下文压缩默认开启，可关闭并随配置保存
 	await expect(page.locator('#auto-compact-enabled')).toBeChecked();
@@ -554,9 +564,9 @@ test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并�
 	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
-		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 4));
+		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 3));
 
-	// 工具调用反馈持久化为可见的系统消息
+	// 工具调用反馈持久化为气泡内的工具分段
 	await expect(page.getByText(/【工具调用】set_outfit/).first()).toBeVisible();
 	await expect(page.getByText(/已把上衣更换为「黑色卫衣」/).first()).toBeVisible();
 
@@ -615,8 +625,7 @@ test('AI 一次回复可包含多段：工具轮次叙事文本与最终回复�
 
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
-	await page.locator('#llm-provider').selectOption('deepseek');
-	await page.locator('#llm-api-key').fill('test-key');
+	await addDeepSeekService(page);
 	await page.locator('#ai-tools-enabled').check();
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
@@ -626,17 +635,18 @@ test('AI 一次回复可包含多段：工具轮次叙事文本与最终回复�
 	await page.getByPlaceholder(/输入消息/).fill('好了快穿上吧，别着凉了');
 	await page.getByRole('button', { name: '发送' }).click();
 
-	// 两段 assistant 文本都保留，且工具执行生效
+	// AI 一轮回复合并为单条气泡：两段正文与工具分段都保留
 	await expect(
 		page.getByText('（愣了一下，低头看看自己，脸颊一下子红了）啊！？我……')
 	).toBeVisible();
 	await expect(page.getByText('（手忙脚乱地把衬衫扣子扣好）呼——这下不会着凉了。')).toBeVisible();
-	await expect(page.locator('.message.assistant')).toHaveCount(2);
+	await expect(page.locator('.message.assistant')).toHaveCount(1);
+	await expect(page.locator('.message.assistant .tool-segment')).toHaveCount(1);
 	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
 	await expect(page.getByText(/【工具调用】set_outfit/).first()).toBeVisible();
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
-		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 5));
+		.toContain(String((snapshotsBefore ? parseInt(snapshotsBefore, 10) : 1) + 3));
 });
 
 test('流式输出：开启后按 SSE 逐块渲染，请求携带 stream: true', async ({ page }) => {
@@ -659,8 +669,7 @@ test('流式输出：开启后按 SSE 逐块渲染，请求携带 stream: true',
 
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
-	await page.locator('#llm-provider').selectOption('deepseek');
-	await page.locator('#llm-api-key').fill('test-key');
+	await addDeepSeekService(page);
 	await page.locator('#stream-enabled').check();
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
@@ -686,8 +695,7 @@ test('流式输出：思考内容实时渲染并保留在气泡思考区', async
 
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
-	await page.locator('#llm-provider').selectOption('deepseek');
-	await page.locator('#llm-api-key').fill('test-key');
+	await addDeepSeekService(page);
 	await page.locator('#stream-enabled').check();
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await page.getByRole('button', { name: /对话/ }).click();
@@ -709,8 +717,7 @@ test('打断生成：busy 时发送按钮变「停止」，点击中止请求', 
 
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
-	await page.locator('#llm-provider').selectOption('deepseek');
-	await page.locator('#llm-api-key').fill('test-key');
+	await addDeepSeekService(page);
 	await page.locator('#stream-enabled').check();
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await page.getByRole('button', { name: /对话/ }).click();
@@ -1209,20 +1216,22 @@ test('设置：获取模型列表自动填充上下文窗口，连接测试验�
 	);
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();
-	await page.locator('#llm-provider').selectOption('deepseek');
+	await page.getByRole('button', { name: /添加模型服务/ }).click();
+	await page.locator('#svc-provider').selectOption('deepseek');
+	await page.locator('#svc-api-key').fill('test-key');
 
 	await page.getByRole('button', { name: '获取模型列表' }).click();
 	await expect(page.getByText(/已获取 2 个模型/)).toBeVisible();
 	// 点击模型输入框弹出服务端模型下拉，点选后自动填充上下文窗口
-	await page.locator('#llm-model').click();
+	await page.locator('#svc-model').click();
 	const modelItem = page.locator('.combobox-item').filter({ hasText: 'mock-model-a' });
 	await expect(modelItem).toBeVisible();
 	await expect(page.locator('.combobox-item').filter({ hasText: 'deepseek-v4-flash' })).toHaveCount(
 		0
 	);
 	await modelItem.click();
-	await expect(page.locator('#llm-model')).toHaveValue('mock-model-a');
-	await expect(page.getByText('上下文窗口：64000 tokens')).toBeVisible();
+	await expect(page.locator('#svc-model')).toHaveValue('mock-model-a');
+	await expect(page.locator('input[aria-label="上下文窗口"]').last()).toHaveValue('64000');
 
 	await page.getByRole('button', { name: '连接测试' }).first().click();
 	await expect(page.getByText('连接成功，API 可用')).toBeVisible();
