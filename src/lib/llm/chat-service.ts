@@ -91,6 +91,8 @@ export interface GenerateReplyOptions {
 	compaction?: CompactionOptions;
 	/** 流式输出回调：真实端点按块回调增量文本，供 UI 边生成边显示。 */
 	onDelta?: (delta: string) => void;
+	/** 流式思考增量回调（reasoning_content）：供 UI 实时展示 AI 思考过程。 */
+	onThinkingDelta?: (delta: string) => void;
 	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
 	enableStateJudge?: boolean;
 }
@@ -193,7 +195,8 @@ export class ChatService {
 						options.tools,
 						config,
 						signal,
-						options.onDelta
+						options.onDelta,
+						{ onThinkingDelta: options.onThinkingDelta }
 					);
 					usage = mergeUsage(usage, result.usage);
 					// 记录本轮模型最先说出的叙事文本与思考：补调重试可能覆盖 result，
@@ -253,7 +256,12 @@ export class ChatService {
 						} else {
 							// 带工具的重试仍失败：去掉工具声明、改非流式再试，
 							// 规避 DeepSeek V4 思考模式在工具声明下的「只思考不产出」问题。
-							const plain = await this.retryPlainText(messages, config, signal);
+							const plain = await this.retryPlainText(
+								messages,
+								config,
+								signal,
+								options.onThinkingDelta
+							);
 							usage = mergeUsage(usage, plain?.usage);
 							if (plain !== null) {
 								result = plain;
@@ -385,7 +393,9 @@ export class ChatService {
 			}
 		}
 
-		let result = await this.client.chat(messages, config, signal, options.onDelta);
+		let result = await this.client.chat(messages, config, signal, options.onDelta, {
+			onThinkingDelta: options.onThinkingDelta
+		});
 		// 纯文本路径同样兜底一次「只思考不输出正文」。
 		if (isThinkingOnlyReply(result)) {
 			const retried = await this.retryThinkingOnly(messages, config, options, signal);
@@ -393,7 +403,7 @@ export class ChatService {
 			if (retried !== null) {
 				result = retried;
 			} else {
-				const plain = await this.retryPlainText(messages, config, signal);
+				const plain = await this.retryPlainText(messages, config, signal, options.onThinkingDelta);
 				usage = mergeUsage(usage, plain?.usage);
 				if (plain !== null) {
 					result = plain;
@@ -521,9 +531,12 @@ export class ChatService {
 							options.tools,
 							config,
 							signal,
-							options.onDelta
+							options.onDelta,
+							{ onThinkingDelta: options.onThinkingDelta }
 						)
-					: await this.client.chat(retryMessages, config, signal, options.onDelta);
+					: await this.client.chat(retryMessages, config, signal, options.onDelta, {
+							onThinkingDelta: options.onThinkingDelta
+						});
 			return result.toolCalls.length > 0 ||
 				(result.content !== null && result.content.trim() !== '')
 				? result
@@ -540,14 +553,17 @@ export class ChatService {
 	private async retryPlainText(
 		messages: ReadonlyArray<ChatMessage>,
 		config: LlmConfig,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		onThinkingDelta?: (delta: string) => void
 	): Promise<LlmChatResult | null> {
 		const retryMessages: ChatMessage[] = [
 			...messages,
 			{ role: 'system', content: THINKING_ONLY_NUDGE }
 		];
 		try {
-			const result = await this.client.chat(retryMessages, { ...config, stream: false }, signal);
+			const result = await this.client.chat(retryMessages, { ...config, stream: false }, signal, undefined, {
+				onThinkingDelta
+			});
 			return result.content !== null && result.content.trim() !== '' ? result : null;
 		} catch {
 			return null;
@@ -595,7 +611,7 @@ export class ChatService {
 					{ ...config, stream },
 					signal,
 					options.onDelta,
-					{ forceToolCall }
+					{ forceToolCall, onThinkingDelta: options.onThinkingDelta }
 				);
 			} catch {
 				return null;
@@ -649,7 +665,7 @@ export class ChatService {
 					{ ...config, stream },
 					signal,
 					options.onDelta,
-					{ forceToolCall }
+					{ forceToolCall, onThinkingDelta: options.onThinkingDelta }
 				);
 			} catch {
 				return null;

@@ -802,6 +802,31 @@ describe('OpenAiCompatibleClient', () => {
 		expect(result.content).toBe('回答');
 	});
 
+	it('流式响应：思考增量通过 onThinkingDelta 回调实时输出', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(
+			sseResponse([
+				'data: {"choices":[{"delta":{"reasoning_content":"让我"}}]}\n\n',
+				'data: {"choices":[{"delta":{"reasoning_content":"想想"}}]}\n\n',
+				'data: {"choices":[{"delta":{"content":"回答"}}]}\n\n',
+				'data: [DONE]\n\n'
+			])
+		);
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		const thinkingDeltas: string[] = [];
+		const result = await client.chat(
+			[],
+			{ ...config, stream: true },
+			undefined,
+			undefined,
+			{ onThinkingDelta: (delta) => thinkingDeltas.push(delta) }
+		);
+		expect(thinkingDeltas).toEqual(['让我', '想想']);
+		expect(result.thinking).toBe('让我想想');
+		expect(result.content).toBe('回答');
+	});
+
 	it('流式响应仅含思考、无正文时按空回复处理并保留思考', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(

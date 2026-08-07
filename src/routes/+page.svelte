@@ -125,6 +125,10 @@
 	let compacting = $state(false);
 	/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
 	let streamingDraft = $state<string | null>(null);
+	/** 流式思考草稿：实时展示 AI 思考过程（reasoning_content）。 */
+	let streamingThinking = $state('');
+	/** 当前生成任务的取消控制器（发送按钮在 busy 时变为「停止」）。 */
+	let abortController: AbortController | null = null;
 	/** 最近消息日志：从最近一次用户发言开始实时记录，再次发言时重置。 */
 	let recentLog = $state('');
 	/** 本次发送是否发生过流式输出（决定完成后是否需要补记未流式的正文）。 */
@@ -239,17 +243,38 @@
 			await session.addMessage('user', content);
 			await runAiReply(searchResults);
 		} catch (err) {
-			toasts.error(err);
+			// 用户主动停止：请求按 AbortError 结束，不弹错误提示。
+			if (abortController?.signal.aborted !== true) {
+				toasts.error(err);
+			}
 		} finally {
 			streamingDraft = null;
+			streamingThinking = '';
+			abortController = null;
 			busy = false;
 			searching = false;
 		}
 	}
 
+	/** 打断生成：中止当前请求；busy 时发送按钮变为「停止」。 */
+	function handleStop(): void {
+		if (!busy) {
+			return;
+		}
+		abortController?.abort();
+		streamingDraft = null;
+		streamingThinking = '';
+		busy = false;
+		toasts.push('info', '已停止生成');
+	}
+
 	/** 用当前会话状态生成回复并落库（普通发送与消息重试共用）；调用方需已设置 busy。 */
 	async function runAiReply(searchResults?: SearchResult[]): Promise<void> {
 		streamedAny = false;
+		streamingDraft = '';
+		streamingThinking = '';
+		const controller = new AbortController();
+		abortController = controller;
 		const input: ContextPipelineInput = {
 			state: session.state,
 			conversation: session.conversation,
@@ -279,7 +304,6 @@
 						state: compactState
 					}
 				: undefined;
-		streamingDraft = '';
 		const {
 			reply,
 			debug,
@@ -290,23 +314,32 @@
 			finishReason,
 			judgeDebug,
 			rounds
-		} = await service.generateReply(input, settings.config, {
-			onDelta: (delta) => {
-				// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
-				streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
-				// 实时记录原始流式内容（不覆盖、不清洗），供排查流式专属问题。
-				recentLog += delta;
-				streamedAny = true;
+		} = await service.generateReply(
+			input,
+			settings.config,
+			{
+				onDelta: (delta) => {
+					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
+					streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
+					// 实时记录原始流式内容（不覆盖、不清洗），供排查流式专属问题。
+					recentLog += delta;
+					streamedAny = true;
+				},
+				onThinkingDelta: (delta) => {
+					// 思考增量实时展示（流式气泡的思考区），让用户知道 AI 正在思考。
+					streamingThinking = `${streamingThinking}${delta}`;
+				},
+				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
+				toolContext: {
+					getState: () => session.state,
+					update: (patch, metadata) => session.update(patch, metadata),
+					advanceTime: (minutes) => session.advanceTime(minutes)
+				},
+				enableStateJudge: settings.config.llmStateConfirm === true,
+				...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
 			},
-			tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
-			toolContext: {
-				getState: () => session.state,
-				update: (patch, metadata) => session.update(patch, metadata),
-				advanceTime: (minutes) => session.advanceTime(minutes)
-			},
-			enableStateJudge: settings.config.llmStateConfirm === true,
-			...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
-		});
+			controller.signal
+		);
 		debugPrompt = debug;
 		lastJudgeDebug = judgeDebug;
 		lastContext = { bundle, usage: usage ?? null, compaction };
@@ -392,9 +425,14 @@
 			toasts.push('info', '已回溯到该回复之前，正在重新生成…');
 			await runAiReply();
 		} catch (err) {
-			toasts.error(err);
+			// 用户主动停止：请求按 AbortError 结束，不弹错误提示。
+			if (abortController?.signal.aborted !== true) {
+				toasts.error(err);
+			}
 		} finally {
 			streamingDraft = null;
+			streamingThinking = '';
+			abortController = null;
 			busy = false;
 		}
 	}
@@ -1037,6 +1075,7 @@
 					{recentLog}
 					onExportLog={handleExportLog}
 					{streamingDraft}
+					{streamingThinking}
 					branches={session.branches}
 					snapshots={session.snapshots}
 					headId={session.headId}
@@ -1044,6 +1083,7 @@
 					onRetry={handleRetry}
 					onConfirmState={handleConfirmState}
 					onSwitchBranch={handleSwitchBranch}
+					onStop={handleStop}
 				/>
 			{:else if tab === 'state'}
 				<StatePanel characterState={session.state} onUpdate={handleStateUpdate} />

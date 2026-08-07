@@ -23,7 +23,7 @@ export class OpenAiCompatibleClient implements LlmClient {
 		config: LlmConfig,
 		signal?: AbortSignal,
 		onDelta?: (delta: string) => void,
-		options?: { jsonMode?: boolean }
+		options?: { jsonMode?: boolean; onThinkingDelta?: (delta: string) => void }
 	): Promise<LlmChatResult> {
 		return this.chatWithTools(messages, [], config, signal, onDelta, options);
 	}
@@ -49,7 +49,11 @@ export class OpenAiCompatibleClient implements LlmClient {
 		config: LlmConfig,
 		signal?: AbortSignal,
 		onDelta?: (delta: string) => void,
-		options?: { forceToolCall?: boolean; jsonMode?: boolean }
+		options?: {
+			forceToolCall?: boolean;
+			jsonMode?: boolean;
+			onThinkingDelta?: (delta: string) => void;
+		}
 	): Promise<LlmChatResult> {
 		const baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
 		if (baseUrl === '') {
@@ -91,7 +95,7 @@ export class OpenAiCompatibleClient implements LlmClient {
 		}
 
 		if (config.stream === true) {
-			return await parseStreamedResult(response, onDelta);
+			return await parseStreamedResult(response, onDelta, options?.onThinkingDelta);
 		}
 
 		let data: unknown;
@@ -143,7 +147,8 @@ function buildChatResult(data: unknown): LlmChatResult {
  */
 async function parseStreamedResult(
 	response: Response,
-	onDelta: ((delta: string) => void) | undefined
+	onDelta: ((delta: string) => void) | undefined,
+	onThinkingDelta: ((delta: string) => void) | undefined
 ): Promise<LlmChatResult> {
 	let content = '';
 	const thinkingParts: string[] = [];
@@ -177,6 +182,7 @@ async function parseStreamedResult(
 			}
 			if (delta.thinking !== undefined && delta.thinking !== '') {
 				thinkingParts.push(delta.thinking);
+				onThinkingDelta?.(delta.thinking);
 			}
 			if (delta.toolCalls !== undefined) {
 				accumulateStreamToolCalls(toolMap, delta.toolCalls);

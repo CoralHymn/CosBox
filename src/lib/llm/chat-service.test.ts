@@ -1356,6 +1356,19 @@ describe('ChatService', () => {
 		expect(onDelta).toHaveBeenNthCalledWith(1, '流');
 		expect(onDelta).toHaveBeenNthCalledWith(2, '式');
 	});
+
+	it('透传流式思考增量回调给客户端', async () => {
+		const onThinkingDelta = vi.fn();
+		const chat = vi.fn<LlmClient['chat']>(async () => ({ content: '好', toolCalls: [] }));
+		const client: LlmClient = { chat };
+		const service = new ChatService(client);
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ onThinkingDelta }
+		);
+		expect(chat.mock.calls[0]![4]).toEqual({ onThinkingDelta });
+	});
 });
 
 describe('serializeDebugPrompt', () => {

@@ -1934,3 +1934,28 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 ### 门禁
 
 - 43 条 e2e 全过；634 个单元测试全过；check / lint 全绿。
+
+## 2026-08-07（续）：打断生成 + 流式思考展示
+
+### 需求
+
+1. AI 抽风时可以及时打断（与发送按钮同一按钮，busy 时变「停止」）；
+2. 流式输出要支持实时显示思考内容，否则 AI 长时间思考时用户不知道原因。
+
+### 实现
+
+- **打断**：`runAiReply` 创建 `AbortController` 并作为 signal 传入
+  `generateReply`（穿透到 fetch/SSE）；`ChatInput` 在 busy 时把发送按钮
+  换成红色「⏹ 停止」，点击中止请求；中止不弹错误提示、不落 assistant
+  快照；`handleSend`/`handleRetry` 的 catch 对主动停止跳过错误 toast。
+- **流式思考**：`LlmClient` options 新增 `onThinkingDelta`；
+  `openai-client` SSE 解析到 `reasoning_content`/`reasoning` 增量时实时回调；
+  `GenerateReplyOptions.onThinkingDelta` 全链路透传（含补调/重试路径）；
+  `+page` 累积为 `streamingThinking`，聊天区流式气泡的「思考过程」实时展开，
+  完成后思考随消息落库保留。
+- 测试：openai-client 流式思考回调单测；chat-service 透传单测；
+  e2e 新增「流式思考实时渲染并保留」「打断生成：按钮切换 + 中止 + 无消息」。
+
+### 门禁
+
+- 45 条 e2e 全过；636 个单元测试全过；check / lint 全绿。

@@ -4,6 +4,8 @@
 
 	interface Props {
 		disabled: boolean;
+		/** 正在生成：发送按钮变为「停止」，点击打断 AI 思考/输出。 */
+		busy: boolean;
 		searchSupported: boolean;
 		searching: boolean;
 		/** 地点库：/goto 补全数据源。 */
@@ -13,10 +15,11 @@
 		/** 输入框内容变化回调（供开发者预览使用）。 */
 		onTextChange?: (text: string) => void;
 		onSend: (content: string, options: { search: boolean }) => void;
+		onStop: () => void;
 	}
 
-	let { disabled, searchSupported, searching, places, wardrobe, onTextChange, onSend }: Props =
-		$props();
+	let { disabled, busy, searchSupported, searching, places, wardrobe, onTextChange, onSend, onStop }:
+		Props = $props();
 	let text = $state('');
 	let search = $state(false);
 	let activeIndex = $state(0);
@@ -142,7 +145,13 @@
 			{searching ? '…' : '🔍'}
 		</button>
 	{/if}
-	<button class="btn btn-primary" onclick={submit} disabled={disabled || text.trim() === ''}
-		>发送</button
-	>
+	{#if busy}
+		<button class="btn btn-primary btn-stop" onclick={onStop} aria-label="停止生成" title="停止生成"
+			>⏹ 停止</button
+		>
+	{:else}
+		<button class="btn btn-primary" onclick={submit} disabled={disabled || text.trim() === ''}
+			>发送</button
+		>
+	{/if}
 </div>

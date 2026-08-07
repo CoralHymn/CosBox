@@ -672,6 +672,63 @@ test('流式输出：开启后按 SSE 逐块渲染，请求携带 stream: true',
 	expect(requestBody).toMatchObject({ stream: true, stream_options: { include_usage: true } });
 });
 
+test('流式输出：思考内容实时渲染并保留在气泡思考区', async ({ page }) => {
+	await page.route('**/chat/completions', async (route) => {
+		const chunks = [
+			'data: {"choices":[{"delta":{"reasoning_content":"让我想想"}}]}\n\n',
+			'data: {"choices":[{"delta":{"reasoning_content":"现在回答"}}]}\n\n',
+			'data: {"choices":[{"delta":{"content":"好的，我明白了。"}}]}\n\n',
+			'data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":4}}\n\n',
+			'data: [DONE]\n\n'
+		];
+		await route.fulfill({ status: 200, contentType: 'text/event-stream', body: chunks.join('') });
+	});
+
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#llm-provider').selectOption('deepseek');
+	await page.locator('#llm-api-key').fill('test-key');
+	await page.locator('#stream-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+
+	const bubble = page.locator('.message.assistant').last();
+	await expect(bubble.getByText('好的，我明白了。')).toBeVisible();
+	// 思考增量在流式阶段实时显示，并随消息落库保留
+	await expect(bubble.locator('.thinking')).toContainText('让我想想现在回答');
+});
+
+test('打断生成：busy 时发送按钮变「停止」，点击中止请求', async ({ page }) => {
+	await page.route('**/chat/completions', async (route) => {
+		// 挂起响应，保持请求进行中，直到用户点击停止
+		await new Promise((resolve) => setTimeout(resolve, 30_000));
+		await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: [DONE]\n\n' });
+	});
+
+	await page.goto('/');
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.locator('#llm-provider').selectOption('deepseek');
+	await page.locator('#llm-api-key').fill('test-key');
+	await page.locator('#stream-enabled').check();
+	await page.getByRole('button', { name: '保存设置' }).click();
+	await page.getByRole('button', { name: /对话/ }).click();
+	await page.getByPlaceholder(/输入消息/).fill('早上好');
+	await page.getByRole('button', { name: '发送' }).click();
+
+	// busy：发送按钮变为「停止生成」
+	const stopBtn = page.getByRole('button', { name: '停止生成' });
+	await expect(stopBtn).toBeVisible();
+	await stopBtn.click();
+
+	// 停止后恢复发送按钮并提示
+	await expect(page.getByRole('button', { name: '发送' })).toBeVisible();
+	await expect(page.getByText('已停止生成')).toBeVisible();
+	// 请求被中止，没有追加 assistant 消息
+	await expect(page.locator('.message.assistant')).toHaveCount(0);
+});
+
 test('启用状态工具后，系统提示注入工具使用说明', async ({ page }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: /设置/ }).click();

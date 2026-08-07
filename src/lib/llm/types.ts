@@ -96,7 +96,7 @@ export interface LlmClient {
 		signal?: AbortSignal,
 		onDelta?: (delta: string) => void,
 		/** 强制模型输出 JSON 对象（response_format: json_object）；部分端点不支持。 */
-		options?: { jsonMode?: boolean }
+		options?: { jsonMode?: boolean; onThinkingDelta?: (delta: string) => void }
 	): Promise<LlmChatResult>;
 	/** 上下文压缩用的延续摘要；不实现时由 ChatService 用 chat 兜底。 */
 	summarize?(
@@ -111,7 +111,12 @@ export interface LlmClient {
 		signal?: AbortSignal,
 		onDelta?: (delta: string) => void,
 		/** 强制模型至少发出一个工具调用（tool_choice=required）或 JSON 对象输出。 */
-		options?: { forceToolCall?: boolean; jsonMode?: boolean }
+		options?: {
+			forceToolCall?: boolean;
+			jsonMode?: boolean;
+			/** 流式思考增量回调（reasoning_content / reasoning），用于实时展示思考过程。 */
+			onThinkingDelta?: (delta: string) => void;
+		}
 	): Promise<LlmChatResult>;
 }
 
