@@ -2009,3 +2009,34 @@ AI 不会调整配饰。排查后发现真正的根因在工具层：`set_outfit
 ### 门禁
 
 - 672 个单元测试全过；check / lint 全绿。
+
+## 2026-08-07（续）：模型服务管理（多模型 + 角色分配）
+
+### 需求
+
+不局限于单个模型：把「服务商 + Key + 模型」保存为可复用服务，随时换绑；
+按任务分三类模型——对话 / 状态判断 / AI 生成，贵的模型干大事、便宜模型干小事，
+控制 token 与消费计划。
+
+### 实现
+
+- 新类型 `ModelService`（provider/baseUrl/apiKey/model/contextWindow/maxTokens/label）
+  与 `ModelRole = chat | judge | generator`；`LlmConfig` 增加
+  `modelServices` 列表与三个角色绑定 id。
+- 新模块 `model-services.ts`：`normalizeModelService`（校验/补全/钳制）、
+  `resolveServiceConfig`（按角色合成请求配置，未绑定回退主配置）、
+  `ensureModelServiceBindings`（老存档迁移：生成「默认模型」服务并绑定三角色）。
+- 接入点：对话与压缩走 chat 角色；LLM 状态判断走 judge 角色（
+  `GenerateReplyOptions.judgeConfig` 透传到 `confirmStateForTurn`，含手动确认）；
+  AI 生成与记忆提取走 generator 角色；开发者输入预览按 chat 角色展示请求参数。
+- 设置页「模型服务管理」卡片：三角色分配下拉（快速换绑 = 切换模型）、
+  服务列表（角色徽标 + 编辑/删除 + 删除确认）、新增/编辑表单
+  （名称/服务商/BaseURL/Key/模型/上下文窗口/MaxTokens + 获取模型列表/连接测试）、
+  全局 Temperature 与 Max Tokens 回退说明。
+- 设置 store 加载时迁移并写回；`normalizeLlmConfig` 对缺失字段回退空列表。
+- 测试：model-services（解析/合成/回退/迁移）、providers 保留新字段、
+  chat-service judgeConfig 生效，共 13 条新增。
+
+### 门禁
+
+- 686 个单元测试全过；check / lint 全绿。

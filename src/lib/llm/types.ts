@@ -2,6 +2,31 @@ import type { MessageRole, WorldTime } from '../core/types';
 import { DEFAULT_WEB_SEARCH_CONFIG, type WebSearchConfig } from '../search/types';
 import { DEFAULT_COMPACT_THRESHOLD } from './compaction';
 
+/** 模型服务角色：不同用途走不同模型，便于控制成本与 token 分配。 */
+export type ModelRole = 'chat' | 'judge' | 'generator';
+
+/**
+ * 一个可复用、已保存的模型服务（一套 provider + key + model 组合）。
+ * 仅本地持久化：不随工作区导出、不同步到远程服务器（与 apiKey 同等安全要求）。
+ */
+export interface ModelService {
+	id: string;
+	/** 用户可见名称，如「DeepSeek 主模型」。 */
+	label: string;
+	provider: 'demo' | 'openai-compatible';
+	/** 服务商预设 id（见 providers.ts）；'custom' 表示自定义端点。 */
+	providerId: string;
+	baseUrl: string;
+	apiKey: string;
+	model: string;
+	/** 模型上下文窗口（token）；未知时不填。 */
+	contextWindow?: number;
+	/** 单次回复输出预算（max_tokens）；缺省回退全局配置。 */
+	maxTokens?: number;
+	notes?: string;
+	createdAt: number;
+}
+
 /** LLM 服务配置（demo = 内置离线演示，openai-compatible = 任意兼容端点）。 */
 export interface LlmConfig {
 	provider: 'demo' | 'openai-compatible';
@@ -31,6 +56,14 @@ export interface LlmConfig {
 	memoryInjectLimit?: number;
 	/** 长期记忆：每次回复后自动提取新记忆（默认关闭，避免频繁消耗 token）。 */
 	memoryAutoExtract?: boolean;
+	/** 已保存的模型服务列表（含 API Key，仅本地）。 */
+	modelServices?: ModelService[];
+	/** 对话角色使用的模型服务 id；缺省回退主配置。 */
+	chatModelId?: string;
+	/** LLM 状态判断角色使用的模型服务 id。 */
+	judgeModelId?: string;
+	/** AI 生成（地点/衣柜/日程/记忆提取）角色使用的模型服务 id。 */
+	generatorModelId?: string;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
 	webSearch: WebSearchConfig;
 }
@@ -145,6 +178,10 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	memoryEnabled: true,
 	memoryInjectLimit: 5,
 	memoryAutoExtract: false,
+	modelServices: [],
+	chatModelId: '',
+	judgeModelId: '',
+	generatorModelId: '',
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
 

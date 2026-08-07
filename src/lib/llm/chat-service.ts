@@ -95,6 +95,8 @@ export interface GenerateReplyOptions {
 	onThinkingDelta?: (delta: string) => void;
 	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
 	enableStateJudge?: boolean;
+	/** LLM 状态确认使用的模型配置；缺省回退主对话配置（可指定便宜模型省 token）。 */
+	judgeConfig?: LlmConfig;
 }
 
 /** 默认最大工具轮数：超过后停止并以提示文本收尾。 */
@@ -727,7 +729,7 @@ export class ChatService {
 			state: input.state,
 			lastUser,
 			lastAssistant: currentAssistant,
-			config,
+			config: options.judgeConfig ?? config,
 			tools: options.tools,
 			toolContext: options.toolContext,
 			signal
