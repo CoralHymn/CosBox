@@ -43,6 +43,20 @@ body {
 	overflow: hidden;
 }
 
+/* 主题背景图：固定全屏图层，透明度由 --bg-image-opacity 控制（0-1）。 */
+body::before {
+	content: '';
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	background-image: var(--bg-image, none);
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
+	opacity: var(--bg-image-opacity, 1);
+	pointer-events: none;
+}
+
 button,
 input,
 textarea,
@@ -299,6 +313,27 @@ button:disabled {
 
 .accessory-actions .input {
 	flex: 1 1 140px;
+}
+
+.theme-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+	gap: 10px;
+}
+
+.theme-color-field {
+	margin-bottom: 0;
+}
+
+.color-input {
+	width: 40px;
+	height: 34px;
+	flex: none;
+	padding: 2px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--panel-2);
+	cursor: pointer;
 }
 
 .input,

@@ -3,6 +3,7 @@ import { normalizeLlmConfig } from '../llm/providers';
 import { DEFAULT_LLM_CONFIG, type LlmConfig } from '../llm/types';
 import { defaultSystemPrompt } from '../context/pipeline';
 import { DEFAULT_SYNC_SETTINGS, type SyncSettings } from '../sync/types';
+import { DEFAULT_THEME_CONFIG, type ThemeConfig } from '../theme/theme';
 import type { KvRepository } from '../db/kv-repo';
 
 /** 应用级角色档案：名字 + 自定义系统提示。 */
@@ -15,6 +16,7 @@ const LLM_KEY = 'settings.llm';
 const PROFILE_KEY = 'settings.profile';
 const DEVELOPER_KEY = 'settings.developer';
 const SYNC_KEY = 'settings.sync';
+const THEME_KEY = 'settings.theme';
 
 /** 默认角色档案：与内置角色「绫音」及默认系统提示模板一致。 */
 const DEFAULT_PROFILE: AppProfile = {
@@ -28,6 +30,7 @@ export function createSettingsStore(kv: KvRepository) {
 	let profile = $state<AppProfile>({ ...DEFAULT_PROFILE });
 	let developerMode = $state(false);
 	let sync = $state<SyncSettings>({ ...DEFAULT_SYNC_SETTINGS });
+	let theme = $state<ThemeConfig>({ ...DEFAULT_THEME_CONFIG });
 	let loaded = $state(false);
 	const listeners = new SvelteSet<() => void>();
 
@@ -39,11 +42,12 @@ export function createSettingsStore(kv: KvRepository) {
 
 	/** 从 kv 加载设置；首次使用默认值。 */
 	async function load(): Promise<void> {
-		const [savedConfig, savedProfile, savedDeveloper, savedSync] = await Promise.all([
+		const [savedConfig, savedProfile, savedDeveloper, savedSync, savedTheme] = await Promise.all([
 			kv.get<LlmConfig>(LLM_KEY),
 			kv.get<AppProfile>(PROFILE_KEY),
 			kv.get<boolean>(DEVELOPER_KEY),
-			kv.get<SyncSettings>(SYNC_KEY)
+			kv.get<SyncSettings>(SYNC_KEY),
+			kv.get<ThemeConfig>(THEME_KEY)
 		]);
 		if (savedConfig) {
 			config = normalizeLlmConfig(savedConfig);
@@ -54,6 +58,9 @@ export function createSettingsStore(kv: KvRepository) {
 		developerMode = savedDeveloper === true;
 		if (savedSync) {
 			sync = { ...DEFAULT_SYNC_SETTINGS, ...savedSync };
+		}
+		if (savedTheme) {
+			theme = { ...DEFAULT_THEME_CONFIG, ...savedTheme };
 		}
 		loaded = true;
 	}
@@ -95,6 +102,19 @@ export function createSettingsStore(kv: KvRepository) {
 		emit();
 	}
 
+	/** 保存主题（颜色/背景图/透明度），修改即时生效。 */
+	async function saveTheme(next: ThemeConfig): Promise<void> {
+		const plain: ThemeConfig = {
+			presetId: next.presetId,
+			colors: { ...next.colors },
+			backgroundImage: next.backgroundImage,
+			backgroundOpacity: next.backgroundOpacity
+		};
+		theme = plain;
+		await kv.set(THEME_KEY, plain);
+		emit();
+	}
+
 	/** 订阅设置变化（同步推送用）。 */
 	function subscribe(listener: () => void): () => void {
 		listeners.add(listener);
@@ -114,6 +134,9 @@ export function createSettingsStore(kv: KvRepository) {
 		get sync() {
 			return sync;
 		},
+		get theme() {
+			return theme;
+		},
 		get loaded() {
 			return loaded;
 		},
@@ -123,6 +146,7 @@ export function createSettingsStore(kv: KvRepository) {
 		resetProfile,
 		saveDeveloperMode,
 		saveSync,
+		saveTheme,
 		subscribe
 	};
 }
