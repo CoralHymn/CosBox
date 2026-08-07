@@ -1,4 +1,5 @@
 import { StorageError } from '../core/errors';
+import { clonePlain } from '../core/clone';
 import type { MemoryEntry } from '../memory/types';
 import type { CosBoxDatabase } from './schema';
 
@@ -21,7 +22,9 @@ export class MemoryRepository {
 	/** 写入（新增或整体替换）一条记忆。 */
 	async upsert(entry: MemoryEntry): Promise<void> {
 		try {
-			await this.database.memories.put(entry);
+			// Svelte 5 $state 代理无法被 IndexedDB structuredClone（DataCloneError），
+			// 在 DB 边界统一深拷贝兜底（与 kv-repo 一致）。
+			await this.database.memories.put(clonePlain(entry));
 		} catch (err) {
 			throw new StorageError('保存记忆失败', { cause: err });
 		}
@@ -33,7 +36,7 @@ export class MemoryRepository {
 			return;
 		}
 		try {
-			await this.database.memories.bulkPut([...entries]);
+			await this.database.memories.bulkPut(entries.map((entry) => clonePlain(entry)));
 		} catch (err) {
 			throw new StorageError('批量保存记忆失败', { cause: err });
 		}

@@ -2424,3 +2424,27 @@ D87 修复后用户仍反馈记忆功能有问题，怀疑「对话命中关键�
 ### 门禁
 
 - 735 个单元测试全过（新增 6 个）；check / lint 全绿。
+
+## 2026-08-08（续）：修复记忆编辑「保存失败」但界面显示已改
+
+### 需求
+
+修改记忆提示「保存记忆失败」，但切页后界面仍显示修改后的内容。
+
+### 根因
+
+`memoryStore.update` 先更新内存态、再写 DB；`{ ...current }` 展开 Svelte 5
+`$state` 代理后，嵌套的 `keywords` 数组仍是代理，Dexie `put` 走 IndexedDB
+structuredClone 抛 DataCloneError →「保存记忆失败」。内存态已更新所以界面
+显示正确，但 DB 写入实际失败，刷新后会丢失。
+
+### 实现
+
+- `MemoryRepository.upsert` / `bulkPut` 写入前统一 `clonePlain` 深拷贝
+  （structuredClone 失败退回 JSON），与 kv-repo / character-manager 的既有
+  DB 边界做法一致；
+- 回归测试：代理值（模拟 Svelte $state）upsert / bulkPut 可安全写入并读回。
+
+### 门禁
+
+- 737 个单元测试全过（新增 2 个）；check / lint 全绿。
