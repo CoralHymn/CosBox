@@ -144,21 +144,26 @@ describe('normalizeLlmConfig', () => {
 			providerId: 'deepseek',
 			baseUrl: 'https://api.deepseek.com/v1',
 			apiKey: 'k',
-			model: 'deepseek-v4-flash',
+			models: [{ id: 'm1', model: 'deepseek-v4-flash' }],
 			createdAt: 1
 		};
 		const result = normalizeLlmConfig({
 			modelServices: [service],
 			chatModelId: 's1',
+			chatModelEntryId: 'm1',
 			judgeModelId: 's1',
-			generatorModelId: 's1'
+			judgeModelEntryId: 'm1',
+			generatorModelId: 's1',
+			generatorModelEntryId: 'm1'
 		});
 		expect(result.modelServices).toEqual([service]);
 		expect(result.chatModelId).toBe('s1');
+		expect(result.chatModelEntryId).toBe('m1');
 		expect(result.judgeModelId).toBe('s1');
 		expect(result.generatorModelId).toBe('s1');
 		const empty = normalizeLlmConfig({});
 		expect(empty.modelServices).toEqual([]);
 		expect(empty.chatModelId).toBe('');
+		expect(empty.chatModelEntryId).toBe('');
 	});
 });

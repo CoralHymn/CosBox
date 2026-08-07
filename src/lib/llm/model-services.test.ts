@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+	bindingValue,
 	ensureModelServiceBindings,
+	findModelEntry,
 	findModelService,
+	modelEntryIdForRole,
 	modelServiceIdForRole,
+	normalizeModelEntry,
 	normalizeModelService,
+	parseBindingValue,
 	resolveServiceConfig
 } from './model-services';
 import { DEFAULT_LLM_CONFIG } from './types';
+import type { ModelService } from './types';
 
 const BASE = {
 	...DEFAULT_LLM_CONFIG,
@@ -19,81 +25,108 @@ const BASE = {
 	modelContextWindow: 256_000
 };
 
+function service(overrides: Partial<ModelService> = {}): ModelService {
+	return {
+		id: 's1',
+		label: '服务',
+		provider: 'openai-compatible',
+		providerId: 'deepseek',
+		baseUrl: 'https://api.deepseek.com/v1',
+		apiKey: 'k',
+		models: [
+			{ id: 'm1', model: 'deepseek-v4-flash', contextWindow: 256_000, maxTokens: 4096 },
+			{ id: 'm2', model: 'deepseek-v4-pro', contextWindow: 256_000, maxTokens: 8192 }
+		],
+		createdAt: 1,
+		...overrides
+	};
+}
+
+describe('normalizeModelEntry', () => {
+	it('补全 id、清理数值', () => {
+		const entry = normalizeModelEntry({ model: ' kimi-k3 ', contextWindow: 128_000.9, maxTokens: 0 });
+		expect(entry.id).not.toBe('');
+		expect(entry.model).toBe('kimi-k3');
+		expect(entry.contextWindow).toBe(128_000);
+		expect(entry.maxTokens).toBeUndefined();
+	});
+});
+
 describe('normalizeModelService', () => {
-	it('补全缺省字段并清理输入', () => {
+	it('保留多模型条目并清理输入', () => {
 		const service = normalizeModelService({
 			label: '  小模型  ',
 			provider: 'openai-compatible',
 			providerId: 'moonshot',
 			baseUrl: 'https://api.moonshot.cn/v1/',
 			apiKey: '  key  ',
-			model: ' kimi-k3 ',
-			contextWindow: 128_000.9,
-			maxTokens: 2048.9,
+			models: [
+				{ model: 'kimi-k3', contextWindow: 128_000.9, maxTokens: 2048.9 },
+				{ model: 'kimi-k2.5' }
+			],
 			notes: ' 备注 '
 		});
 		expect(service.id).not.toBe('');
 		expect(service.label).toBe('小模型');
 		expect(service.baseUrl).toBe('https://api.moonshot.cn/v1');
 		expect(service.apiKey).toBe('key');
-		expect(service.model).toBe('kimi-k3');
-		expect(service.contextWindow).toBe(128_000);
-		expect(service.maxTokens).toBe(2048);
+		expect(service.models).toHaveLength(2);
+		expect(service.models[0]).toMatchObject({ model: 'kimi-k3', contextWindow: 128_000, maxTokens: 2048 });
+		expect(service.models[1]).toMatchObject({ model: 'kimi-k2.5' });
 		expect(service.notes).toBe('备注');
 	});
 
-	it('demo 服务 providerId 归一到 custom，空模型/名称有兜底', () => {
-		const service = normalizeModelService({
+	it('兼容旧草稿：顶层 model/contextWindow/maxTokens 转成单条模型条目', () => {
+		const draft = {
 			label: '',
+			provider: 'openai-compatible' as const,
+			providerId: 'custom',
+			baseUrl: '',
+			apiKey: '',
+			models: [],
+			model: 'deepseek-v4-flash',
+			contextWindow: 256_000,
+			maxTokens: 4096
+		};
+		const service = normalizeModelService(draft);
+		expect(service.models).toHaveLength(1);
+		expect(service.models[0]!.model).toBe('deepseek-v4-flash');
+		expect(service.models[0]!.contextWindow).toBe(256_000);
+		expect(service.models[0]!.maxTokens).toBe(4096);
+	});
+
+	it('demo 服务 providerId 归一到 custom', () => {
+		const service = normalizeModelService({
+			label: 'demo',
 			provider: 'demo',
 			providerId: 'whatever',
 			baseUrl: '',
 			apiKey: '',
-			model: '',
-			contextWindow: undefined,
-			maxTokens: undefined
+			models: [{ model: 'demo' }]
 		});
 		expect(service.provider).toBe('demo');
 		expect(service.providerId).toBe('custom');
-		expect(service.model).not.toBe('');
-		expect(service.label).not.toBe('');
-	});
-
-	it('非法数值被忽略', () => {
-		const service = normalizeModelService({
-			label: 'x',
-			provider: 'openai-compatible',
-			providerId: 'custom',
-			baseUrl: '',
-			apiKey: '',
-			model: 'm',
-			contextWindow: -1,
-			maxTokens: 0
-		});
-		expect(service.contextWindow).toBeUndefined();
-		expect(service.maxTokens).toBeUndefined();
 	});
 });
 
 describe('resolveServiceConfig', () => {
-	it('角色命中服务时用服务覆盖 provider/key/model/窗口/maxTokens', () => {
+	it('按服务 + 模型条目合成请求配置', () => {
 		const config = {
 			...BASE,
 			modelServices: [
-				{
+				service({
 					id: 'cheap',
-					label: '小模型',
-					provider: 'openai-compatible' as const,
 					providerId: 'moonshot',
 					baseUrl: 'https://api.moonshot.cn/v1',
 					apiKey: 'cheap-key',
-					model: 'kimi-k3',
-					contextWindow: 128_000,
-					maxTokens: 1024,
-					createdAt: 1
-				}
+					models: [
+						{ id: 'k3', model: 'kimi-k3', contextWindow: 128_000, maxTokens: 1024 },
+						{ id: 'k2', model: 'kimi-k2.5' }
+					]
+				})
 			],
-			judgeModelId: 'cheap'
+			judgeModelId: 'cheap',
+			judgeModelEntryId: 'k3'
 		};
 		const resolved = resolveServiceConfig(config, 'judge');
 		expect(resolved.providerId).toBe('moonshot');
@@ -104,41 +137,47 @@ describe('resolveServiceConfig', () => {
 		expect(resolved.maxTokens).toBe(1024);
 	});
 
-	it('服务缺省 contextWindow/maxTokens 时回退主配置', () => {
+	it('模型条目缺省时用服务第一条；条目字段缺省时回退主配置', () => {
 		const config = {
 			...BASE,
 			modelServices: [
-				{
+				service({
 					id: 's',
-					label: 's',
-					provider: 'openai-compatible' as const,
 					providerId: 'custom',
 					baseUrl: '',
 					apiKey: '',
-					model: 'm',
-					createdAt: 1
-				}
+					models: [{ id: 'only', model: 'm' }]
+				})
 			],
-			chatModelId: 's'
+			chatModelId: 's',
+			chatModelEntryId: ''
 		};
 		const resolved = resolveServiceConfig(config, 'chat');
+		expect(resolved.model).toBe('m');
 		expect(resolved.modelContextWindow).toBe(256_000);
 		expect(resolved.maxTokens).toBe(4096);
 	});
 
-	it('角色未绑定或服务缺失时回退主配置', () => {
+	it('角色未绑定或服务/条目缺失时回退主配置', () => {
 		const unbound = resolveServiceConfig(BASE, 'generator');
 		expect(unbound.model).toBe(BASE.model);
 		expect(unbound.apiKey).toBe(BASE.apiKey);
-		expect(unbound.baseUrl).toBe(BASE.baseUrl);
 		const missing = resolveServiceConfig({ ...BASE, chatModelId: 'missing' }, 'chat');
 		expect(missing.model).toBe(BASE.model);
-		expect(missing.apiKey).toBe(BASE.apiKey);
+		const noEntry = resolveServiceConfig(
+			{
+				...BASE,
+				modelServices: [service({ models: [] })],
+				chatModelId: 's1'
+			},
+			'chat'
+		);
+		expect(noEntry.model).toBe(BASE.model);
 	});
 });
 
 describe('ensureModelServiceBindings', () => {
-	it('老存档无服务时生成「默认模型」并绑定三个角色', () => {
+	it('老存档无服务时生成「默认模型」并绑定三个角色与条目', () => {
 		const migrated = ensureModelServiceBindings(BASE);
 		expect(migrated.modelServices).toHaveLength(1);
 		const service = migrated.modelServices![0]!;
@@ -146,60 +185,76 @@ describe('ensureModelServiceBindings', () => {
 		expect(service.label).toBe('默认模型');
 		expect(service.providerId).toBe('deepseek');
 		expect(service.apiKey).toBe('main-key');
-		expect(service.model).toBe('deepseek-v4-flash');
+		expect(service.models[0]!.model).toBe('deepseek-v4-flash');
 		expect(migrated.chatModelId).toBe('default');
+		expect(migrated.chatModelEntryId).toBe(service.models[0]!.id);
 		expect(migrated.judgeModelId).toBe('default');
 		expect(migrated.generatorModelId).toBe('default');
 	});
 
-	it('角色 id 缺失或指向不存在服务时回退第一条', () => {
-		const config = {
+	it('老格式服务（顶层 model）迁移为单条模型条目', () => {
+		const legacy = {
+			...service(),
+			models: undefined,
+			model: 'deepseek-v4-pro',
+			contextWindow: 256_000,
+			maxTokens: 8192
+		} as unknown as ModelService;
+		const migrated = ensureModelServiceBindings({
 			...BASE,
-			modelServices: [
-				{
-					id: 'a',
-					label: 'A',
-					provider: 'openai-compatible' as const,
-					providerId: 'custom',
-					baseUrl: '',
-					apiKey: '',
-					model: 'a',
-					createdAt: 1
-				}
-			],
-			chatModelId: 'missing',
-			judgeModelId: 'a',
-			generatorModelId: ''
-		};
-		const migrated = ensureModelServiceBindings(config);
-		expect(migrated.chatModelId).toBe('a');
-		expect(migrated.judgeModelId).toBe('a');
-		expect(migrated.generatorModelId).toBe('a');
-		expect(migrated.modelServices).toHaveLength(1);
+			modelServices: [legacy],
+			chatModelId: 's1'
+		});
+		expect(migrated.modelServices![0]!.models).toHaveLength(1);
+		expect(migrated.modelServices![0]!.models[0]!.model).toBe('deepseek-v4-pro');
+		expect(migrated.chatModelEntryId).toBe(migrated.modelServices![0]!.models[0]!.id);
+	});
+
+	it('角色条目 id 缺失或不存在时回退该服务第一条', () => {
+		const migrated = ensureModelServiceBindings({
+			...BASE,
+			modelServices: [service()],
+			chatModelId: 's1',
+			chatModelEntryId: 'missing'
+		});
+		expect(migrated.chatModelEntryId).toBe('m1');
 	});
 });
 
 describe('helpers', () => {
-	it('modelServiceIdForRole 按角色返回绑定 id', () => {
-		const config = { ...BASE, chatModelId: 'c', judgeModelId: 'j', generatorModelId: 'g' };
+	it('modelServiceIdForRole / modelEntryIdForRole 按角色返回绑定 id', () => {
+		const config = {
+			...BASE,
+			chatModelId: 'c',
+			chatModelEntryId: 'cm',
+			judgeModelId: 'j',
+			judgeModelEntryId: 'jm',
+			generatorModelId: 'g',
+			generatorModelEntryId: 'gm'
+		};
 		expect(modelServiceIdForRole(config, 'chat')).toBe('c');
+		expect(modelEntryIdForRole(config, 'chat')).toBe('cm');
 		expect(modelServiceIdForRole(config, 'judge')).toBe('j');
+		expect(modelEntryIdForRole(config, 'judge')).toBe('jm');
 		expect(modelServiceIdForRole(config, 'generator')).toBe('g');
+		expect(modelEntryIdForRole(config, 'generator')).toBe('gm');
 	});
 
-	it('findModelService 按 id 查找', () => {
-		const service = {
-			id: 's',
-			label: 'S',
-			provider: 'openai-compatible' as const,
-			providerId: 'custom',
-			baseUrl: '',
-			apiKey: '',
-			model: 'm',
-			createdAt: 1
-		};
-		const config = { ...BASE, modelServices: [service] };
-		expect(findModelService(config, 's')).toBe(service);
+	it('findModelService / findModelEntry 查找与首条回退', () => {
+		const modelService = service();
+		const config = { ...BASE, modelServices: [modelService] };
+		expect(findModelService(config, 's1')).toBe(modelService);
 		expect(findModelService(config, 'nope')).toBeUndefined();
+		expect(findModelEntry(modelService, 'm2')?.model).toBe('deepseek-v4-pro');
+		expect(findModelEntry(modelService, 'missing')?.id).toBe('m1');
+	});
+
+	it('bindingValue / parseBindingValue 往返', () => {
+		const value = bindingValue('s1', 'm2');
+		expect(value).toBe('s1::m2');
+		expect(parseBindingValue(value)).toEqual({ serviceId: 's1', entryId: 'm2' });
+		expect(parseBindingValue('bad')).toBeNull();
+		expect(parseBindingValue('a::')).toBeNull();
+		expect(parseBindingValue('::b')).toBeNull();
 	});
 });

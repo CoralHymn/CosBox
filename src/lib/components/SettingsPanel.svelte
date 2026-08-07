@@ -1,9 +1,20 @@
 <script lang="ts">
 	import { findModelInfo } from '../llm/model-info';
-	import { MODEL_ROLE_LABELS, normalizeModelService } from '../llm/model-services';
+	import {
+		bindingValue,
+		MODEL_ROLE_LABELS,
+		type ModelEntryDraft,
+		normalizeModelService,
+		parseBindingValue
+	} from '../llm/model-services';
 	import type { FetchedModel } from '../llm/model-service';
 	import { CUSTOM_PROVIDER_ID, findProviderPreset, LLM_PROVIDER_PRESETS } from '../llm/providers';
-	import { DEFAULT_LLM_CONFIG, type LlmConfig, type ModelRole, type ModelService } from '../llm/types';
+	import {
+		DEFAULT_LLM_CONFIG,
+		type LlmConfig,
+		type ModelRole,
+		type ModelService
+	} from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
 	import type { AppProfile } from '../stores/settings.svelte';
 	import type { SyncResult } from '../sync/sync-service';
@@ -98,14 +109,21 @@
 	/** 已保存的模型服务列表与三角色绑定（角色 → 服务 id）。 */
 	let services = $state<ModelService[]>([]);
 	let chatModelId = $state('');
+	let chatModelEntryId = $state('');
 	let judgeModelId = $state('');
+	let judgeModelEntryId = $state('');
 	let generatorModelId = $state('');
+	let generatorModelEntryId = $state('');
 	/** 服务编辑草稿（复用 provider/baseUrl/apiKey/model 等字段）。 */
 	let serviceEditorOpen = $state(false);
 	let editingServiceId = $state<string | null>(null);
 	let serviceLabel = $state('');
 	let serviceNote = $state('');
 	let serviceMaxTokens = $state<number | undefined>(undefined);
+	/** 编辑器里已加入的模型行（多选）。 */
+	let editorModels = $state<ModelEntryDraft[]>([]);
+	/** 「获取模型列表」后勾选待批量添加的模型 id。 */
+	let selectedFetchedModels = $state<string[]>([]);
 	let savingService = $state(false);
 
 	/** 主题颜色项：rgba 项只能文本输入，其余用取色器。 */
@@ -138,6 +156,15 @@
 	const modelCandidates = $derived(
 		availableModels.length > 0 ? availableModels : (currentPreset?.models ?? [])
 	);
+	/** 角色分配下拉的扁平选项：每个服务下的每个模型一条（值 = 服务id::模型id）。 */
+	const roleOptions = $derived(
+		services.flatMap((service) =>
+			(service.models ?? []).map((entry) => ({
+				value: bindingValue(service.id, entry.id),
+				label: `${service.label} / ${entry.model}`
+			}))
+		)
+	);
 
 	$effect(() => {
 		presetSelection =
@@ -162,8 +189,11 @@
 		memoryAutoExtract = config.memoryAutoExtract === true;
 		services = (config.modelServices ?? []).map((service) => ({ ...service }));
 		chatModelId = config.chatModelId ?? '';
+		chatModelEntryId = config.chatModelEntryId ?? '';
 		judgeModelId = config.judgeModelId ?? '';
+		judgeModelEntryId = config.judgeModelEntryId ?? '';
 		generatorModelId = config.generatorModelId ?? '';
+		generatorModelEntryId = config.generatorModelEntryId ?? '';
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
 		searchApiKey = config.webSearch.apiKey;
@@ -294,8 +324,11 @@
 			memoryAutoExtract,
 			modelServices: services.map((service) => ({ ...service })),
 			chatModelId,
+			chatModelEntryId,
 			judgeModelId,
+			judgeModelEntryId,
 			generatorModelId,
+			generatorModelEntryId,
 			webSearch: {
 				enabled: searchEnabled,
 				provider: searchProvider,
@@ -418,6 +451,8 @@
 		editingServiceId = service?.id ?? null;
 		serviceLabel = service?.label ?? '';
 		serviceNote = service?.notes ?? '';
+		editorModels = (service?.models ?? []).map((entry) => ({ ...entry }));
+		selectedFetchedModels = [];
 		if (service === null) {
 			presetSelection = CUSTOM_PROVIDER_ID;
 			baseUrl = '';
@@ -434,18 +469,61 @@
 						: CUSTOM_PROVIDER_ID;
 			baseUrl = service.baseUrl;
 			apiKey = service.apiKey;
-			model = service.model;
-			modelContextWindow = service.contextWindow;
-			serviceMaxTokens = service.maxTokens;
+			model = '';
+			modelContextWindow = undefined;
+			serviceMaxTokens = undefined;
 		}
 		availableModels = [];
 		modelContexts = {};
 		serviceEditorOpen = true;
 	}
 
+	/** 把「添加模型」草稿（model/窗口/Max）追加为一行。 */
+	function addEditorModel(): void {
+		if (model.trim() === '') {
+			return;
+		}
+		editorModels = [
+			...editorModels,
+			{
+				model: model.trim(),
+				...(modelContextWindow !== undefined ? { contextWindow: modelContextWindow } : {}),
+				...(serviceMaxTokens !== undefined ? { maxTokens: serviceMaxTokens } : {})
+			}
+		];
+		model = '';
+		modelContextWindow = undefined;
+		serviceMaxTokens = undefined;
+	}
+
+	/** 局部更新编辑器里的某行模型。 */
+	function updateEditorModel(index: number, patch: Partial<ModelEntryDraft>): void {
+		editorModels = editorModels.map((entry, i) => (i === index ? { ...entry, ...patch } : entry));
+	}
+
+	/** 删除编辑器里的一行模型。 */
+	function removeEditorModel(index: number): void {
+		editorModels = editorModels.filter((_, i) => i !== index);
+	}
+
+	/** 把「获取模型列表」勾选的模型批量加入编辑器。 */
+	function addFetchedModels(): void {
+		const existingModels = editorModels.map((entry) => entry.model);
+		const fresh = selectedFetchedModels.filter((id) => !existingModels.includes(id));
+		editorModels = [
+			...editorModels,
+			...fresh.map((id) => ({
+				model: id,
+				...(modelContexts[id] !== undefined ? { contextWindow: modelContexts[id] } : {})
+			}))
+		];
+		selectedFetchedModels = [];
+		availableModels = [];
+	}
+
 	/** 保存（新增或更新）一个模型服务；首个服务自动绑定全部角色。 */
 	async function saveService(): Promise<void> {
-		if (savingService || model.trim() === '') {
+		if (savingService || editorModels.length === 0) {
 			return;
 		}
 		savingService = true;
@@ -457,9 +535,7 @@
 				providerId: presetSelection,
 				baseUrl,
 				apiKey,
-				model,
-				contextWindow: modelContextWindow,
-				maxTokens: serviceMaxTokens ?? undefined,
+				models: editorModels,
 				notes: serviceNote
 			};
 			const normalized = normalizeModelService(draft);
@@ -467,11 +543,24 @@
 				services = [...services, normalized];
 				if (services.length === 1) {
 					chatModelId = normalized.id;
+					chatModelEntryId = normalized.models[0]?.id ?? '';
 					judgeModelId = normalized.id;
+					judgeModelEntryId = normalized.models[0]?.id ?? '';
 					generatorModelId = normalized.id;
+					generatorModelEntryId = normalized.models[0]?.id ?? '';
 				}
 			} else {
 				services = services.map((service) => (service.id === normalized.id ? normalized : service));
+				// 编辑已有服务：若角色绑定的是该服务但条目已不存在，回退第一条。
+				const firstEntryId = normalized.models[0]?.id ?? '';
+				const rebind = (serviceId: string, entryId: string): string =>
+					serviceId === normalized.id &&
+					!normalized.models.some((entry) => entry.id === entryId)
+						? firstEntryId
+						: entryId;
+				chatModelEntryId = rebind(chatModelId, chatModelEntryId);
+				judgeModelEntryId = rebind(judgeModelId, judgeModelEntryId);
+				generatorModelEntryId = rebind(generatorModelId, generatorModelEntryId);
 			}
 			serviceEditorOpen = false;
 			editingServiceId = null;
@@ -488,14 +577,18 @@
 		const remaining = services.filter((item) => item.id !== service.id);
 		services = remaining;
 		const fallback = remaining[0]?.id ?? '';
+		const fallbackEntryId = remaining[0]?.models[0]?.id ?? '';
 		if (chatModelId === service.id) {
 			chatModelId = fallback;
+			chatModelEntryId = fallbackEntryId;
 		}
 		if (judgeModelId === service.id) {
 			judgeModelId = fallback;
+			judgeModelEntryId = fallbackEntryId;
 		}
 		if (generatorModelId === service.id) {
 			generatorModelId = fallback;
+			generatorModelEntryId = fallbackEntryId;
 		}
 		if (editingServiceId === service.id) {
 			serviceEditorOpen = false;
@@ -503,14 +596,21 @@
 		}
 	}
 
-	/** 角色绑定：下拉选择服务 id。 */
-	function setRole(role: ModelRole, id: string): void {
+	/** 角色绑定：下拉值为 `服务id::模型条目id`。 */
+	function setRole(role: ModelRole, value: string): void {
+		const parsed = parseBindingValue(value);
+		if (parsed === null) {
+			return;
+		}
 		if (role === 'chat') {
-			chatModelId = id;
+			chatModelId = parsed.serviceId;
+			chatModelEntryId = parsed.entryId;
 		} else if (role === 'judge') {
-			judgeModelId = id;
+			judgeModelId = parsed.serviceId;
+			judgeModelEntryId = parsed.entryId;
 		} else {
-			generatorModelId = id;
+			generatorModelId = parsed.serviceId;
+			generatorModelEntryId = parsed.entryId;
 		}
 	}
 
@@ -532,15 +632,24 @@
 	/** 全部角色（分配区遍历用）。 */
 	const ALL_ROLES: ModelRole[] = ['chat', 'judge', 'generator'];
 
-	/** 角色当前绑定的服务 id。 */
+	/** 角色当前绑定下拉值（`服务id::模型条目id`）。 */
 	function roleId(role: ModelRole): string {
+		let serviceId = '';
+		let entryId = '';
 		if (role === 'chat') {
-			return chatModelId;
+			serviceId = chatModelId;
+			entryId = chatModelEntryId;
+		} else if (role === 'judge') {
+			serviceId = judgeModelId;
+			entryId = judgeModelEntryId;
+		} else {
+			serviceId = generatorModelId;
+			entryId = generatorModelEntryId;
 		}
-		if (role === 'judge') {
-			return judgeModelId;
+		if (serviceId === '' || entryId === '') {
+			return '';
 		}
-		return generatorModelId;
+		return bindingValue(serviceId, entryId);
 	}
 
 	/** 服务商展示名。 */
@@ -609,13 +718,16 @@
 	<div class="card">
 		<h3 class="card-title">模型服务管理</h3>
 		<p class="muted" style="margin: 0 0 12px;">
-			把「服务商 + Key + 模型」保存为可复用的模型服务，再为三类任务分配不同模型：
+			把「服务商 + Key」保存为一个连接，下面挂多个可选模型（Key 只填一次）；
+			再为三类任务分配「服务 + 模型」：
 			对话用强模型、状态判断与生成用便宜模型，便于控制 token 与消费。API Key 仅保存在本地，
 			不会随工作区导出或同步到服务器。
 		</p>
 
 		<div class="field">
-			<span class="muted" style="display: block; margin-bottom: 4px;">任务角色分配（快速切换 = 换绑服务）</span>
+			<span class="muted" style="display: block; margin-bottom: 4px;">
+				任务角色分配（快速切换模型 = 换绑「服务 / 模型」）
+			</span>
 			<div class="row-actions" style="flex-wrap: wrap; gap: 8px;">
 				{#each ALL_ROLES as role (role)}
 					<div class="field" style="flex: 1; min-width: 180px;">
@@ -627,10 +739,8 @@
 							onchange={(event) =>
 								setRole(role, (event.currentTarget as HTMLSelectElement).value)}
 						>
-							{#each services as service (service.id)}
-								<option value={service.id}>
-									{service.label}（{service.model}）
-								</option>
+							{#each roleOptions as option (option.value)}
+								<option value={option.value}>{option.label}</option>
 							{/each}
 						</select>
 					</div>
@@ -650,9 +760,19 @@
 							{/each}
 						</div>
 						<p class="muted" style="margin: 3px 0 0; font-size: 12px;">
-							{providerLabelFor(service)} · {service.model}
-							{#if service.maxTokens !== undefined} · Max {service.maxTokens}{/if}
+							{providerLabelFor(service)} · 共 {service.models.length} 个模型
 						</p>
+						<div class="row-actions" style="gap: 4px; flex-wrap: wrap; margin-top: 4px;">
+							{#each service.models as entry (entry.id)}
+								<span
+									class="model-chip"
+									title="窗口 {entry.contextWindow ?? '未知'} · Max {entry.maxTokens ?? '全局'}"
+								>
+									{entry.model}
+									{#if entry.maxTokens !== undefined} ·{entry.maxTokens}{/if}
+								</span>
+							{/each}
+						</div>
 					</div>
 					<div class="row-actions" style="gap: 4px;">
 						<button class="btn btn-small" onclick={() => openServiceEditor(service)}>编辑</button>
@@ -714,50 +834,97 @@
 								: 'your-api-key'}
 						/>
 					</div>
-					<div class="field">
-						<label for="svc-model">模型</label>
-						<ModelCombobox
-							value={model}
-							candidates={modelCandidates}
-							inputId="svc-model"
-							placeholder="模型 id（点击选择或直接输入）"
-							onChange={onModelChange}
-						/>
-						<p class="muted" style="margin-top: 2px;">
-							上下文窗口：{modelContextWindow ?? findModelInfo(model.trim())?.contextWindow ?? '未知'} tokens
-						</p>
-					</div>
 					{#if currentPreset?.notes}
 						<p class="muted" style="margin-top: 2px;">{currentPreset.notes}</p>
 					{/if}
-					<div class="grid-2">
-						<div class="field">
-							<label for="svc-context">上下文窗口（token，可选）</label>
+					<div class="field">
+						<span class="muted" style="display: block; margin-bottom: 4px;">
+							模型列表（一个服务商下可多选多个模型）
+						</span>
+						{#each editorModels as entry, index (index)}
+							<div class="model-row">
+								<input
+									class="input"
+									value={entry.model}
+									placeholder="模型 id"
+									onchange={(event) =>
+										updateEditorModel(index, {
+											model: (event.currentTarget as HTMLInputElement).value
+										})}
+									aria-label="模型 id"
+								/>
+								<input
+									class="input"
+									style="width: 110px;"
+									type="number"
+									value={entry.contextWindow ?? ''}
+									placeholder="窗口"
+									onchange={(event) =>
+										updateEditorModel(index, {
+											contextWindow:
+												Number((event.currentTarget as HTMLInputElement).value) > 0
+													? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+													: undefined
+										})}
+									aria-label="上下文窗口"
+								/>
+								<input
+									class="input"
+									style="width: 90px;"
+									type="number"
+									value={entry.maxTokens ?? ''}
+									placeholder="Max"
+									onchange={(event) =>
+										updateEditorModel(index, {
+											maxTokens:
+												Number((event.currentTarget as HTMLInputElement).value) > 0
+													? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+													: undefined
+										})}
+									aria-label="Max Tokens"
+								/>
+								<button
+									class="btn btn-danger btn-small"
+									onclick={() => removeEditorModel(index)}
+									aria-label="移除该模型">✕</button
+								>
+							</div>
+						{/each}
+						<div class="model-row" style="margin-top: 6px;">
+							<ModelCombobox
+								value={model}
+								candidates={modelCandidates}
+								inputId="svc-model"
+								placeholder="输入/选择模型后加入"
+								onChange={onModelChange}
+							/>
 							<input
-								id="svc-context"
 								class="input"
+								style="width: 110px;"
 								type="number"
 								value={modelContextWindow ?? ''}
+								placeholder="窗口"
 								onchange={(event) =>
 									(modelContextWindow = Number((event.currentTarget as HTMLInputElement).value) > 0
 										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
 										: undefined)}
-								placeholder="未知留空"
+								aria-label="上下文窗口"
 							/>
-						</div>
-						<div class="field">
-							<label for="svc-max-tokens">Max Tokens（可选，缺省用全局）</label>
 							<input
-								id="svc-max-tokens"
 								class="input"
+								style="width: 90px;"
 								type="number"
 								value={serviceMaxTokens ?? ''}
+								placeholder="Max"
 								onchange={(event) =>
 									(serviceMaxTokens = Number((event.currentTarget as HTMLInputElement).value) > 0
 										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
 										: undefined)}
-								placeholder="全局 {maxTokens}"
+								aria-label="Max Tokens"
 							/>
+							<button class="btn btn-small" onclick={addEditorModel} disabled={model.trim() === ''}>
+								＋ 加入
+							</button>
 						</div>
 					</div>
 					<div class="row-actions" style="margin-bottom: 10px;">
@@ -773,9 +940,37 @@
 						</button>
 					</div>
 					{#if availableModels.length > 0}
-						<p class="muted" style="margin: 0 0 10px;">
-							已获取 {availableModels.length} 个模型；选择或输入已知模型后自动填充上下文窗口。
-						</p>
+						<div class="fetched-models">
+							<p class="muted" style="margin: 0 0 6px;">
+								已获取 {availableModels.length} 个模型，勾选后批量加入：
+							</p>
+							<div class="row-actions" style="gap: 4px; flex-wrap: wrap;">
+								{#each availableModels as fetched (fetched)}
+									<label class="row-actions" style="gap: 4px; font-size: 12px;">
+										<input
+											class="checkbox"
+											type="checkbox"
+											checked={selectedFetchedModels.includes(fetched)}
+											onchange={(event) => {
+												const checked = (event.currentTarget as HTMLInputElement).checked;
+												selectedFetchedModels = checked
+													? [...selectedFetchedModels, fetched]
+													: selectedFetchedModels.filter((id) => id !== fetched);
+											}}
+										/>
+										<span>{fetched}</span>
+									</label>
+								{/each}
+							</div>
+							<button
+								class="btn btn-small"
+								style="margin-top: 6px;"
+								onclick={addFetchedModels}
+								disabled={selectedFetchedModels.length === 0}
+							>
+								添加所选（{selectedFetchedModels.length}）
+							</button>
+						</div>
 					{/if}
 				{/if}
 				<div class="field">
@@ -783,7 +978,7 @@
 					<input id="svc-note" class="input" bind:value={serviceNote} placeholder="用途说明" />
 				</div>
 				<div class="row-actions" style="gap: 6px;">
-					<button class="btn btn-small" onclick={saveService} disabled={savingService || model.trim() === ''}>
+					<button class="btn btn-small" onclick={saveService} disabled={savingService || editorModels.length === 0}>
 						{savingService ? '保存中…' : '保存服务'}
 					</button>
 					<button
@@ -1192,5 +1387,30 @@
 		border: 1px solid var(--border);
 		border-radius: 10px;
 		background: var(--panel-2);
+	}
+	.model-chip {
+		font-size: 11px;
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		color: var(--text-dim);
+	}
+	.model-row {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+		margin-bottom: 6px;
+	}
+	.model-row .input:first-child {
+		flex: 1;
+		min-width: 0;
+	}
+	.fetched-models {
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 8px;
+		margin-bottom: 10px;
+		background: var(--panel);
 	}
 </style>

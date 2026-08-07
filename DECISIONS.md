@@ -1169,18 +1169,25 @@ Claude Code / Mem0 验证过的模式，且不牺牲「对话记录不可变」�
 对话、状态判断、AI 生成共用同一个模型，贵的模型干小事浪费 token 与消费。
 **选择**：
 
-1. **模型服务**：把「provider + baseUrl + apiKey + model（+ 窗口/预算）」保存为可复用
-   的 `ModelService` 列表，设置页可增删改、连接测试、获取模型列表；Key 仅本地，
+1. **模型服务 = 服务商连接 + 多模型**：`ModelService` 保存
+   「provider + baseUrl + apiKey + label」，下面挂 `models: ModelEntry[]`
+   （模型 id + 窗口 + Max Tokens），Key 只填一次、服务商下可多选多个模型
+   （含「获取模型列表」勾选批量加入）；设置页可增删改、连接测试；Key 仅本地，
    不随工作区导出、不同步（沿用 apiKey 的安全边界）。
-2. **角色分配**：`LlmConfig` 新增 `chatModelId / judgeModelId / generatorModelId`
-   三个绑定；`resolveServiceConfig(config, role)` 按角色取出服务并合成请求配置，
-   未绑定/服务缺失时回退主配置。
+2. **角色分配 = 服务 + 模型两级**：`LlmConfig` 新增
+   `chatModelId / judgeModelId / generatorModelId`（服务 id）与
+   `chatModelEntryId / judgeModelEntryId / generatorModelEntryId`（模型条目 id）；
+   `resolveServiceConfig(config, role)` 按角色取「服务 + 条目」合成请求配置，
+   条目缺省用服务第一条；未绑定/服务/条目缺失时回退主配置。
 3. **接入点**：对话/压缩走 chat 角色；LLM 状态判断走 judge 角色（
    `GenerateReplyOptions.judgeConfig` 透传）；AI 生成与记忆提取走 generator 角色。
-4. **迁移**：老存档无服务列表时，`ensureModelServiceBindings` 用主配置生成
-   「默认模型」服务并绑定三个角色，加载时写回；`normalizeLlmConfig` 对缺失字段回退。
+4. **迁移**：`ensureModelServiceBindings` 兼容三级老存档——无服务列表（用主配置
+   生成「默认模型」）、单模型服务（顶层 model/contextWindow/maxTokens 转成单条
+   模型条目）、有服务但条目绑定缺失（回退第一条）；加载时写回；
+   `normalizeLlmConfig` 对缺失字段回退。
 
-**理由**：多服务 + 角色分配是 opencode/Chatbox 等客户端的通用形态——填一次 Key、
-随时换绑；判断/生成/提取用小模型可显著降低开销；回退主配置保证老存档零迁移成本。
+**理由**：多服务 + 服务商下多模型 + 角色分配是 opencode/Chatbox 等客户端的通用
+形态——填一次 Key、同一服务商可挂 flash/pro 等多个模型、随时换绑；
+判断/生成/提取用小模型可显著降低开销；三级回退保证老存档零迁移成本。
 **代价**：Key 以明文存于 IndexedDB（与旧实现相同，本地单机可接受）；每类角色
-需要用户手动分配；压缩仍跟随对话角色（未单独拆分，避免角色过多增加维护成本）。
+需要手动分配「服务 + 模型」；压缩仍跟随对话角色（未单独拆分，避免角色过多）。

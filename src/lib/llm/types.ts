@@ -5,8 +5,18 @@ import { DEFAULT_COMPACT_THRESHOLD } from './compaction';
 /** 模型服务角色：不同用途走不同模型，便于控制成本与 token 分配。 */
 export type ModelRole = 'chat' | 'judge' | 'generator';
 
+/** 一个服务商连接下的单个模型条目（可多选多个）。 */
+export interface ModelEntry {
+	id: string;
+	model: string;
+	/** 模型上下文窗口（token）；未知时不填。 */
+	contextWindow?: number;
+	/** 单次回复输出预算（max_tokens）；缺省回退全局配置。 */
+	maxTokens?: number;
+}
+
 /**
- * 一个可复用、已保存的模型服务（一套 provider + key + model 组合）。
+ * 一个可复用、已保存的模型服务（一套 provider + key 连接，下面挂多个可选模型）。
  * 仅本地持久化：不随工作区导出、不同步到远程服务器（与 apiKey 同等安全要求）。
  */
 export interface ModelService {
@@ -18,11 +28,8 @@ export interface ModelService {
 	providerId: string;
 	baseUrl: string;
 	apiKey: string;
-	model: string;
-	/** 模型上下文窗口（token）；未知时不填。 */
-	contextWindow?: number;
-	/** 单次回复输出预算（max_tokens）；缺省回退全局配置。 */
-	maxTokens?: number;
+	/** 该服务商连接下已保存的模型条目（多选）。 */
+	models: ModelEntry[];
 	notes?: string;
 	createdAt: number;
 }
@@ -60,10 +67,16 @@ export interface LlmConfig {
 	modelServices?: ModelService[];
 	/** 对话角色使用的模型服务 id；缺省回退主配置。 */
 	chatModelId?: string;
+	/** 对话角色在该服务下使用的模型条目 id；缺省用第一条。 */
+	chatModelEntryId?: string;
 	/** LLM 状态判断角色使用的模型服务 id。 */
 	judgeModelId?: string;
+	/** LLM 状态判断角色在该服务下使用的模型条目 id。 */
+	judgeModelEntryId?: string;
 	/** AI 生成（地点/衣柜/日程/记忆提取）角色使用的模型服务 id。 */
 	generatorModelId?: string;
+	/** AI 生成角色在该服务下使用的模型条目 id。 */
+	generatorModelEntryId?: string;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
 	webSearch: WebSearchConfig;
 }
@@ -180,8 +193,11 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	memoryAutoExtract: false,
 	modelServices: [],
 	chatModelId: '',
+	chatModelEntryId: '',
 	judgeModelId: '',
+	judgeModelEntryId: '',
 	generatorModelId: '',
+	generatorModelEntryId: '',
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
 
