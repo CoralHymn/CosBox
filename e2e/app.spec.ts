@@ -467,7 +467,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 	await page.getByRole('button', { name: '恢复默认主题' }).click();
 	await expect.poll(bgVar).toBe('#0e1016');
 
-	// 背景图：上传后 body 透明、::before 图层承载图片（不被不透明 body 背景遮挡）
+	// 背景图：上传后由 theme-backdrop 图层承载（JS 直接设置，不走 CSS 变量）
 	const svg =
 		"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect width='8' height='8' fill='#ff0000'/></svg>";
 	await page
@@ -476,7 +476,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 	await expect
 		.poll(() =>
 			page.evaluate(
-				() => getComputedStyle(document.querySelector('.app')!, '::before').backgroundImage
+				() => getComputedStyle(document.querySelector('.theme-backdrop')!).backgroundImage
 			)
 		)
 		.toContain('data:image/svg+xml');
@@ -503,7 +503,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 	await expect
 		.poll(() =>
 			page.evaluate(() =>
-				document.documentElement.style.getPropertyValue('--bg-image-opacity')
+				getComputedStyle(document.querySelector('.theme-backdrop')!).opacity
 			)
 		)
 		.toBe('0.5');

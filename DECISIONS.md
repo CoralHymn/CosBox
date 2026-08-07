@@ -1070,18 +1070,20 @@ conversation 重建会让 `message` prop 变化并重跑 `$effect`，把用户�
 2. 设置页新增「主题」卡片：预设下拉、背景图选择/移除、透明度滑杆、15 个颜色
    变量（取色器 + 文本输入）；**修改即时生效并自动保存**（与其它设置走
    「保存设置」不同，主题需要实时预览）。
-3. 背景图由 `.app` 承载（`.app::before` 固定全屏图层），
-   `--bg-image-opacity` 只作用于图片图层（不放 `.app` 本体，避免整个 UI
-   半透明）。**关键约束**：实色背景放在 `html`（画布层），`body` 与结构面
-   透明——否则按 CSS 绘制顺序，不透明背景会绘制在负 z-index 的 `::before`
-   背景图之后，把图片完全盖住。
+3. 背景图由 `.theme-backdrop` 专用图层承载（`.app` 内固定全屏元素，
+   `z-index: -1`，在 `.app` 的层叠上下文内）。**背景图与透明度由 JS 直接
+   写到元素内联样式，不走 CSS 变量**——超长 data URL（几十 KB ~ 几 MB）存进
+   CSS 变量在部分浏览器会解析失败、静默丢弃（表现为背景变黑），内联样式
+   无此限制。**关键约束**：实色背景放在 `html`（画布层），`body` 与结构面
+   透明——否则按 CSS 绘制顺序，不透明背景会绘制在负 z-index 图层之后，
+   把图片完全盖住。
 4. **结构面透明化**：启用背景图时，通过 `--bg-app-header` / `--bg-app-panel`
    变量把顶栏、导航栏、输入条、侧栏与面板背景置为 `transparent`，让背景图
-   铺满全屏。图片透明度由 `.app::before` 图层的 `--bg-image-opacity` 控制
-   （不放 `.app` 本体，否则整个 UI 会跟着半透明）。
+   铺满全屏。图片透明度由 JS 写到 `.theme-backdrop` 的 `opacity`（不放
+   `.app` 本体，否则整个 UI 会跟着半透明）。
 5. **内容面半透明**：仅透明结构面后，卡片/气泡/按钮/输入框等仍大面积遮挡
    图片。新增 `--bg-app-surface` / `--bg-app-surface-2` / `--bg-app-surface-3`，
-   启用背景图时按当前主题色（panel / panel-2 / bg）动态换算 rgba（alpha 0.72）
+   启用背景图时按当前主题色（panel / panel-2 / bg）动态换算 rgba（alpha 0.25）
    应用到 `.card`、`.message.assistant/system`、`.thinking`、`.btn`、
    `.input/.textarea/.select`、`.chip`、下拉弹窗——图片大面积透出的同时保留
    底色可读性；无背景图时移除变量，外观不变。

@@ -925,6 +925,9 @@
 </script>
 
 <div class="app" class:nav-open={mobileNavOpen}>
+	<!-- 主题背景图图层：图片与透明度由 JS 直接设置，不走 CSS 变量
+	     （超长 data URL 存 CSS 变量在部分浏览器会解析失败）。 -->
+	<div class="theme-backdrop" aria-hidden="true"></div>
 	<header class="header">
 		{#if isMobile}
 			<button
