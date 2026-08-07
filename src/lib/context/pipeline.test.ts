@@ -219,6 +219,41 @@ describe('buildContext', () => {
 		});
 	});
 
+	it('交错思考/正文（无工具段）展开为两条 assistant，不覆盖内容', () => {
+		const conversation: ChatMessageView[] = [
+			{ id: 'u1', role: 'user', content: '然后呢？', timestamp: 1 },
+			{
+				id: 'a1',
+				role: 'assistant',
+				content: '第一段正文第二段正文',
+				timestamp: 2,
+				segments: [
+					{ kind: 'thinking', content: '第一段思考' },
+					{ kind: 'text', content: '第一段正文' },
+					{ kind: 'thinking', content: '第二段思考' },
+					{ kind: 'text', content: '第二段正文' }
+				]
+			}
+		];
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation,
+			worldInfo: []
+		});
+		const roles = bundle.messages.map((message) => message.role);
+		expect(roles).toEqual(['user', 'assistant', 'assistant']);
+		expect(bundle.messages[1]).toMatchObject({
+			role: 'assistant',
+			content: '第一段正文',
+			reasoning: '第一段思考'
+		});
+		expect(bundle.messages[2]).toMatchObject({
+			role: 'assistant',
+			content: '第二段正文',
+			reasoning: '第二段思考'
+		});
+	});
+
 	it('启用状态工具时系统提示注入工具使用说明', () => {
 		const bundle = buildContext({
 			state: createInitialState(),

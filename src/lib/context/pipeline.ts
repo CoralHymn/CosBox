@@ -75,6 +75,7 @@ export function buildToolGuidance(): string {
 		'- 属性发生变化 → 立即调用 set_attribute。',
 		'- 工具调用必须通过 tool_calls 字段发出并带完整参数（advance_time 给 minutes、goto_location 给地点名、set_outfit 给 slot+item、set_attribute 给 key+value）；',
 		'- 思考过程（reasoning）里写「我要调用 xxx」不算数：决定调用后立即在本次回复中发出结构化的 tool_calls。',
+		'- 禁止把工具调用写成纯文本或 JSON 放在正文里（如 {"tool":"..."}）：正文只写台词/旁白，调用一律走 tool_calls 字段。',
 		'每次调用工具都会立即生效并返回反馈；「我这就去」「过了几分钟」这类表述不算数，必须真的发出 tool_calls。'
 	].join('\n');
 }
@@ -187,22 +188,33 @@ function expandSegmentedMessage(message: ChatMessageView): ChatMessage[] {
 	let text = '';
 	let reasoning: string | undefined;
 	const worldTime = message.worldTime;
+	/** 把当前累积的「思考 + 正文」作为一条 assistant 消息落盘。 */
+	function flushAssistant(): void {
+		if (text.trim() === '' && reasoning === undefined) {
+			return;
+		}
+		result.push({
+			role: 'assistant',
+			content: text,
+			...(worldTime !== undefined ? { worldTime } : {}),
+			...(reasoning !== undefined ? { reasoning } : {})
+		});
+		text = '';
+		reasoning = undefined;
+	}
 	for (const segment of message.segments ?? []) {
 		if (segment.kind === 'thinking') {
+			// 思考段意味着新一轮「思考 + 正文」的开始（interleaved thinking 场景
+			// 会交替出现 思考→正文→思考→正文）：先把上一轮 flush，避免内容被覆盖。
+			// 仅当上一轮已有正文时 flush，连续思考段（无正文）不产生空 assistant。
+			if (text.trim() !== '') {
+				flushAssistant();
+			}
 			reasoning = segment.content;
 		} else if (segment.kind === 'text') {
 			text = segment.content;
 		} else if (segment.kind === 'tool') {
-			if (text.trim() !== '' || reasoning !== undefined) {
-				result.push({
-					role: 'assistant',
-					content: text,
-					...(worldTime !== undefined ? { worldTime } : {}),
-					...(reasoning !== undefined ? { reasoning } : {})
-				});
-				text = '';
-				reasoning = undefined;
-			}
+			flushAssistant();
 			result.push({
 				role: 'system',
 				content: `【工具调用】${segment.toolName ?? ''}：${segment.content}`,
@@ -210,13 +222,6 @@ function expandSegmentedMessage(message: ChatMessageView): ChatMessage[] {
 			});
 		}
 	}
-	if (text.trim() !== '' || reasoning !== undefined) {
-		result.push({
-			role: 'assistant',
-			content: text,
-			...(worldTime !== undefined ? { worldTime } : {}),
-			...(reasoning !== undefined ? { reasoning } : {})
-		});
-	}
+	flushAssistant();
 	return result;
 }

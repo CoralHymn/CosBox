@@ -27,6 +27,10 @@ export function extractTextToolCalls(text: string): ToolCall[] {
 			}
 		}
 	}
+	// DeepSeek V4 等模型已知会把工具调用写成纯文本 JSON 对象（放在 content 而非 tool_calls
+	// 字段）：兼容 {"tool": "advance_time", "args": {...}} / {"name": "...", "arguments": {...}}
+	// 与 OpenAI 风格的 {"function": {"name": "...", "arguments": {...}}}。
+	calls.push(...extractJsonToolCalls(text));
 	return calls;
 }
 
@@ -101,6 +105,111 @@ function mapToolArgs(name: string, args: Record<string, unknown>): Record<string
 		return { key, value: valueText };
 	}
 	return null;
+}
+
+/**
+ * 从正文中扫描 JSON 对象形态的工具调用（DeepSeek 已知行为：把调用写进 content）。
+ * 只接受包含合法工具名的对象（tool/name/function.name 均可），并且 args/arguments
+ * 必须是 JSON 对象；其余大括号内容（角色台词等）不会被误判。
+ */
+function extractJsonToolCalls(text: string): ToolCall[] {
+	const calls: ToolCall[] = [];
+	let searchFrom = 0;
+	while (searchFrom < text.length) {
+		const open = text.indexOf('{', searchFrom);
+		if (open === -1) {
+			break;
+		}
+		const end = findMatchingBrace(text, open);
+		if (end === -1) {
+			break;
+		}
+		const candidate = text.slice(open, end + 1);
+		try {
+			const parsed: unknown = JSON.parse(candidate);
+			const mapped = mapJsonToolCall(parsed);
+			if (mapped !== null) {
+				calls.push({
+					id: `text_call_${calls.length}`,
+					name: mapped.name,
+					arguments: mapped.arguments
+				});
+			}
+		} catch {
+			// 不是合法 JSON 对象（可能是角色台词里的花括号），跳过。
+		}
+		searchFrom = end + 1;
+	}
+	return calls;
+}
+
+/** 从 JSON 对象中解析工具名与参数；不是合法工具调用返回 null。 */
+function mapJsonToolCall(parsed: unknown): { name: string; arguments: Record<string, unknown> } | null {
+	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		return null;
+	}
+	const record = parsed as Record<string, unknown>;
+	const fn = record.function;
+	const name =
+		typeof record.tool === 'string' && record.tool.trim() !== ''
+			? record.tool
+			: typeof record.name === 'string' && record.name.trim() !== ''
+				? record.name
+				: fn !== null && typeof fn === 'object' && !Array.isArray(fn) &&
+						typeof (fn as Record<string, unknown>).name === 'string'
+					? String((fn as Record<string, unknown>).name)
+					: '';
+	if (!TOOL_NAMES.includes(name as (typeof TOOL_NAMES)[number])) {
+		return null;
+	}
+	const fnArgs = fn !== null && typeof fn === 'object' && !Array.isArray(fn)
+		? (fn as Record<string, unknown>).arguments
+		: undefined;
+	let args: unknown = record.args ?? record.arguments ?? fnArgs;
+	// OpenAI 风格序列化时 arguments 是 JSON 字符串，解析成对象再校验。
+	if (typeof args === 'string' && args.trim() !== '') {
+		try {
+			args = JSON.parse(args);
+		} catch {
+			return null;
+		}
+	}
+	if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+		return null;
+	}
+	const mapped = mapToolArgs(name, args as Record<string, unknown>);
+	return mapped === null ? null : { name, arguments: mapped };
+}
+
+/** 从 openIndex 开始找匹配的右花括号（跳过字符串与转义），找不到返回 -1。 */
+function findMatchingBrace(text: string, openIndex: number): number {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = openIndex; i < text.length; i += 1) {
+		const ch = text[i]!;
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (ch === '\\') {
+				escaped = true;
+			} else if (ch === '"') {
+				inString = false;
+			}
+			continue;
+		}
+		if (ch === '"') {
+			inString = true;
+		} else if (ch === '{') {
+			depth += 1;
+		} else if (ch === '}') {
+			depth -= 1;
+			if (depth === 0) {
+				return i;
+			}
+		}
+	}
+	return -1;
 }
 
 /** 去掉参数值的常见引号（英文/中文引号与书名号）。 */

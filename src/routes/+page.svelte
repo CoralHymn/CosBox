@@ -366,7 +366,8 @@
 			thinking,
 			finishReason,
 			judgeDebug,
-			rounds
+			rounds,
+			replySegments
 		} = await service.generateReply(
 			input,
 			chatConfig,
@@ -418,11 +419,26 @@
 				mergedSegments.push({ kind: 'tool', content: tool.output, toolName: tool.name });
 			}
 		}
-		if (thinking !== undefined && thinking.trim() !== '') {
+		// 最终回复若携带思考/正文交替顺序（interleaved thinking），按序分段展示，
+		// 避免「思考→正文→思考→正文」被折叠成一段思考 + 一段正文。
+		let replyTextPushed = false;
+		if (replySegments !== undefined && replySegments.length > 0) {
+			for (const segment of replySegments) {
+				if (segment.kind === 'thinking') {
+					mergedSegments.push({ kind: 'thinking', content: segment.content.trim() });
+				} else if (segment.kind === 'text') {
+					mergedSegments.push({
+						kind: 'text',
+						content: sanitizeAssistantText(segment.content.trim())
+					});
+					replyTextPushed = true;
+				}
+			}
+		} else if (thinking !== undefined && thinking.trim() !== '') {
 			mergedSegments.push({ kind: 'thinking', content: thinking.trim() });
 		}
 		const budgetExhausted = finishReason === 'length';
-		if (reply.trim() !== '') {
+		if (!replyTextPushed && reply.trim() !== '') {
 			mergedSegments.push({ kind: 'text', content: reply.trim() });
 		}
 		if (mergedSegments.length > 0) {
