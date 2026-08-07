@@ -2095,6 +2095,41 @@ assistant 消息没有 thinking；切回 DeepSeek 后这些历史消息序列化
 
 - 691 个单元测试全过；check / lint 全绿。
 
+## 2026-08-07（续）：换模型后「前一段思考、下一段不思考」——保留重试前思考 + 请求体诊断
+
+### 需求
+
+换到非思考模型再切回 DeepSeek 后，思考时有时无：流式过程中能看到思考，
+但落库后的消息 / 后续轮次没有思考。
+
+### 根因
+
+DeepSeek V4 思考模式的回传要求在上一提交已补齐（每条 assistant 都带
+`reasoning_content`，空串也可）。客户端仍有一个缺口：agent 循环与纯文本路径里，
+「只思考无正文」重试、补调工具等流程会用重试结果**替换** result，而替换结果
+（尤其非流式兜底）可能不带 thinking——于是流式时已经展示的思考，在消息落库后丢失。
+
+### 实现
+
+- `chat-service`：每轮记录 `firstResultThinking`，返回时
+  `preferThinking(result.thinking, firstResultThinking)` 兜底保留原始思考
+  （工具轮与纯文本路径都处理）。
+- 开发者视图：`DebugRequestInfo` 增加 `body`（实际序列化的请求体，含
+  `reasoning_content`）与 `reasoningSummary`（DeepSeek 目标下 assistant 消息
+  「携带思考 / 空串 / 缺失」统计）；复制完整提示词时追加 `[请求体（实际发送）]`
+  JSON，与实际请求走同一 `buildRequestBody` 序列化逻辑。
+
+### 排查指引
+
+若仍出现不思考，打开「开发者：查看最近一次完整提示词」核对：
+1. `reasoningSummary` 是否「缺失 0 条」——缺失 > 0 说明请求序列化漏了字段；
+2. 「最近响应：思考=0 字」说明端点本次没有返回 `reasoning_content`
+   （模型 / 代理侧），可对比上一轮思考 > 0 的请求体差异。
+
+### 门禁
+
+- 694 个单元测试全过；check / lint 全绿。
+
 ## 2026-08-07（续）：上下文用量按对话模型展示 + 模型服务管理即时保存
 
 ### 需求

@@ -23,7 +23,15 @@ import {
 import { runStateConfirmation, runStateJudge, type JudgeDebugView } from './state-judge';
 import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
 import { extractTextToolCalls } from './text-tools';
-import type { ChatMessage, LlmChatResult, LlmClient, LlmConfig, TokenUsage } from './types';
+import { buildRequestBody } from './openai-client';
+import type {
+	ChatMessage,
+	LlmChatResult,
+	LlmClient,
+	LlmConfig,
+	StateToolSchema,
+	TokenUsage
+} from './types';
 
 /** 开发者模式下展示的请求参数：用于排查 max_tokens / stream 等是否真正生效。 */
 export interface DebugRequestInfo {
@@ -32,6 +40,10 @@ export interface DebugRequestInfo {
 	stream: boolean;
 	/** 是否启用了状态工具（agent 循环）。 */
 	toolsEnabled: boolean;
+	/** 实际序列化后发送给端点的请求体（含 reasoning_content 等字段，排查思考模式回传用）。 */
+	body?: Record<string, unknown>;
+	/** 请求体中 assistant 消息的 reasoning_content 覆盖摘要（思考模式诊断用）。 */
+	reasoningSummary?: string;
 }
 
 /** 最近一次端点响应的摘要（空正文诊断用）。 */
@@ -201,6 +213,10 @@ export class ChatService {
 						{ onThinkingDelta: options.onThinkingDelta }
 					);
 					usage = mergeUsage(usage, result.usage);
+					// 记录本轮模型第一次响应携带的思考：后续补调/重试可能替换 result，
+					// 若替换后的结果没有思考（如非流式兜底），落库时仍保留原始思考，
+					// 避免「流式时看到思考、完成后消息里消失」。
+					const firstResultThinking = result.thinking;
 					// 记录本轮模型最先说出的叙事文本与思考：补调重试可能覆盖 result，
 					// 角色原本的消息不能因此丢失（否则会出现「工具调用前的话被吞掉」）。
 					const roundNarrative =
@@ -327,7 +343,7 @@ export class ChatService {
 							debug,
 							usage,
 							compaction,
-							thinking: result.thinking,
+							thinking: preferThinking(result.thinking, firstResultThinking),
 							finishReason: result.finishReason,
 							judgeDebug,
 							rounds
@@ -398,6 +414,9 @@ export class ChatService {
 		let result = await this.client.chat(messages, config, signal, options.onDelta, {
 			onThinkingDelta: options.onThinkingDelta
 		});
+		// 与工具路径一致：重试可能替换 result，兜底保留第一次响应携带的思考，
+		// 防止「只思考无正文」重试成功但替换结果丢失思考、落库后不再展示。
+		const firstResultThinking = result.thinking;
 		// 纯文本路径同样兜底一次「只思考不输出正文」。
 		if (isThinkingOnlyReply(result)) {
 			const retried = await this.retryThinkingOnly(messages, config, options, signal);
@@ -433,7 +452,7 @@ export class ChatService {
 			debug,
 			usage: mergeUsage(usage, result.usage),
 			compaction,
-			thinking: result.thinking,
+			thinking: preferThinking(result.thinking, firstResultThinking),
 			finishReason: result.finishReason,
 			judgeDebug,
 			rounds
@@ -803,6 +822,20 @@ export class ChatService {
 	}
 }
 
+/**
+ * 优先采用非空思考；当前结果没有思考时回退到该轮更早的响应（重试替换场景）。
+ * 思考只用于展示与落库，回退不会影响发送给 API 的内容。
+ */
+function preferThinking(
+	current: string | undefined,
+	fallback: string | undefined
+): string | undefined {
+	if (current !== undefined && current.trim() !== '') {
+		return current;
+	}
+	return fallback;
+}
+
 /** 把最近一次请求序列化为纯文本（供调试复制）。 */
 export function serializeDebugPrompt(view: DebugPromptView): string {
 	const parts: string[] = [`[system] ${view.systemMessage}`];
@@ -815,6 +848,11 @@ export function serializeDebugPrompt(view: DebugPromptView): string {
 			parts.push(`[tool_calls] ${JSON.stringify(message.toolCalls, null, 2)}`);
 		}
 	}
+	if (view.request?.body !== undefined) {
+		// 实际序列化后的请求体：包含 reasoning_content 等字段，
+		// 用于核对思考模式回传是否完整（每轮 assistant 都必须带该字段）。
+		parts.push(`[请求体（实际发送）] ${JSON.stringify(view.request.body, null, 2)}`);
+	}
 	return parts.join('\n\n');
 }
 
@@ -825,6 +863,31 @@ function buildDebugView(
 	config: LlmConfig,
 	options: GenerateReplyOptions
 ): DebugPromptView {
+	const body = buildRequestBody(
+		messages,
+		(options.tools ?? []) as readonly StateToolSchema[],
+		config
+	);
+	const bodyMessages = Array.isArray(body.messages)
+		? (body.messages as ReadonlyArray<Record<string, unknown>>)
+		: [];
+	let assistantCount = 0;
+	let withReasoning = 0;
+	let withEmptyReasoning = 0;
+	for (const message of bodyMessages) {
+		if (message.role !== 'assistant') {
+			continue;
+		}
+		assistantCount += 1;
+		if (typeof message.reasoning_content === 'string' && message.reasoning_content !== '') {
+			withReasoning += 1;
+		} else if (typeof message.reasoning_content === 'string') {
+			withEmptyReasoning += 1;
+		}
+	}
+	const reasoningSummary = isDeepSeekModel(config)
+		? `DeepSeek 思考模式：assistant 消息 ${assistantCount} 条，携带思考 ${withReasoning} 条、空串 ${withEmptyReasoning} 条、缺失 ${assistantCount - withReasoning - withEmptyReasoning} 条`
+		: `非 DeepSeek 目标（${config.providerId}/${config.model}）：不发送 reasoning_content`;
 	return {
 		systemMessage,
 		messages,
@@ -832,7 +895,9 @@ function buildDebugView(
 			model: config.model,
 			maxTokens: config.maxTokens,
 			stream: config.stream === true,
-			toolsEnabled: (options.tools?.length ?? 0) > 0
+			toolsEnabled: (options.tools?.length ?? 0) > 0,
+			body,
+			reasoningSummary
 		}
 	};
 }

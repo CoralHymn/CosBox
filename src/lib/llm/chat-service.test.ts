@@ -163,6 +163,41 @@ describe('ChatService', () => {
 		expect(chat).toHaveBeenCalledTimes(2);
 	});
 
+	it('纯文本路径：重试结果丢失思考时回退保留第一次响应的思考', async () => {
+		const chat = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '第一次思考' })
+			.mockResolvedValueOnce({ content: '正文来了', toolCalls: [], thinking: '' });
+		const service = new ChatService({ chat });
+		const { reply, thinking } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config
+		);
+		expect(reply).toBe('正文来了');
+		expect(thinking).toBe('第一次思考');
+		expect(chat).toHaveBeenCalledTimes(2);
+	});
+
+	it('工具路径：重试结果丢失思考时回退保留本轮第一次响应的思考', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '工具轮思考' })
+			.mockResolvedValueOnce({ content: '补上的正文', toolCalls: [], thinking: undefined });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const { reply, thinking } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		expect(reply).toBe('补上的正文');
+		expect(thinking).toBe('工具轮思考');
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+	});
+
 	it('正常回复不触发重试', async () => {
 		const chat = vi.fn(async () => ({ content: '正常', toolCalls: [] }));
 		const service = new ChatService({ chat });
@@ -869,12 +904,54 @@ describe('ChatService', () => {
 			config,
 			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
 		);
-		expect(debug.request).toEqual({
+		expect(debug.request).toMatchObject({
 			model: 'demo',
 			maxTokens: 100,
 			stream: false,
 			toolsEnabled: true
 		});
+		expect(debug.request?.body).toMatchObject({ model: 'demo', max_tokens: 100 });
+		expect(debug.request?.body?.messages).toHaveLength(1);
+		expect(debug.request?.reasoningSummary).toContain('非 DeepSeek 目标');
+	});
+
+	it('调试视图：DeepSeek 目标请求体为每条 assistant 消息补 reasoning_content', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: '好的', toolCalls: [] }))
+		};
+		const service = new ChatService(client);
+		const deepSeekConfig: LlmConfig = {
+			...config,
+			providerId: 'deepseek',
+			model: 'deepseek-v4-flash'
+		};
+		const { debug } = await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [
+					{
+						id: 'a1',
+						role: 'assistant',
+						content: '上一条回复',
+						timestamp: 1,
+						thinking: '上一条思考'
+					},
+					{ id: 'a2', role: 'assistant', content: '无思考模型的回复', timestamp: 2 },
+					{ id: 'u1', role: 'user', content: '继续', timestamp: 3 }
+				],
+				worldInfo: []
+			},
+			deepSeekConfig,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+		);
+		const bodyMessages = (debug.request?.body?.messages ?? []) as Array<Record<string, unknown>>;
+		const assistantMessages = bodyMessages.filter((message) => message.role === 'assistant');
+		expect(assistantMessages.length).toBeGreaterThan(0);
+		for (const message of assistantMessages) {
+			expect(typeof message.reasoning_content).toBe('string');
+		}
+		expect(debug.request?.reasoningSummary).toContain('携带思考 1 条');
+		expect(debug.request?.reasoningSummary).toContain('空串 1 条');
 	});
 
 	it('agent 循环：超过最大轮数后以提示文本收尾', async () => {

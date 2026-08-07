@@ -394,6 +394,11 @@
 											? '开'
 											: '关'}，状态工具={modal.view.request.toolsEnabled ? '开' : '关'}
 									</p>
+									{#if modal.view.request.reasoningSummary !== undefined}
+										<p class="muted" style="margin: 0 0 4px;">
+											{modal.view.request.reasoningSummary}
+										</p>
+									{/if}
 								{/if}
 								{#if modal.view.lastResponse !== undefined}
 									<p class="muted" style="margin: 0 0 4px;">
