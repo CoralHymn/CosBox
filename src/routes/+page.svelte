@@ -44,7 +44,7 @@
 		type GenerationResult,
 		type GeneratorKind
 	} from '../lib/llm/generator';
-	import { resolveContextWindow } from '../lib/llm/model-info';
+	import { estimateMessagesTokens, resolveContextWindow } from '../lib/llm/model-info';
 	import { sanitizeAssistantText } from '../lib/llm/message-time';
 	import { OpenAiCompatibleClient } from '../lib/llm/openai-client';
 	import { findProviderPreset } from '../lib/llm/providers';
@@ -63,6 +63,7 @@
 	import { CharacterManager } from '../lib/manager/character-manager';
 	import { applySlashCommand, parseSlashCommand, type SlashCommand } from '../lib/utils/slash';
 	import { createCharacterSession } from '../lib/stores/character.svelte';
+	import { createContextUsageStore } from '../lib/stores/context-usage.svelte';
 	import { createSettingsStore } from '../lib/stores/settings.svelte';
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
@@ -88,6 +89,7 @@
 		snapshots: snapshotRepo,
 		kv
 	});
+	const contextUsage = createContextUsageStore(kv);
 	const session = createCharacterSession(manager);
 	const settings = createSettingsStore(kv);
 	const worldInfo = createWorldInfoStore(new WorldInfoRepository(db));
@@ -114,10 +116,13 @@
 		bundle: ContextBundle | null;
 		usage: TokenUsage | null;
 		compaction: CompactionState | null;
+		/** 压缩时保留的最近完整消息数；重启后由持久化数据恢复。 */
+		keptRecent: number;
 	}>({
 		bundle: null,
 		usage: null,
-		compaction: null
+		compaction: null,
+		keptRecent: 0
 	});
 	/** 跨请求延续的压缩状态（摘要 + 边界）；只影响发送给模型的内容。 */
 	let compactState = $state<CompactionState | null>(null);
@@ -149,6 +154,13 @@
 
 	const searchSupported = $derived(
 		settings.config.webSearch.enabled && settings.config.webSearch.apiKey.trim() !== ''
+	);
+
+	/** 重启恢复的用量摘要：bundle 为空但 usage 存在时表示数据来自本地持久化。 */
+	const restoredContextSummary = $derived(
+		lastContext.bundle === null && lastContext.usage !== null
+			? { keptRecent: lastContext.keptRecent }
+			: null
 	);
 
 	/** 监听视口宽度，移动端才渲染汉堡菜单与状态浮层（桌面端 DOM 不受影响）。 */
@@ -196,6 +208,18 @@
 			await manager.init();
 			await worldInfo.init();
 			await settings.load();
+			await contextUsage.load();
+			const restored = contextUsage.usage;
+			if (restored !== null) {
+				// 重启后恢复上次请求的用量面板：上下文包不落库（含完整消息数组），
+				// 仅恢复展示所需的 usage / compaction / keptRecent。
+				lastContext = {
+					bundle: null,
+					usage: restored.usage,
+					compaction: restored.compaction,
+					keptRecent: restored.keptRecent
+				};
+			}
 			await syncService.load();
 			startSync();
 			session.subscribe(() => syncService.notifyChanged());
@@ -342,7 +366,11 @@
 		);
 		debugPrompt = debug;
 		lastJudgeDebug = judgeDebug;
-		lastContext = { bundle, usage: usage ?? null, compaction };
+		const keptRecent = bundle.history.filter(
+			(message) => message.id !== 'context-summary'
+		).length;
+		lastContext = { bundle, usage: usage ?? null, compaction, keptRecent };
+		void persistCurrentContextUsage();
 		compactState = compaction;
 		streamingDraft = null;
 		// AI 一次回复可包含多段：每轮先落叙事文本，再把工具调用反馈持久化为
@@ -518,12 +546,53 @@
 				toasts.push('info', '对话较短，暂无需压缩');
 			} else {
 				lastContext = { ...lastContext, compaction: result.state };
+				void persistCurrentContextUsage();
 				toasts.success('已生成上下文摘要，将在下次请求使用');
 			}
 		} catch (err) {
 			toasts.error(err);
 		} finally {
 			compacting = false;
+		}
+	}
+
+	/**
+	 * 把当前 lastContext 的用量摘要持久化，重启后仍可显示。
+	 * API 未返回 usage 时，用上下文包本地估算输入 token，避免恢复后用量面板为空。
+	 */
+	async function persistCurrentContextUsage(): Promise<void> {
+		try {
+			if (lastContext.bundle === null) {
+				if (lastContext.usage !== null) {
+					// 重启恢复的场景：仅更新压缩状态等字段。
+					await contextUsage.save({
+						usage: lastContext.usage,
+						compaction: lastContext.compaction,
+						keptRecent: lastContext.keptRecent,
+						savedAt: Date.now()
+					});
+				}
+				return;
+			}
+			const effectiveUsage: TokenUsage =
+				lastContext.usage ??
+				{
+					promptTokens: estimateMessagesTokens([
+						{ role: 'system', content: lastContext.bundle.systemMessage },
+						...lastContext.bundle.messages
+					]),
+					completionTokens: 0,
+					cachedTokens: 0
+				};
+			await contextUsage.save({
+				usage: effectiveUsage,
+				compaction: lastContext.compaction,
+				keptRecent: lastContext.keptRecent,
+				savedAt: Date.now()
+			});
+		} catch (err) {
+			// 用量持久化失败不阻断聊天流程，仅提示用户。
+			toasts.error(err);
 		}
 	}
 
@@ -1020,6 +1089,7 @@
 					config={settings.config}
 					context={lastContext.bundle}
 					usage={lastContext.usage}
+					restored={restoredContextSummary}
 					compaction={lastContext.compaction}
 					autoCompact={settings.config.autoCompact === true}
 					compactThreshold={settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD}
@@ -1058,6 +1128,7 @@
 					config={settings.config}
 					context={lastContext.bundle}
 					usage={lastContext.usage}
+					restored={restoredContextSummary}
 					compaction={lastContext.compaction}
 					autoCompact={settings.config.autoCompact === true}
 					compactThreshold={settings.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD}
