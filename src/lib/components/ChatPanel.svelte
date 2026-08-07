@@ -282,7 +282,7 @@
 
 <div class="chat-layout">
 	<div class="chat-panel">
-		{#if conversation.length === 0 && (streamingDraft === null || streamingDraft === '')}
+		{#if conversation.length === 0 && streamingDraft === null}
 			<div class="empty-chat">
 				<div>
 					<p style="font-size: 15px; margin: 0 0 6px;">开始一段新的故事吧</p>
@@ -301,7 +301,7 @@
 						branchNav={branchNavFor(message.id)}
 					/>
 				{/each}
-				{#if streamingDraft !== null && streamingDraft !== ''}
+				{#if streamingDraft !== null}
 					<MessageBubble
 						message={{
 							id: 'stream-draft',
