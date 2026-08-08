@@ -1525,3 +1525,29 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 
 **代价**：措辞变软后，个别「模型确实该调用却偷懒」的场景可能少一次强制信号；
 但思考意图检测与 LLM 状态确认仍在，整体漏调用风险可控。
+
+## D99：无浏览器 CORS 的服务商——Vite 开发代理 /llm-proxy
+
+**问题**：新增的 OpenCode GO/Zen 预设用户填入正确 Key 仍报「Failed to fetch」。
+实测确认 opencode.ai 的 API 不支持浏览器 CORS：对 `/chat/completions` 的
+`OPTIONS` 预检直接返回 404 且无 CORS 头（服务器端直连一切正常、假 Key 返回 401，
+排除网络与 Key 问题）。CosBox 是纯静态 SPA（adapter-static），所有 LLM 请求都从
+浏览器发起，直连这类「仅面向 CLI/服务端」的端点必然失败。
+
+**选择**：
+
+1. `vite.config.ts` 增加 `/llm-proxy` 代理前缀 → `https://opencode.ai`
+   （`dev` 与 `preview` 均配置，`changeOrigin` + rewrite 剥离前缀）；
+   OpenCode GO/Zen 预设 baseUrl 改为相对路径 `/llm-proxy/zen/go/v1` / `/llm-proxy/zen/v1`，
+   浏览器走同源路径，由开发服务器转发到 opencode.ai。
+2. `providers.test.ts` 的 baseUrl 完整性断言允许 `/llm-proxy/` 相对路径
+   （绝对端点为默认形态）；仅 OpenCode 系使用代理，其余预设保持绝对端点。
+
+**理由**：开发/预览阶段用 Vite 内置代理零依赖解决 CORS，预设改相对路径后用户开箱即用
+（无需手动改地址）；`Authorization` 头与请求体经代理原样透传，Key 仍只存在浏览器侧，
+不引入新的服务端存储面。
+
+**代价**：仅覆盖 `npm run dev` / `npm run preview`；静态部署（如直接丢 CDN）时
+`/llm-proxy` 无对应后端，需自建同路径反向代理或改回绝对端点（notes 已注明）；
+代理只针对 opencode.ai 一个域名，若未来接入其它无 CORS 服务商需在 vite 配置里
+扩展目标。
