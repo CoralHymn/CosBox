@@ -2615,3 +2615,9 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 ### 门禁
 
 - 754 个单元测试全过（新增 3 条）；check / lint / prettier / build 全绿。
+
+### 补充
+
+- 经用户提醒，声明清单补入 `VoltAgent/awesome-design-md`（MIT）——
+  内置主题预设（Claude / Discord / The Verge）的设计分析参考；
+  许可证已联网核对，名称唯一性与字段完整性测试同步覆盖。
