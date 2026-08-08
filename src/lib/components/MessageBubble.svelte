@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ChatMessageView } from '../core/types';
+	import type { ChatMessageView, MessageSegment } from '../core/types';
 	import { formatWorldTime } from '../core/state';
 	import { formatTimestamp } from '../utils/format';
 
@@ -22,14 +22,68 @@
 		} | null;
 	}
 
-	let { message, onEdit, disabled = false, onRetry, onConfirmState, branchNav = null }: Props =
-		$props();
+	let {
+		message,
+		onEdit,
+		disabled = false,
+		onRetry,
+		onConfirmState,
+		branchNav = null
+	}: Props = $props();
 
 	const roleLabel: Record<ChatMessageView['role'], string> = {
 		user: '你',
 		assistant: '角色',
 		system: '系统'
 	};
+
+	/**
+	 * 双层展示（对齐主流 agent 的「活动流 + 最终答案」）：
+	 * - 工作过程区：最后一次工具调用及之前的所有分段（思考 / 工具 / 中间叙事正文），可折叠；
+	 * - 最终答案：最后一次工具调用之后的正文段。
+	 * 没有工具段时思考全部归入工作过程区、正文全部归入最终答案；
+	 * 拆不出最终正文（消息以工具段收尾等）时回退为「全部正文都是最终答案」，不丢内容。
+	 */
+	const display = $derived.by((): { process: MessageSegment[]; finals: MessageSegment[] } => {
+		const segments = message.segments ?? [];
+		const nonEmptyText = segments.filter(
+			(segment) => segment.kind === 'text' && segment.content.trim() !== ''
+		);
+		let lastToolIndex = -1;
+		segments.forEach((segment, index) => {
+			if (segment.kind === 'tool') {
+				lastToolIndex = index;
+			}
+		});
+		let finals =
+			lastToolIndex >= 0
+				? segments
+						.slice(lastToolIndex + 1)
+						.filter((segment) => segment.kind === 'text' && segment.content.trim() !== '')
+				: nonEmptyText;
+		if (finals.length === 0) {
+			finals = nonEmptyText;
+		}
+		const finalSet = new Set<MessageSegment>(finals);
+		const process = segments.filter((segment) => !finalSet.has(segment));
+		return { process, finals };
+	});
+
+	/** 工作过程区标题：只有思考时沿用「思考过程」，含工具/叙事时用「工作过程（N 步）」。 */
+	const processLabel = $derived(
+		display.process.some((segment) => segment.kind !== 'thinking')
+			? `工作过程（${display.process.length} 步）`
+			: '思考过程'
+	);
+
+	/** 流式阶段最终正文尚未产生时的等待文案：正在执行工具 or 正在思考。 */
+	const streamWaiting = $derived.by(() => {
+		const segments = message.segments ?? [];
+		const last = segments[segments.length - 1];
+		return last !== undefined && last.kind === 'tool' && last.status === 'running'
+			? '正在执行工具…'
+			: '思考中…';
+	});
 
 	const editable = $derived(
 		onEdit !== undefined &&
@@ -141,29 +195,47 @@
 				bind:this={editEl}
 				aria-label="编辑消息正文"
 				oninput={onEditInput}
-				onkeydown={onEditKeydown}
-			></textarea>
+				onkeydown={onEditKeydown}></textarea>
 		{/if}
 		{#if message.segments !== undefined && message.segments.length > 0}
-			<!-- AI 一轮回复的分段展示：思考 / 正文 / 工具调用按序排列在一个气泡内。 -->
-			{#each message.segments as segment, i (i)}
-				{#if segment.kind === 'thinking'}
-					<details class="thinking" open={message.id === 'stream-draft'}>
-						<summary>思考过程</summary>
-						<pre>{segment.content}</pre>
-					</details>
-				{:else if segment.kind === 'tool'}
-					<div class="tool-segment">
-						<span class="tool-output"
-							>【工具调用】{segment.toolName ?? ''}：{segment.content}</span
-						>
-					</div>
-				{:else}
-					{#if segment.content !== ''}
-						<div class="segment-text">{segment.content}</div>
-					{/if}
-				{/if}
-			{/each}
+			<!-- 双层布局：可折叠「工作过程区」（思考/工具/中间叙事）+ 下方最终答案。 -->
+			{#if display.process.length > 0}
+				<details class="thinking work-process" open={message.id === 'stream-draft'}>
+					<summary>{processLabel}</summary>
+					{#each display.process as segment, i (i)}
+						{#if segment.kind === 'thinking'}
+							<pre>{segment.content}</pre>
+						{:else if segment.kind === 'tool'}
+							<div
+								class="tool-segment"
+								class:tool-running={segment.status === 'running'}
+								class:tool-error={segment.status === 'error'}
+							>
+								<span class="tool-output"
+									>【工具调用】{segment.toolName ??
+										''}{#if segment.toolArgs !== undefined && segment.toolArgs !== ''}({segment.toolArgs}){/if}：{segment.status ===
+									'running'
+										? '调用中…'
+										: segment.content}</span
+								>
+							</div>
+						{:else if segment.content !== ''}
+							<div class="segment-text">{segment.content}</div>
+						{/if}
+					{/each}
+				</details>
+			{/if}
+			{#if display.finals.length > 0}
+				{#each display.finals as segment, i (i)}
+					<div class="segment-text">{segment.content}</div>
+				{/each}
+			{:else if message.id === 'stream-draft'}
+				<span class="stream-wait" aria-label="AI 正在工作">
+					<span class="dot"></span>{streamWaiting}
+				</span>
+			{:else if message.role === 'assistant'}
+				<span class="muted">（无正文，仅思考过程）</span>
+			{/if}
 		{:else if !editing}
 			{#if message.role === 'assistant' && message.thinking !== undefined && message.thinking.trim() !== ''}
 				<details class="thinking" open={message.id === 'stream-draft'}>
@@ -448,6 +520,15 @@
 	.segment-text + .segment-text {
 		margin-top: 10px;
 	}
+	/* 工作过程区内各步骤之间的间距（思考块 / 工具块 / 中间叙事）。 */
+	.work-process pre + pre,
+	.work-process pre + .tool-segment,
+	.work-process pre + .segment-text,
+	.work-process .tool-segment + pre,
+	.work-process .segment-text + pre,
+	.work-process .segment-text + .tool-segment {
+		margin-top: 8px;
+	}
 	.tool-segment {
 		display: flex;
 		flex-wrap: wrap;
@@ -460,6 +541,18 @@
 		border: 1px solid var(--border);
 		font-size: 13px;
 		line-height: 1.5;
+	}
+	.tool-segment:first-child {
+		margin-top: 0;
+	}
+	.tool-segment.tool-running {
+		border-color: var(--accent);
+	}
+	.tool-segment.tool-running .tool-output {
+		color: var(--accent);
+	}
+	.tool-segment.tool-error .tool-output {
+		color: var(--err);
 	}
 	.tool-segment .tool-label {
 		color: var(--accent);

@@ -4,6 +4,7 @@
 		BranchSummary,
 		CharacterState,
 		ChatMessageView,
+		MessageSegment,
 		SnapshotNode
 	} from '../core/types';
 	import { formatWorldTime } from '../core/state';
@@ -55,10 +56,8 @@
 		recentLog: string;
 		/** 导出最近日志。 */
 		onExportLog: () => void;
-		/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
-		streamingDraft: string | null;
-		/** 流式思考草稿：实时展示 AI 思考过程（reasoning_content）。 */
-		streamingThinking: string;
+		/** 流式分段草稿：正在生成、尚未落快照的 assistant 分段；null 表示未在生成。 */
+		streamingSegments: MessageSegment[] | null;
 		/** 全部分支 tip（用于消息气泡下方的分支切换）。 */
 		branches: BranchSummary[];
 		/** 全部快照节点（用于计算分支备选路径）。 */
@@ -100,8 +99,7 @@
 		onEditMessage,
 		recentLog,
 		onExportLog,
-		streamingDraft,
-		streamingThinking,
+		streamingSegments,
 		branches,
 		snapshots,
 		headId,
@@ -214,8 +212,7 @@
 
 	$effect(() => {
 		void conversation;
-		void streamingDraft;
-		void streamingThinking;
+		void streamingSegments;
 		if (listEl !== null) {
 			listEl.scrollTop = listEl.scrollHeight;
 		}
@@ -285,7 +282,7 @@
 
 <div class="chat-layout">
 	<div class="chat-panel">
-		{#if conversation.length === 0 && streamingDraft === null}
+		{#if conversation.length === 0 && streamingSegments === null}
 			<div class="empty-chat">
 				<div>
 					<p style="font-size: 15px; margin: 0 0 6px;">开始一段新的故事吧</p>
@@ -299,21 +296,22 @@
 						{message}
 						onEdit={onEditMessage}
 						disabled={busy}
-						onRetry={onRetry}
+						{onRetry}
 						onConfirmState={allowStateTools ? onConfirmState : undefined}
 						branchNav={branchNavFor(message.id)}
 					/>
 				{/each}
-				{#if streamingDraft !== null}
+				{#if streamingSegments !== null}
 					<MessageBubble
 						message={{
 							id: 'stream-draft',
 							role: 'assistant',
-							content: streamingDraft,
+							content: streamingSegments
+								.filter((segment) => segment.kind === 'text')
+								.map((segment) => segment.content)
+								.join('\n'),
 							timestamp: Date.now(),
-							...(streamingThinking.trim() !== ''
-								? { thinking: streamingThinking }
-								: {})
+							...(streamingSegments.length > 0 ? { segments: streamingSegments } : {})
 						}}
 					/>
 				{/if}
@@ -332,7 +330,7 @@
 				{#if recentLog.trim() !== ''}
 					<button class="btn btn-small" onclick={onExportLog}>
 						导出最近日志（{recentLog.split('\n\n').length} 段
-						{#if streamingDraft !== null}，记录中{/if}）
+						{#if streamingSegments !== null}，记录中{/if}）
 					</button>
 				{/if}
 				<button class="btn btn-small" onclick={openPreview}> 开发者：预览输入框提示词 </button>

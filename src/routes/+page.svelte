@@ -34,6 +34,7 @@
 	} from '../lib/import-export/workspace';
 	import {
 		ChatService,
+		formatToolArguments,
 		type DebugPromptView,
 		type PromptPreviewResult
 	} from '../lib/llm/chat-service';
@@ -62,8 +63,8 @@
 	import { resolveServiceConfig } from '../lib/llm/model-services';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
 	import type { JudgeDebugView } from '../lib/llm/state-judge';
-	import { STATE_TOOLS } from '../lib/llm/state-tools';
-	import type { LlmConfig, ModelRole, TokenUsage } from '../lib/llm/types';
+	import { STATE_TOOLS, isToolErrorOutput, type ExecutedToolCall } from '../lib/llm/state-tools';
+	import type { LlmConfig, ModelRole, ToolCall, TokenUsage } from '../lib/llm/types';
 	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
 	import type { SyncSettings } from '../lib/sync/types';
 	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
@@ -151,10 +152,11 @@
 	let compactState = $state<CompactionState | null>(null);
 	/** 正在执行手动压缩。 */
 	let compacting = $state(false);
-	/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
-	let streamingDraft = $state<string | null>(null);
-	/** 流式思考草稿：实时展示 AI 思考过程（reasoning_content）。 */
-	let streamingThinking = $state('');
+	/**
+	 * 流式分段草稿：正在生成、尚未落快照的 assistant 分段（思考 / 正文 / 工具调用
+	 * 按流中实际顺序排列）；null 表示未在生成。
+	 */
+	let streamingSegments = $state<MessageSegment[] | null>(null);
 	/** 当前生成任务的取消控制器（发送按钮在 busy 时变为「停止」）。 */
 	let abortController: AbortController | null = null;
 	/** 最近消息日志：从最近一次用户发言开始实时记录，再次发言时重置。 */
@@ -304,8 +306,7 @@
 				toasts.error(err);
 			}
 		} finally {
-			streamingDraft = null;
-			streamingThinking = '';
+			streamingSegments = null;
 			abortController = null;
 			busy = false;
 			searching = false;
@@ -318,17 +319,73 @@
 			return;
 		}
 		abortController?.abort();
-		streamingDraft = null;
-		streamingThinking = '';
+		streamingSegments = null;
 		busy = false;
 		toasts.push('info', '已停止生成');
+	}
+
+	/** 流式正文增量：同类型续接最后一段、异类型新开段；同步清洗时间标注。 */
+	function appendStreamText(segments: MessageSegment[], delta: string): MessageSegment[] {
+		const list = [...segments];
+		const last = list[list.length - 1];
+		if (last !== undefined && last.kind === 'text') {
+			list[list.length - 1] = { ...last, content: sanitizeAssistantText(last.content + delta) };
+		} else {
+			list.push({ kind: 'text', content: sanitizeAssistantText(delta) });
+		}
+		return list;
+	}
+
+	/** 流式思考增量：同类型续接最后一段、异类型新开段（保留 思考→正文→思考 的交替顺序）。 */
+	function appendStreamThinking(segments: MessageSegment[], delta: string): MessageSegment[] {
+		const list = [...segments];
+		const last = list[list.length - 1];
+		if (last !== undefined && last.kind === 'thinking') {
+			list[list.length - 1] = { ...last, content: last.content + delta };
+		} else {
+			list.push({ kind: 'thinking', content: delta });
+		}
+		return list;
+	}
+
+	/** 工具执行完成：把结果写入对应的「执行中」工具段（工具串行执行，按名称倒序匹配）。 */
+	function markStreamToolResult(
+		segments: MessageSegment[],
+		result: ExecutedToolCall
+	): MessageSegment[] {
+		for (let index = segments.length - 1; index >= 0; index -= 1) {
+			const segment = segments[index]!;
+			if (
+				segment.kind === 'tool' &&
+				segment.status === 'running' &&
+				segment.toolName === result.name
+			) {
+				const next = [...segments];
+				next[index] = {
+					...segment,
+					content: result.output,
+					...(isToolErrorOutput(result.output)
+						? { status: 'error' as const }
+						: { status: undefined })
+				};
+				return next;
+			}
+		}
+		return [
+			...segments,
+			{
+				kind: 'tool',
+				toolName: result.name,
+				content: result.output,
+				...(isToolErrorOutput(result.output) ? { status: 'error' as const } : {})
+			}
+		];
 	}
 
 	/** 用当前会话状态生成回复并落库（普通发送与消息重试共用）；调用方需已设置 busy。 */
 	async function runAiReply(searchResults?: SearchResult[]): Promise<void> {
 		streamedAny = false;
-		streamingDraft = '';
-		streamingThinking = '';
+		streamingSegments = [];
 		const controller = new AbortController();
 		abortController = controller;
 		const input: ContextPipelineInput = {
@@ -336,8 +393,7 @@
 			conversation: session.conversation,
 			worldInfo: worldInfo.entries,
 			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
-			memoryLimit:
-				settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
+			memoryLimit: settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
 			enableStateTools: settings.config.allowAiStateTools === true,
 			characterName:
 				settings.profile.name ||
@@ -349,10 +405,7 @@
 		};
 		const chatConfig = roleConfig('chat');
 		const service = new ChatService(chatConfig.provider === 'demo' ? demoClient : openAiClient);
-		const contextWindow = resolveContextWindow(
-			chatConfig.modelContextWindow,
-			chatConfig.model
-		);
+		const contextWindow = resolveContextWindow(chatConfig.modelContextWindow, chatConfig.model);
 		const compactionOptions =
 			chatConfig.autoCompact === true
 				? {
@@ -379,14 +432,36 @@
 			{
 				onDelta: (delta) => {
 					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
-					streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
+					// 分段维护（同类型续接、异类型新开段），保留 思考→正文→思考→正文 的交替顺序。
+					streamingSegments = appendStreamText(streamingSegments ?? [], delta);
 					// 实时记录原始流式内容（不覆盖、不清洗），供排查流式专属问题。
 					recentLog += delta;
 					streamedAny = true;
 				},
 				onThinkingDelta: (delta) => {
-					// 思考增量实时展示（流式气泡的思考区），让用户知道 AI 正在思考。
-					streamingThinking = `${streamingThinking}${delta}`;
+					// 思考增量实时展示（流式气泡的工作过程区），让用户知道 AI 正在思考。
+					streamingSegments = appendStreamThinking(streamingSegments ?? [], delta);
+				},
+				onToolStart: (call: ToolCall) => {
+					// 工具开始执行：气泡里立即出现「工具调用中」，避免长时间无反馈。
+					const argsText = formatToolArguments(call.arguments);
+					streamingSegments = [
+						...(streamingSegments ?? []),
+						{
+							kind: 'tool',
+							toolName: call.name,
+							...(argsText !== '' ? { toolArgs: argsText } : {}),
+							content: '',
+							status: 'running'
+						}
+					];
+				},
+				onToolResult: (result: ExecutedToolCall) => {
+					streamingSegments = markStreamToolResult(streamingSegments ?? [], result);
+				},
+				onRestart: () => {
+					// 思考循环中断重启：首次请求已流式输出的内容不会落库，清空草稿保持一致。
+					streamingSegments = [];
 				},
 				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 				toolContext: {
@@ -402,13 +477,11 @@
 		);
 		debugPrompt = debug;
 		lastJudgeDebug = judgeDebug;
-		const keptRecent = bundle.history.filter(
-			(message) => message.id !== 'context-summary'
-		).length;
+		const keptRecent = bundle.history.filter((message) => message.id !== 'context-summary').length;
 		lastContext = { bundle, usage: usage ?? null, compaction, keptRecent };
 		void persistCurrentContextUsage();
 		compactState = compaction;
-		streamingDraft = null;
+		streamingSegments = null;
 		// AI 一轮回复合并为单条 assistant 消息：思考 / 正文 / 工具调用按序
 		// 保存为 segments，气泡内分段展示——不再把每个工具轮次拆成独立消息，
 		// 避免「一个思考绑一个输出」导致中间内容被吞。
@@ -421,7 +494,13 @@
 				mergedSegments.push({ kind: 'text', content: round.content.trim() });
 			}
 			for (const tool of round.tools) {
-				mergedSegments.push({ kind: 'tool', content: tool.output, toolName: tool.name });
+				mergedSegments.push({
+					kind: 'tool',
+					content: tool.output,
+					toolName: tool.name,
+					...(tool.args !== undefined && tool.args !== '' ? { toolArgs: tool.args } : {}),
+					...(isToolErrorOutput(tool.output) ? { status: 'error' as const } : {})
+				});
 			}
 		}
 		// 最终回复若携带思考/正文交替顺序（interleaved thinking），按序分段展示，
@@ -468,9 +547,7 @@
 				.join('\n');
 			await session.addMessage('assistant', plainText, {
 				segments: mergedSegments,
-				...(thinking !== undefined && thinking.trim() !== ''
-					? { thinking: thinking.trim() }
-					: {})
+				...(thinking !== undefined && thinking.trim() !== '' ? { thinking: thinking.trim() } : {})
 			});
 		} else {
 			toasts.push(
@@ -553,8 +630,7 @@
 				toasts.error(err);
 			}
 		} finally {
-			streamingDraft = null;
-			streamingThinking = '';
+			streamingSegments = null;
 			abortController = null;
 			busy = false;
 		}
@@ -599,7 +675,8 @@
 					executed.map((tool) => ({
 						kind: 'tool',
 						content: tool.output,
-						toolName: tool.name
+						toolName: tool.name,
+						...(isToolErrorOutput(tool.output) ? { status: 'error' as const } : {})
 					}))
 				);
 			}
@@ -674,16 +751,14 @@
 				}
 				return;
 			}
-			const effectiveUsage: TokenUsage =
-				lastContext.usage ??
-				{
-					promptTokens: estimateMessagesTokens([
-						{ role: 'system', content: lastContext.bundle.systemMessage },
-						...lastContext.bundle.messages
-					]),
-					completionTokens: 0,
-					cachedTokens: 0
-				};
+			const effectiveUsage: TokenUsage = lastContext.usage ?? {
+				promptTokens: estimateMessagesTokens([
+					{ role: 'system', content: lastContext.bundle.systemMessage },
+					...lastContext.bundle.messages
+				]),
+				completionTokens: 0,
+				cachedTokens: 0
+			};
 			await contextUsage.save({
 				usage: effectiveUsage,
 				compaction: lastContext.compaction,
@@ -874,8 +949,7 @@
 			conversation,
 			worldInfo: worldInfo.entries,
 			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
-			memoryLimit:
-				settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
+			memoryLimit: settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
 			characterName:
 				settings.profile.name ||
 				(typeof session.state.attributes.name === 'string'
@@ -1408,8 +1482,7 @@
 					onEditMessage={handleEditMessage}
 					{recentLog}
 					onExportLog={handleExportLog}
-					{streamingDraft}
-					{streamingThinking}
+					{streamingSegments}
 					branches={session.branches}
 					snapshots={session.snapshots}
 					headId={session.headId}

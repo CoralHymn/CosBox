@@ -479,6 +479,10 @@ function accumulateStreamToolCalls(
 			}
 			if (typeof fn.arguments === 'string') {
 				current.argumentsRaw += fn.arguments;
+			} else if (isRecord(fn.arguments)) {
+				// 部分代理在流式块里直接把 arguments 作为对象下发：序列化保留，
+				// 否则参数静默丢失，工具会以空参数执行并报错。
+				current.argumentsRaw = JSON.stringify(fn.arguments);
 			}
 		}
 		map.set(index, current);
@@ -555,10 +559,7 @@ export function buildRequestBody(
 }
 
 /** 把内部消息结构序列化为 OpenAI-compatible 消息。 */
-function serializeMessage(
-	message: ChatMessage,
-	deepSeekThinking = false
-): Record<string, unknown> {
+function serializeMessage(message: ChatMessage, deepSeekThinking = false): Record<string, unknown> {
 	// 世界时间只在「序列化给模型」这一步注入为元数据行，消息正文始终纯净。
 	const content =
 		message.worldTime !== undefined
