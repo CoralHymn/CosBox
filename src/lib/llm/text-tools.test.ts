@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractTextToolCalls } from './text-tools';
+import { extractTextToolCalls, stripTextToolCalls } from './text-tools';
 
 describe('extractTextToolCalls', () => {
 	it('解析 advance_time(120) 位置参数', () => {
@@ -77,14 +77,32 @@ describe('extractTextToolCalls', () => {
 			extractTextToolCalls(
 				'{"function":{"name":"goto_location","arguments":"{\\"name\\":\\"食堂\\"}"}}'
 			)
-		).toEqual([
-			{ id: 'text_call_0', name: 'goto_location', arguments: { name: '食堂' } }
-		]);
+		).toEqual([{ id: 'text_call_0', name: 'goto_location', arguments: { name: '食堂' } }]);
 	});
 
 	it('JSON 对象缺 args 或工具名非法时不解析', () => {
 		expect(extractTextToolCalls('{"tool":"advance_time"}')).toEqual([]);
 		expect(extractTextToolCalls('{"tool":"fly_to_moon","args":{"x":1}}')).toEqual([]);
 		expect(extractTextToolCalls('（她打开地图看了看）{我们出发吧}')).toEqual([]);
+	});
+});
+
+describe('stripTextToolCalls', () => {
+	it('剔除「工具名(参数)」调用语法并保留其余正文', () => {
+		expect(stripTextToolCalls('好的。goto_location(name=食堂) 这就出发。')).toBe(
+			'好的。 这就出发。'
+		);
+	});
+
+	it('剔除 JSON 形态的工具调用，保留普通花括号文本', () => {
+		expect(
+			stripTextToolCalls('{"tool":"advance_time","args":{"minutes":30}}\n（她笑了笑）{出发咯}')
+		).toBe('（她笑了笑）{出发咯}');
+	});
+
+	it('无法解析为调用的语法不剔除', () => {
+		expect(stripTextToolCalls('她轻声说：goto_location 是什么呢？')).toBe(
+			'她轻声说：goto_location 是什么呢？'
+		);
 	});
 });

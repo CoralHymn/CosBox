@@ -2656,3 +2656,46 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 ### 门禁
 
 - 756 个单元测试全过（新增 2 条）；45 条 e2e 全过；check / lint / prettier 全绿。
+
+## 2026-08-09：假正文出上下文 + 文本双通道（护栏 + 开关）+ 后处理状态条 + 监控 tab
+
+### 背景
+
+- 用户反馈：AI 思考里写「让我调用 goto_location」却直接输出正文不调用，之后的停顿
+  不可见；假正文进上下文导致车轱辘；状态确认阶段执行工具也看不到。
+- 否决宿主按关键词推断 goto_location 的方案：「真希望能去海滩走走」「想起了公园」
+  会被误判为实际移动——剧情判断全部留给 LLM，宿主只解析明确的调用语法（D102）。
+
+### 实现
+
+- `pipeline.ts`：`expandSegmentedMessage` 重写——只发工具反馈 + 最后工具段之后的正文
+  （思考合并挂 reasoning），假正文不进上下文；以工具段收尾时回退保留全部正文。
+- `text-tools.ts`：新增 `TEXT_TOOL_FALLBACK_HINT`（仅限补调/确认提示词使用）与
+  `stripTextToolCalls`（采纳文本调用后剔除正文里的调用语法）。
+- `chat-service.ts`：新增 `onPhase/onMetric/textToolFallback` 选项；三个补调重试接受
+  文本形式调用（结构化永远优先），第二档用 `FORCE_TOOL_NUDGE` 与第一档拉开差异；
+  关键路径（重试/循环中断/判断/确认/空回复/截断/压缩）发出指标事件。
+- `state-judge.ts`：confirmation 循环双通道 + 透传 `onToolStart/onToolResult/onMetric`；
+  确认提示词追加兜底语法指引。
+- `types.ts`/`providers.ts`：`LlmConfig` 新增 `textToolFallback`（默认 true），旧存档归一化。
+- `SettingsPanel.svelte`：AI 行为区新增「文本形式工具调用双通道」勾选（随允许 AI
+  自主修改状态禁用）。
+- `stores/metrics.svelte.ts`：计数器 + 每轮样本 + 事件流水，KV 防抖持久化，滚动窗口
+  300 轮/500 事件；供监控面板展示与清空。
+- `LineChart.svelte`/`MonitorPanel.svelte`：无依赖 SVG spline 多序列折线图（Catmull-Rom
+  转贝塞尔）；监控面板含 Token 消耗/耗时/工具与兜底三张图、计数卡（文本兜底置顶高亮）、
+  最近事件流水。
+- `NavRail.svelte`/`ui.svelte.ts`/`+page.svelte`：新增「监控」tab；`streamingPhase`
+  状态条接线（生成与手动状态确认共用）；每轮结束记录样本与指标。
+- `ChatPanel.svelte`/`app.css`：气泡下方状态条 `.phase-bar`（正文输出后仍可见）。
+
+### 护栏（防模型利用兜底偷懒）
+
+- 提示词物理隔离：主流程系统提示与每轮提醒绝不提及文本形式调用。
+- 代码级优先级压制：仅当 `toolCalls.length === 0` 才解析文本；并存时只认 JSON。
+- 设置开关可随时关闭双通道强制只走 JSON，配合监控指标排查「主流程摆烂」。
+
+### 门禁
+
+- 763 个单元测试全过（新增 7 条：stripTextToolCalls 3 条、双通道/护栏/开关/确认 4 条）；
+  45 条 e2e 全过（mobile 导航项断言 10→11）；check / lint / prettier 全绿。

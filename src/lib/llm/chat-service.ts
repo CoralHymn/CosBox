@@ -17,13 +17,14 @@ import { estimateMessagesTokens, sumUsage } from './model-info';
 import { isDeepSeekModel } from './providers';
 import {
 	executeStateTool,
+	isToolErrorOutput,
 	type ExecutedToolCall,
 	type StateToolContext,
 	type StateToolDefinition
 } from './state-tools';
 import { runStateConfirmation, runStateJudge, type JudgeDebugView } from './state-judge';
 import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
-import { extractTextToolCalls } from './text-tools';
+import { extractTextToolCalls, stripTextToolCalls, TEXT_TOOL_FALLBACK_HINT } from './text-tools';
 import { buildRequestBody } from './openai-client';
 import type {
 	ChatMessage,
@@ -118,6 +119,18 @@ export interface GenerateReplyOptions {
 	 * UI 应清空流式草稿，避免「流式看到、完成后被吞」。
 	 */
 	onRestart?: () => void;
+	/**
+	 * 阶段状态回调：补调重试 / 状态判断 / 状态确认等后处理进入新阶段时发出文案，
+	 * 正常结束时发 null，供 UI 在正文已输出后继续展示「AI 还在做什么」。
+	 */
+	onPhase?: (label: string | null) => void;
+	/** 指标事件回调（计数器）：关键路径命中时发出稳定事件名，供监控面板统计。 */
+	onMetric?: (name: string) => void;
+	/**
+	 * 文本形式工具调用双通道（缺省开启）：结构化 tool_calls 缺失时允许解析文本形式
+	 * 调用兜底；关闭后主循环/补调/状态确认一律只认结构化 tool_calls。
+	 */
+	textToolFallback?: boolean;
 	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
 	enableStateJudge?: boolean;
 	/** LLM 状态确认使用的模型配置；缺省回退主对话配置（可指定便宜模型省 token）。 */
@@ -143,6 +156,10 @@ const MALFORMED_TOOL_NUDGE =
 	'【系统提示】你上一轮试图发出 tool_calls，但函数名为空或参数格式无效，宿主没有收到任何合法调用。' +
 	'如果剧情需要调用工具，请重新发出结构化的 tool_calls：函数名必须是非空字符串（advance_time / goto_location / set_outfit / set_attribute），' +
 	'参数必须是合法 JSON 对象；不要只把调用写在思考或正文里。';
+/** 补调第二档强提示：针对「重试后仍只写正文不发调用」的模型，与第一档拉开差异（DeepSeek 拒绝 tool_choice 时二档不至于空转）。 */
+const FORCE_TOOL_NUDGE =
+	'【系统提示】宿主现在必须收到一次真实的工具调用：请立即发出结构化 tool_calls，' +
+	'函数名与参数必须完整有效；只描述状态变化而不发出 tool_calls 不算完成。';
 
 /**
  * 对话服务：把「状态 + 历史 + 世界信息」组装为上下文，再调用 LLM。
@@ -197,6 +214,7 @@ export class ChatService {
 			if (
 				shouldCompact(estimated, config.maxTokens, compactCfg.contextWindow, compactCfg.threshold)
 			) {
+				options.onMetric?.('compaction.triggered');
 				const result = await this.compactConversation(
 					input.conversation,
 					config,
@@ -242,6 +260,8 @@ export class ChatService {
 					// 流中出现了 tool_calls delta 但格式无效（函数名为空等）：模型确实试图调用，
 					// 但静默丢弃会让它误以为调用已生效。回写失败提示重试一次，让它重新发出。
 					if (result.malformedToolCall === true && result.toolCalls.length === 0) {
+						options.onMetric?.('malformed.tool_call.detected');
+						options.onPhase?.('正在重新发出工具调用…');
 						const retried = await this.retryMalformedToolCall(messages, config, options, signal);
 						usage = mergeUsage(usage, retried?.usage);
 						if (retried !== null) {
@@ -250,12 +270,20 @@ export class ChatService {
 					}
 					// 结构化 tool_calls 缺失时，尝试从正文/思考中解析文本形式的工具调用
 					// （DeepSeek 等思考模型有时把调用写进 reasoning 而不发 tool_calls）。
-					if (result.toolCalls.length === 0) {
+					// 双通道开关关闭时跳过：强制只认结构化调用（排查模型偷懒用）。
+					if (result.toolCalls.length === 0 && options.textToolFallback !== false) {
 						const textCalls = extractTextToolCalls(
 							`${result.thinking ?? ''}\n${result.content ?? ''}`
 						);
 						if (textCalls.length > 0) {
-							result = { ...result, toolCalls: textCalls };
+							options.onMetric?.('tool_call.text_fallback.main');
+							result = {
+								...result,
+								toolCalls: textCalls,
+								// 正文里的调用语法已转为真实调用，剔除后落库/展示，
+								// 避免「goto_location(...)」混入角色台词。
+								...(result.content !== null ? { content: stripTextToolCalls(result.content) } : {})
+							};
 						}
 					}
 					// 思考里明确提到工具名却没发出 tool_calls（DeepSeek V4 常见漏调用）：
@@ -263,6 +291,7 @@ export class ChatService {
 					if (result.toolCalls.length === 0) {
 						const planned = detectToolIntent(result.thinking);
 						if (planned !== null) {
+							options.onPhase?.(`正在补调 ${planned}…`);
 							const retried = await this.retryPlannedTool(
 								messages,
 								planned,
@@ -284,6 +313,7 @@ export class ChatService {
 						executedTools.length === 0 &&
 						detectTimeClaim(`${result.thinking ?? ''}\n${result.content ?? ''}`)
 					) {
+						options.onPhase?.('正在补调 advance_time…');
 						const retried = await this.retryTimeClaim(messages, config, options, signal);
 						usage = mergeUsage(usage, retried?.usage);
 						if (retried !== null) {
@@ -294,18 +324,27 @@ export class ChatService {
 					// 追加正文必填提示重试一次，重试成功则采用重试结果（可能继续走工具轮）。
 					if (isThinkingOnlyReply(result)) {
 						const loopDetected = detectThinkingLoop(result.thinking);
+						options.onPhase?.('正在重新请求正文…');
+						options.onMetric?.(
+							loopDetected ? 'retry.thinking_loop.triggered' : 'retry.thinking_only.triggered'
+						);
 						const retried = loopDetected
 							? await this.retryThinkingLoop(messages, config, options, signal)
 							: await this.retryThinkingOnly(messages, config, options, signal);
 						usage = mergeUsage(usage, retried?.usage);
 						if (retried !== null) {
+							options.onMetric?.(
+								loopDetected ? 'retry.thinking_loop.adopted' : 'retry.thinking_only.adopted'
+							);
 							result = retried;
 						} else {
 							// 带工具的重试仍失败：去掉工具声明、改非流式再试，
 							// 规避 DeepSeek V4 思考模式在工具声明下的「只思考不产出」问题。
+							options.onMetric?.('retry.plain_text.triggered');
 							const plain = await this.retryPlainText(messages, config, signal);
 							usage = mergeUsage(usage, plain?.usage);
 							if (plain !== null) {
+								options.onMetric?.('retry.plain_text.adopted');
 								result = plain;
 							}
 						}
@@ -344,6 +383,7 @@ export class ChatService {
 								const next = addMinutes(now, minutes);
 								const output = `时间推进到 ${formatWorldTime(next)}`;
 								options.onToolResult?.({ id: 'host_infer', name: 'advance_time', output });
+								options.onMetric?.('tool_call.host_infer');
 								executedTools.push({ id: 'host_infer', name: 'advance_time', output });
 								rounds.push({
 									content: null,
@@ -354,21 +394,32 @@ export class ChatService {
 					}
 					if (result.toolCalls.length === 0) {
 						if (options.enableStateJudge === true && executedTools.length === 0) {
+							options.onPhase?.('正在检查状态是否需要同步…');
+							options.onMetric?.('judge.triggered');
 							const judge = await this.maybeRunStateJudge(
 								input,
 								config,
 								options,
 								signal,
 								result,
-								executedTools.length > 0
+								executedTools.length > 0,
+								{ onPhase: options.onPhase, onMetric: options.onMetric }
 							);
 							executedTools.push(...judge.executed);
 							rounds.push(...judge.rounds);
 							judgeDebug = judge.debug;
 						}
+						const finalReply = sanitizeAssistantText(result.content ?? '');
+						if (result.finishReason === 'length') {
+							options.onMetric?.('reply.finish_length');
+						}
+						if (finalReply.trim() === '') {
+							options.onMetric?.('reply.empty');
+						}
+						options.onPhase?.(null);
 						debug = { ...debug, lastResponse: buildLastResponse(result) };
 						return {
-							reply: sanitizeAssistantText(result.content ?? ''),
+							reply: finalReply,
 							bundle,
 							executedTools,
 							debug,
@@ -389,6 +440,14 @@ export class ChatService {
 						options.onToolStart?.(call);
 						const outcome = await executeStateTool(options.tools, call, options.toolContext);
 						options.onToolResult?.(outcome);
+						if (isToolErrorOutput(outcome.output)) {
+							options.onMetric?.('tool.execution_error');
+						}
+						if (call.id.startsWith('text_call_')) {
+							options.onMetric?.('tool_call.structured_text');
+						} else {
+							options.onMetric?.('tool_call.structured');
+						}
 						executedTools.push(outcome);
 						roundTools.push({
 							name: call.name,
@@ -433,6 +492,7 @@ export class ChatService {
 					});
 					messages = [{ role: 'system', content: bundle.systemMessage }, ...messages.slice(1)];
 				}
+				options.onPhase?.(null);
 				return {
 					reply: '（AI 已连续执行多次状态变更，先暂停。请发送新消息继续。）',
 					bundle,
@@ -456,6 +516,7 @@ export class ChatService {
 		// 纯文本路径同样兜底一次「只思考不输出正文」。
 		if (isThinkingOnlyReply(result)) {
 			const loopDetected = detectThinkingLoop(result.thinking);
+			options.onPhase?.('正在重新请求正文…');
 			const retried = loopDetected
 				? await this.retryThinkingLoop(messages, config, options, signal)
 				: await this.retryThinkingOnly(messages, config, options, signal);
@@ -472,20 +533,31 @@ export class ChatService {
 		}
 		debug = { ...debug, lastResponse: buildLastResponse(result) };
 		if (options.enableStateJudge === true && executedTools.length === 0) {
+			options.onPhase?.('正在检查状态是否需要同步…');
+			options.onMetric?.('judge.triggered');
 			const judge = await this.maybeRunStateJudge(
 				input,
 				config,
 				options,
 				signal,
 				result,
-				executedTools.length > 0
+				executedTools.length > 0,
+				{ onPhase: options.onPhase, onMetric: options.onMetric }
 			);
 			executedTools.push(...judge.executed);
 			rounds.push(...judge.rounds);
 			judgeDebug = judge.debug;
 		}
+		const plainReply = sanitizeAssistantText(result.content ?? '');
+		if (result.finishReason === 'length') {
+			options.onMetric?.('reply.finish_length');
+		}
+		if (plainReply.trim() === '') {
+			options.onMetric?.('reply.empty');
+		}
+		options.onPhase?.(null);
 		return {
-			reply: sanitizeAssistantText(result.content ?? ''),
+			reply: plainReply,
 			bundle,
 			executedTools,
 			debug,
@@ -714,6 +786,7 @@ export class ChatService {
 				// 流式思考命中循环导致中断：通知 UI 清空已展示的草稿（这部分内容不会落库），
 				// 再注入「停止重复」提示重试一次。
 				if (loopAborted) {
+					options.onMetric?.('loop.thinking_aborted');
 					options.onRestart?.();
 					return await attempt(REPETITION_NUDGE);
 				}
@@ -758,6 +831,9 @@ export class ChatService {
 		options: GenerateReplyOptions,
 		signal?: AbortSignal
 	): Promise<LlmChatResult | null> {
+		options.onMetric?.('retry.planned.triggered');
+		// 文本兜底提示只出现在补调路径，主流程提示词保持严格 tool_calls 约束。
+		const fallbackHint = options.textToolFallback !== false ? `\n${TEXT_TOOL_FALLBACK_HINT}` : '';
 		const retryMessages: ChatMessage[] = [
 			...messages,
 			{
@@ -765,10 +841,13 @@ export class ChatService {
 				content:
 					`【系统提示】你上一轮思考中提到了要调用 ${tool}，但回复里没有对应的 tool_calls。` +
 					`如果你确实需要调用，请立即发出 ${tool} 的 tool_calls（带完整参数）；` +
-					'如果不需要调用，请直接输出正文。'
+					`如果不需要调用，请直接输出正文。${fallbackHint}`
 			}
 		];
-		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
+		const attempt = async (
+			forceToolCall: boolean,
+			overrideMessages?: ChatMessage[]
+		): Promise<LlmChatResult | null> => {
 			if (
 				this.client.chatWithTools === undefined ||
 				options.tools === undefined ||
@@ -781,7 +860,7 @@ export class ChatService {
 				// 补调重试不接入流式回调且统一非流式：结果可能被丢弃，流式展示会「看到却被吞」；
 				// 且部分代理只在非流式转发 tool_calls，非流式补调更可靠。
 				return await this.client.chatWithTools(
-					retryMessages,
+					overrideMessages ?? retryMessages,
 					options.tools,
 					{ ...config, stream: false },
 					signal,
@@ -792,15 +871,31 @@ export class ChatService {
 				return null;
 			}
 		};
-		// 第一档：提示 + 常规请求；第二档：tool_choice=required 强制。
-		// DeepSeek V4 思考模式不接受 tool_choice（400），第二档退化为「强提示」，
+		// 第一档：提示 + 常规请求；第二档：tool_choice=required 强制 + 强提示。
+		// DeepSeek V4 思考模式不接受 tool_choice（400），第二档退化为「强提示 + 非流式」，
 		// 仍保留非流式绕过代理丢调用的价值；只采纳真正发出 tool_calls 的结果。
 		const first = await attempt(false);
-		if (first && first.toolCalls.length > 0) {
-			return first;
+		if (first != null) {
+			// 双通道：结构化调用优先，仅当完全没有 tool_calls 时才解析文本形式调用。
+			const adopted = this.adoptTextToolCalls(first, options, 'retry');
+			if (adopted.toolCalls.length > 0) {
+				options.onMetric?.('retry.planned.adopted');
+				return adopted;
+			}
 		}
-		const forced = await attempt(!isDeepSeekModel(config));
-		return forced && forced.toolCalls.length > 0 ? forced : null;
+		const forcedMessages: ChatMessage[] = [
+			...retryMessages,
+			{ role: 'system', content: FORCE_TOOL_NUDGE }
+		];
+		const forced = await attempt(!isDeepSeekModel(config), forcedMessages);
+		if (forced != null) {
+			const adopted = this.adoptTextToolCalls(forced, options, 'retry');
+			if (adopted.toolCalls.length > 0) {
+				options.onMetric?.('retry.planned.adopted');
+				return adopted;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -815,11 +910,16 @@ export class ChatService {
 		options: GenerateReplyOptions,
 		signal?: AbortSignal
 	): Promise<LlmChatResult | null> {
+		options.onMetric?.('retry.malformed.triggered');
+		const fallbackHint = options.textToolFallback !== false ? `\n${TEXT_TOOL_FALLBACK_HINT}` : '';
 		const retryMessages: ChatMessage[] = [
 			...messages,
-			{ role: 'system', content: MALFORMED_TOOL_NUDGE }
+			{ role: 'system', content: `${MALFORMED_TOOL_NUDGE}${fallbackHint}` }
 		];
-		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
+		const attempt = async (
+			forceToolCall: boolean,
+			overrideMessages?: ChatMessage[]
+		): Promise<LlmChatResult | null> => {
 			if (
 				this.client.chatWithTools === undefined ||
 				options.tools === undefined ||
@@ -830,7 +930,7 @@ export class ChatService {
 			}
 			try {
 				return await this.client.chatWithTools(
-					retryMessages,
+					overrideMessages ?? retryMessages,
 					options.tools,
 					{ ...config, stream: false },
 					signal,
@@ -842,11 +942,26 @@ export class ChatService {
 			}
 		};
 		const first = await attempt(false);
-		if (first && first.toolCalls.length > 0) {
-			return first;
+		if (first != null) {
+			const adopted = this.adoptTextToolCalls(first, options, 'retry');
+			if (adopted.toolCalls.length > 0) {
+				options.onMetric?.('retry.malformed.adopted');
+				return adopted;
+			}
 		}
-		const forced = await attempt(!isDeepSeekModel(config));
-		return forced && forced.toolCalls.length > 0 ? forced : null;
+		const forcedMessages: ChatMessage[] = [
+			...retryMessages,
+			{ role: 'system', content: FORCE_TOOL_NUDGE }
+		];
+		const forced = await attempt(!isDeepSeekModel(config), forcedMessages);
+		if (forced != null) {
+			const adopted = this.adoptTextToolCalls(forced, options, 'retry');
+			if (adopted.toolCalls.length > 0) {
+				options.onMetric?.('retry.malformed.adopted');
+				return adopted;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -862,11 +977,16 @@ export class ChatService {
 		options: GenerateReplyOptions,
 		signal?: AbortSignal
 	): Promise<LlmChatResult | null> {
+		options.onMetric?.('retry.time_claim.triggered');
+		const fallbackHint = options.textToolFallback !== false ? `\n${TEXT_TOOL_FALLBACK_HINT}` : '';
 		const retryMessages: ChatMessage[] = [
 			...messages,
-			{ role: 'system', content: TIME_CLAIM_NUDGE }
+			{ role: 'system', content: `${TIME_CLAIM_NUDGE}${fallbackHint}` }
 		];
-		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
+		const attempt = async (
+			forceToolCall: boolean,
+			overrideMessages?: ChatMessage[]
+		): Promise<LlmChatResult | null> => {
 			if (
 				this.client.chatWithTools === undefined ||
 				options.tools === undefined ||
@@ -877,7 +997,7 @@ export class ChatService {
 			}
 			try {
 				return await this.client.chatWithTools(
-					retryMessages,
+					overrideMessages ?? retryMessages,
 					options.tools,
 					{ ...config, stream: false },
 					signal,
@@ -889,11 +1009,52 @@ export class ChatService {
 			}
 		};
 		const first = await attempt(false);
-		if (first && first.toolCalls.length > 0) {
-			return first;
+		if (first != null) {
+			const adopted = this.adoptTextToolCalls(first, options, 'retry');
+			if (adopted.toolCalls.length > 0) {
+				options.onMetric?.('retry.time_claim.adopted');
+				return adopted;
+			}
 		}
-		const forced = await attempt(!isDeepSeekModel(config));
-		return forced && forced.toolCalls.length > 0 ? forced : null;
+		const forcedMessages: ChatMessage[] = [
+			...retryMessages,
+			{ role: 'system', content: FORCE_TOOL_NUDGE }
+		];
+		const forced = await attempt(!isDeepSeekModel(config), forcedMessages);
+		if (forced != null) {
+			const adopted = this.adoptTextToolCalls(forced, options, 'retry');
+			if (adopted.toolCalls.length > 0) {
+				options.onMetric?.('retry.time_claim.adopted');
+				return adopted;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * 文本双通道采纳：结构化 tool_calls 永远优先（护栏），仅当结果完全没有
+	 * tool_calls 且开关开启时，才降级解析文本形式调用；采纳后剔除正文里的调用语法。
+	 */
+	private adoptTextToolCalls(
+		result: LlmChatResult,
+		options: GenerateReplyOptions,
+		stage: 'retry' | 'confirmation'
+	): LlmChatResult {
+		if (result.toolCalls.length > 0 || options.textToolFallback === false) {
+			return result;
+		}
+		const textCalls = extractTextToolCalls(`${result.thinking ?? ''}\n${result.content ?? ''}`);
+		if (textCalls.length === 0) {
+			return result;
+		}
+		options.onMetric?.(
+			stage === 'retry' ? 'tool_call.text_fallback.retry' : 'tool_call.text_fallback.confirmation'
+		);
+		return {
+			...result,
+			toolCalls: textCalls,
+			...(result.content !== null ? { content: stripTextToolCalls(result.content) } : {})
+		};
 	}
 
 	/**
@@ -906,7 +1067,8 @@ export class ChatService {
 		options: GenerateReplyOptions,
 		signal?: AbortSignal,
 		currentResult?: LlmChatResult,
-		nativeToolsExecuted = false
+		nativeToolsExecuted = false,
+		forward?: { onPhase?: (label: string | null) => void; onMetric?: (name: string) => void }
 	): Promise<{
 		executed: ExecutedToolCall[];
 		rounds: ReplyRound[];
@@ -947,7 +1109,12 @@ export class ChatService {
 			config: options.judgeConfig ?? config,
 			tools: options.tools,
 			toolContext: options.toolContext,
-			signal
+			signal,
+			onPhase: forward?.onPhase,
+			onMetric: forward?.onMetric,
+			onToolStart: options.onToolStart,
+			onToolResult: options.onToolResult,
+			textToolFallback: options.textToolFallback !== false
 		});
 		return { executed: result.executed, rounds: result.rounds, debug: result.debug };
 	}
@@ -965,6 +1132,14 @@ export class ChatService {
 		tools: readonly StateToolDefinition[];
 		toolContext: StateToolContext;
 		signal?: AbortSignal;
+		/** 阶段/指标回调（自动确认路径由 generateReply 透传；手动确认同样可接）。 */
+		onPhase?: (label: string | null) => void;
+		onMetric?: (name: string) => void;
+		/** 确认阶段执行工具时的实时事件（供流式气泡展示工具段）。 */
+		onToolStart?: (call: ToolCall) => void;
+		onToolResult?: (result: ExecutedToolCall) => void;
+		/** 文本形式工具调用双通道（缺省开启）。 */
+		textToolFallback?: boolean;
 	}): Promise<{
 		executed: ExecutedToolCall[];
 		rounds: ReplyRound[];
@@ -982,8 +1157,11 @@ export class ChatService {
 			signal: input.signal
 		});
 		if (!judge.needsTool) {
+			input.onMetric?.('judge.no_change');
 			return { executed: [], rounds: [], debug: judge.debug };
 		}
+		input.onMetric?.('judge.needs_tool');
+		input.onPhase?.('正在同步状态…');
 		const confirmation = await runStateConfirmation({
 			state: input.state,
 			lastUser: input.lastUser,
@@ -992,7 +1170,11 @@ export class ChatService {
 			config: input.config,
 			tools: input.tools,
 			toolContext: input.toolContext,
-			signal: input.signal
+			signal: input.signal,
+			onToolStart: input.onToolStart,
+			onToolResult: input.onToolResult,
+			onMetric: input.onMetric,
+			textToolFallback: input.textToolFallback !== false
 		});
 		const debug: JudgeDebugView = {
 			...judge.debug,

@@ -34,6 +34,63 @@ export function extractTextToolCalls(text: string): ToolCall[] {
 	return calls;
 }
 
+/**
+ * 文本形式工具调用的兜底提示：只允许出现在补调重试与状态确认的提示词里，
+ * 绝不得进入主流程系统提示/每轮提醒（防止模型学会「不发 JSON、靠文本兜底」的偷懒路径）。
+ */
+export const TEXT_TOOL_FALLBACK_HINT =
+	'若你确实需要调用工具但无法发出结构化 tool_calls，可在回复中退而用文本形式写出调用，' +
+	'例如 goto_location(name=厕所)、advance_time(minutes=30)、set_outfit(slot=上装,item=运动服)、' +
+	'set_attribute(key=心情,value=开心)，宿主同样能解析执行；但只要能发出结构化 tool_calls，' +
+	'必须优先使用结构化调用，不得故意改用文本形式。';
+
+/**
+ * 从文本中剔除已解析为工具调用的语法片段（「工具名(参数)」与 JSON 对象形态），
+ * 供采纳文本兜底调用后清洗正文，避免调用语法混入角色台词展示给用户。
+ */
+export function stripTextToolCalls(text: string): string {
+	let result = text;
+	for (const name of TOOL_NAMES) {
+		const pattern = new RegExp(`\\b${name}[ \\t]*[（(]\\s*([^）)]*)[）)]`, 'g');
+		result = result.replace(pattern, (whole, inner: string) =>
+			parseCallArgs(inner ?? '') === null ? whole : ''
+		);
+	}
+	// JSON 形态：复用与解析相同的括号匹配逻辑，只剔除可解析为工具调用的对象。
+	let searchFrom = 0;
+	let cleaned = '';
+	while (searchFrom < result.length) {
+		const open = result.indexOf('{', searchFrom);
+		if (open === -1) {
+			cleaned += result.slice(searchFrom);
+			break;
+		}
+		const end = findMatchingBrace(result, open);
+		if (end === -1) {
+			cleaned += result.slice(searchFrom);
+			break;
+		}
+		const candidate = result.slice(open, end + 1);
+		let isToolCall = false;
+		try {
+			isToolCall = mapJsonToolCall(JSON.parse(candidate)) !== null;
+		} catch {
+			isToolCall = false;
+		}
+		cleaned += result.slice(searchFrom, open) + (isToolCall ? '' : candidate);
+		searchFrom = end + 1;
+	}
+	// 剔除后可能遗留的空白行/行首分隔符，收敛为单个换行。
+	// 换行符用 fromCharCode 构造，规避转义处理差异。
+	const nl = String.fromCharCode(10);
+	const trailingWs = new RegExp(`[ \\t]+${nl}`, 'g');
+	const multiNewline = new RegExp(`${nl}{3,}`, 'g');
+	return cleaned
+		.replace(trailingWs, nl)
+		.replace(multiNewline, nl + nl)
+		.trim();
+}
+
 /** 支持解析的四个状态工具名。 */
 const TOOL_NAMES = ['advance_time', 'goto_location', 'set_outfit', 'set_attribute'] as const;
 
@@ -144,7 +201,9 @@ function extractJsonToolCalls(text: string): ToolCall[] {
 }
 
 /** 从 JSON 对象中解析工具名与参数；不是合法工具调用返回 null。 */
-function mapJsonToolCall(parsed: unknown): { name: string; arguments: Record<string, unknown> } | null {
+function mapJsonToolCall(
+	parsed: unknown
+): { name: string; arguments: Record<string, unknown> } | null {
 	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
 		return null;
 	}
@@ -155,16 +214,19 @@ function mapJsonToolCall(parsed: unknown): { name: string; arguments: Record<str
 			? record.tool
 			: typeof record.name === 'string' && record.name.trim() !== ''
 				? record.name
-				: fn !== null && typeof fn === 'object' && !Array.isArray(fn) &&
-						typeof (fn as Record<string, unknown>).name === 'string'
+				: fn !== null &&
+					  typeof fn === 'object' &&
+					  !Array.isArray(fn) &&
+					  typeof (fn as Record<string, unknown>).name === 'string'
 					? String((fn as Record<string, unknown>).name)
 					: '';
 	if (!TOOL_NAMES.includes(name as (typeof TOOL_NAMES)[number])) {
 		return null;
 	}
-	const fnArgs = fn !== null && typeof fn === 'object' && !Array.isArray(fn)
-		? (fn as Record<string, unknown>).arguments
-		: undefined;
+	const fnArgs =
+		fn !== null && typeof fn === 'object' && !Array.isArray(fn)
+			? (fn as Record<string, unknown>).arguments
+			: undefined;
 	let args: unknown = record.args ?? record.arguments ?? fnArgs;
 	// OpenAI 风格序列化时 arguments 是 JSON 字符串，解析成对象再校验。
 	if (typeof args === 'string' && args.trim() !== '') {

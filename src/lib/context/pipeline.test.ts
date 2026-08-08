@@ -97,12 +97,8 @@ describe('buildPerTurnToolReminder', () => {
 		const location = buildPerTurnToolReminder('我们回宿舍吧');
 		expect(location).toContain('可能涉及地点变化');
 		expect(location).toContain('如果剧情确实发生了地点变化');
-		expect(buildPerTurnToolReminder('快把衬衫穿上')).toContain(
-			'如果剧情确实发生了穿着变化'
-		);
-		expect(buildPerTurnToolReminder('我排了几分钟队')).toContain(
-			'如果剧情确实发生了时间流逝'
-		);
+		expect(buildPerTurnToolReminder('快把衬衫穿上')).toContain('如果剧情确实发生了穿着变化');
+		expect(buildPerTurnToolReminder('我排了几分钟队')).toContain('如果剧情确实发生了时间流逝');
 	});
 
 	it('用户发言命中穿着变化时追加 set_outfit 提醒', () => {
@@ -247,7 +243,7 @@ describe('buildContext', () => {
 		expect(bundle.history.map((m) => m.id)).toEqual(['1']);
 	});
 
-	it('分段 assistant 消息展开为 思考+正文 / 工具反馈 / 思考+正文 的发送序列', () => {
+	it('分段 assistant 消息展开：工具反馈 + 最终正文，中间叙事（假正文）不发送', () => {
 		const conversation: ChatMessageView[] = [
 			{ id: 'u1', role: 'user', content: '好了快穿上吧', timestamp: 1 },
 			{
@@ -270,24 +266,22 @@ describe('buildContext', () => {
 			worldInfo: []
 		});
 		const roles = bundle.messages.map((message) => message.role);
-		expect(roles).toEqual(['user', 'assistant', 'system', 'assistant']);
+		expect(roles).toEqual(['user', 'system', 'assistant']);
 		expect(bundle.messages[1]).toMatchObject({
-			role: 'assistant',
-			content: '（愣了一下）我、我马上穿！',
-			reasoning: '先调用 set_outfit 换装'
-		});
-		expect(bundle.messages[2]).toMatchObject({
 			role: 'system',
 			content: '【工具调用】set_outfit：已把上衣更换为「白色衬衫」'
 		});
-		expect(bundle.messages[3]).toMatchObject({
+		expect(bundle.messages[2]).toMatchObject({
 			role: 'assistant',
 			content: '（手忙脚乱地扣好扣子）呼——这下不会着凉了。',
-			reasoning: '穿好了，回应一下'
+			// 两段思考合并挂 reasoning（DeepSeek 要求 assistant 历史回传思考）。
+			reasoning: '先调用 set_outfit 换装\n\n穿好了，回应一下'
 		});
+		// 工具调用前的中间叙事（假正文）不进上下文，避免重复正文诱发复述/车轱辘。
+		expect(bundle.messages.some((message) => message.content.includes('我马上穿'))).toBe(false);
 	});
 
-	it('交错思考/正文（无工具段）展开为两条 assistant，不覆盖内容', () => {
+	it('交错思考/正文（无工具段）全部保留为一条 assistant，不丢内容', () => {
 		const conversation: ChatMessageView[] = [
 			{ id: 'u1', role: 'user', content: '然后呢？', timestamp: 1 },
 			{
@@ -309,16 +303,11 @@ describe('buildContext', () => {
 			worldInfo: []
 		});
 		const roles = bundle.messages.map((message) => message.role);
-		expect(roles).toEqual(['user', 'assistant', 'assistant']);
+		expect(roles).toEqual(['user', 'assistant']);
 		expect(bundle.messages[1]).toMatchObject({
 			role: 'assistant',
-			content: '第一段正文',
-			reasoning: '第一段思考'
-		});
-		expect(bundle.messages[2]).toMatchObject({
-			role: 'assistant',
-			content: '第二段正文',
-			reasoning: '第二段思考'
+			content: '第一段正文\n第二段正文',
+			reasoning: '第一段思考\n\n第二段思考'
 		});
 	});
 

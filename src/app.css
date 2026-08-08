@@ -559,6 +559,40 @@ button:disabled {
 	gap: 8px;
 }
 
+/* 后处理状态条：正文输出后的补调/状态确认阶段可见，不再是黑盒停顿。 */
+.phase-bar {
+	align-self: flex-start;
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	padding: 4px 12px;
+	border-radius: 999px;
+	border: 1px solid var(--border);
+	background: var(--panel-2);
+	color: var(--text-faint);
+	font-size: 13px;
+}
+
+.phase-bar .phase-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--accent);
+	animation: phase-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes phase-pulse {
+	0%,
+	100% {
+		opacity: 0.25;
+		transform: scale(0.85);
+	}
+	50% {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
 .message {
 	max-width: min(640px, 78%);
 	padding: 10px 14px;

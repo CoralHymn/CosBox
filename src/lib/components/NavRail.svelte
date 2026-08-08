@@ -17,6 +17,7 @@
 		{ id: 'versions', label: '版本', icon: '🌳' },
 		{ id: 'world', label: '世界书', icon: '📖' },
 		{ id: 'memory', label: '记忆', icon: '🧠' },
+		{ id: 'monitor', label: '监控', icon: '📈' },
 		{ id: 'transfer', label: '导入导出', icon: '📦' },
 		{ id: 'settings', label: '设置', icon: '⚙️' }
 	];

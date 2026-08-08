@@ -78,6 +78,7 @@
 	import { createCharacterSession } from '../lib/stores/character.svelte';
 	import { createContextUsageStore } from '../lib/stores/context-usage.svelte';
 	import { createMemoryStore } from '../lib/stores/memory.svelte';
+	import { createMetricsStore } from '../lib/stores/metrics.svelte';
 	import { createSettingsStore } from '../lib/stores/settings.svelte';
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
@@ -87,6 +88,7 @@
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
 	import LocationsPanel from '../lib/components/LocationsPanel.svelte';
 	import MemoryPanel from '../lib/components/MemoryPanel.svelte';
+	import MonitorPanel from '../lib/components/MonitorPanel.svelte';
 	import NavRail from '../lib/components/NavRail.svelte';
 	import SchedulePanel from '../lib/components/SchedulePanel.svelte';
 	import SettingsPanel from '../lib/components/SettingsPanel.svelte';
@@ -110,6 +112,7 @@
 	const contextUsage = createContextUsageStore(kv);
 	const memoryRepo = new MemoryRepository(db);
 	const memoryStore = createMemoryStore(memoryRepo);
+	const metrics = createMetricsStore(kv);
 	const session = createCharacterSession(manager);
 	const settings = createSettingsStore(kv);
 	const worldInfo = createWorldInfoStore(new WorldInfoRepository(db));
@@ -157,6 +160,11 @@
 	 * 按流中实际顺序排列）；null 表示未在生成。
 	 */
 	let streamingSegments = $state<MessageSegment[] | null>(null);
+	/**
+	 * 后处理阶段文案（补调重试/状态判断/确认等）：正文已输出后仍可见
+	 * 「AI 还在做什么」；null 表示无进行中的后处理。
+	 */
+	let streamingPhase = $state<string | null>(null);
 	/** 当前生成任务的取消控制器（发送按钮在 busy 时变为「停止」）。 */
 	let abortController: AbortController | null = null;
 	/** 最近消息日志：从最近一次用户发言开始实时记录，再次发言时重置。 */
@@ -243,6 +251,7 @@
 			await settings.load();
 			await contextUsage.load();
 			await memoryStore.load();
+			await metrics.load();
 			const restored = contextUsage.usage;
 			if (restored !== null) {
 				// 重启后恢复上次请求的用量面板：上下文包不落库（含完整消息数组），
@@ -307,6 +316,7 @@
 			}
 		} finally {
 			streamingSegments = null;
+			streamingPhase = null;
 			abortController = null;
 			busy = false;
 			searching = false;
@@ -320,6 +330,7 @@
 		}
 		abortController?.abort();
 		streamingSegments = null;
+		streamingPhase = null;
 		busy = false;
 		toasts.push('info', '已停止生成');
 	}
@@ -386,6 +397,9 @@
 	async function runAiReply(searchResults?: SearchResult[]): Promise<void> {
 		streamedAny = false;
 		streamingSegments = [];
+		const turnStartAt = Date.now();
+		let turnRetries = 0;
+		let turnFallbacks = 0;
 		const controller = new AbortController();
 		abortController = controller;
 		const input: ContextPipelineInput = {
@@ -425,7 +439,8 @@
 			finishReason,
 			judgeDebug,
 			rounds,
-			replySegments
+			replySegments,
+			executedTools
 		} = await service.generateReply(
 			input,
 			chatConfig,
@@ -463,6 +478,19 @@
 					// 思考循环中断重启：首次请求已流式输出的内容不会落库，清空草稿保持一致。
 					streamingSegments = [];
 				},
+				onPhase: (label) => {
+					streamingPhase = label;
+				},
+				onMetric: (name) => {
+					metrics.record(name);
+					if (name.startsWith('retry.') && name.endsWith('.triggered')) {
+						turnRetries += 1;
+					}
+					if (name.includes('text_fallback')) {
+						turnFallbacks += 1;
+					}
+				},
+				textToolFallback: settings.config.textToolFallback !== false,
 				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 				toolContext: {
 					getState: () => session.state,
@@ -482,6 +510,18 @@
 		void persistCurrentContextUsage();
 		compactState = compaction;
 		streamingSegments = null;
+		streamingPhase = null;
+		// 监控：记录一轮样本（耗时/用量/工具与兜底计数），供监控 tab 图表展示。
+		metrics.recordTurn({
+			t: Date.now(),
+			latencyMs: Date.now() - turnStartAt,
+			promptTokens: usage?.promptTokens ?? 0,
+			completionTokens: usage?.completionTokens ?? 0,
+			toolCalls: executedTools.length,
+			retries: turnRetries,
+			textFallbacks: turnFallbacks,
+			...(finishReason !== undefined ? { finishReason } : {})
+		});
 		// AI 一轮回复合并为单条 assistant 消息：思考 / 正文 / 工具调用按序
 		// 保存为 segments，气泡内分段展示——不再把每个工具轮次拆成独立消息，
 		// 避免「一个思考绑一个输出」导致中间内容被吞。
@@ -631,6 +671,7 @@
 			}
 		} finally {
 			streamingSegments = null;
+			streamingPhase = null;
 			abortController = null;
 			busy = false;
 		}
@@ -650,6 +691,7 @@
 			.reverse()
 			.find((message) => message.role === 'user');
 		busy = true;
+		streamingPhase = '正在判断是否需要同步状态…';
 		try {
 			// 用该轮发生时的状态（含世界配置覆盖）做判断，避免被后续消息污染。
 			const stateAt = await session.getStateAt(assistant.id);
@@ -665,7 +707,12 @@
 					getState: () => session.state,
 					update: (patch, metadata) => session.update(patch, metadata),
 					advanceTime: (minutes) => session.advanceTime(minutes)
-				}
+				},
+				onPhase: (label) => {
+					streamingPhase = label;
+				},
+				onMetric: (name) => metrics.record(name),
+				textToolFallback: settings.config.textToolFallback !== false
 			});
 			lastJudgeDebug = debug;
 			// 工具反馈追加进原 AI 气泡的分段：前端可见，后续上下文展开为系统反馈。
@@ -688,6 +735,7 @@
 		} catch (err) {
 			toasts.error(err);
 		} finally {
+			streamingPhase = null;
 			busy = false;
 		}
 	}
@@ -1483,6 +1531,7 @@
 					{recentLog}
 					onExportLog={handleExportLog}
 					{streamingSegments}
+					{streamingPhase}
 					branches={session.branches}
 					snapshots={session.snapshots}
 					headId={session.headId}
@@ -1550,6 +1599,15 @@
 					onRemove={handleMemoryRemove}
 					onExtract={handleMemoryExtract}
 					onImportExtracted={handleMemoryImportExtracted}
+				/>
+			{:else if tab === 'monitor'}
+				<MonitorPanel
+					counters={metrics.counters}
+					turns={metrics.turns}
+					events={metrics.events}
+					onReset={() => {
+						void metrics.reset().then(() => toasts.success('已清空监控数据'));
+					}}
 				/>
 			{:else if tab === 'transfer'}
 				<ImportExportPanel onImport={handleImport} onExport={handleExport} />

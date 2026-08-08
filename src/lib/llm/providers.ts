@@ -326,6 +326,7 @@ export interface LlmConfigPatch {
 	stream?: boolean;
 	allowAiStateTools?: boolean;
 	llmStateConfirm?: boolean;
+	textToolFallback?: boolean;
 	memoryEnabled?: boolean;
 	memoryInjectLimit?: number;
 	memoryAutoExtract?: boolean;
@@ -366,6 +367,7 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		stream: partial.stream ?? defaults.stream ?? false,
 		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
 		llmStateConfirm: partial.llmStateConfirm ?? defaults.llmStateConfirm ?? false,
+		textToolFallback: partial.textToolFallback ?? defaults.textToolFallback ?? true,
 		memoryEnabled: partial.memoryEnabled ?? defaults.memoryEnabled ?? true,
 		memoryInjectLimit: partial.memoryInjectLimit ?? defaults.memoryInjectLimit ?? 5,
 		memoryAutoExtract: partial.memoryAutoExtract ?? defaults.memoryAutoExtract ?? false,
