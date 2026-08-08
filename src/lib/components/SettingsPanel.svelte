@@ -26,6 +26,7 @@
 		type ThemeColorKey,
 		type ThemeConfig
 	} from '../theme/theme';
+	import { getCreditGroups } from '../legal/credits';
 	import ModelCombobox from './ModelCombobox.svelte';
 
 	interface Props {
@@ -100,6 +101,8 @@
 	let themeBlur = $state(0);
 	let themeBusy = $state(false);
 	let themeInput = $state<HTMLInputElement | null>(null);
+	/** 「开源协议声明」弹窗是否打开。 */
+	let showCredits = $state(false);
 	let profileName = $state('');
 	let systemPrompt = $state('');
 	let saving = $state(false);
@@ -534,7 +537,9 @@
 			const draft = {
 				id: editingServiceId ?? undefined,
 				label: serviceLabel,
-				provider: (presetSelection === 'demo' ? 'demo' : 'openai-compatible') as ModelService['provider'],
+				provider: (presetSelection === 'demo'
+					? 'demo'
+					: 'openai-compatible') as ModelService['provider'],
 				providerId: presetSelection,
 				baseUrl,
 				apiKey,
@@ -557,8 +562,7 @@
 				// 编辑已有服务：若角色绑定的是该服务但条目已不存在，回退第一条。
 				const firstEntryId = normalized.models[0]?.id ?? '';
 				const rebind = (serviceId: string, entryId: string): string =>
-					serviceId === normalized.id &&
-					!normalized.models.some((entry) => entry.id === entryId)
+					serviceId === normalized.id && !normalized.models.some((entry) => entry.id === entryId)
 						? firstEntryId
 						: entryId;
 				chatModelEntryId = rebind(chatModelId, chatModelEntryId);
@@ -575,7 +579,11 @@
 
 	/** 删除服务；若某个角色正指向它，改绑到剩余第一条服务。 */
 	async function deleteService(service: ModelService): Promise<void> {
-		if (!window.confirm(`确定删除模型服务「${service.label}」？${service.apiKey ? '其 API Key 将一并移除。' : ''}`)) {
+		if (
+			!window.confirm(
+				`确定删除模型服务「${service.label}」？${service.apiKey ? '其 API Key 将一并移除。' : ''}`
+			)
+		) {
 			return;
 		}
 		const remaining = services.filter((item) => item.id !== service.id);
@@ -734,10 +742,9 @@
 	<div class="card">
 		<h3 class="card-title">模型服务管理</h3>
 		<p class="muted" style="margin: 0 0 12px;">
-			把「服务商 + Key」保存为一个连接，下面挂多个可选模型（Key 只填一次）；
-			再为三类任务分配「服务 + 模型」：
-			对话用强模型、状态判断与生成用便宜模型，便于控制 token 与消费。API Key 仅保存在本地，
-			不会随工作区导出或同步到服务器。
+			把「服务商 + Key」保存为一个连接，下面挂多个可选模型（Key 只填一次）； 再为三类任务分配「服务
+			+ 模型」： 对话用强模型、状态判断与生成用便宜模型，便于控制 token 与消费。API Key
+			仅保存在本地， 不会随工作区导出或同步到服务器。
 		</p>
 
 		<div class="field">
@@ -752,8 +759,7 @@
 							id={`role-${role}`}
 							class="select"
 							value={roleId(role)}
-							onchange={(event) =>
-								setRole(role, (event.currentTarget as HTMLSelectElement).value)}
+							onchange={(event) => setRole(role, (event.currentTarget as HTMLSelectElement).value)}
 						>
 							{#each roleOptions as option (option.value)}
 								<option value={option.value}>{option.label}</option>
@@ -785,7 +791,8 @@
 									title="窗口 {entry.contextWindow ?? '未知'} · Max {entry.maxTokens ?? '全局'}"
 								>
 									{entry.model}
-									{#if entry.maxTokens !== undefined} ·{entry.maxTokens}{/if}
+									{#if entry.maxTokens !== undefined}
+										·{entry.maxTokens}{/if}
 								</span>
 							{/each}
 						</div>
@@ -921,9 +928,10 @@
 								value={modelContextWindow ?? ''}
 								placeholder="窗口"
 								onchange={(event) =>
-									(modelContextWindow = Number((event.currentTarget as HTMLInputElement).value) > 0
-										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-										: undefined)}
+									(modelContextWindow =
+										Number((event.currentTarget as HTMLInputElement).value) > 0
+											? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+											: undefined)}
 								aria-label="上下文窗口"
 							/>
 							<input
@@ -933,9 +941,10 @@
 								value={serviceMaxTokens ?? ''}
 								placeholder="Max"
 								onchange={(event) =>
-									(serviceMaxTokens = Number((event.currentTarget as HTMLInputElement).value) > 0
-										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-										: undefined)}
+									(serviceMaxTokens =
+										Number((event.currentTarget as HTMLInputElement).value) > 0
+											? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+											: undefined)}
 								aria-label="Max Tokens"
 							/>
 							<button class="btn btn-small" onclick={addEditorModel} disabled={model.trim() === ''}>
@@ -951,7 +960,11 @@
 						>
 							{fetchingModels ? '获取中…' : '获取模型列表'}
 						</button>
-						<button class="btn btn-small" onclick={test} disabled={fetchingModels || testingConnection}>
+						<button
+							class="btn btn-small"
+							onclick={test}
+							disabled={fetchingModels || testingConnection}
+						>
 							{testingConnection ? '测试中…' : '连接测试'}
 						</button>
 					</div>
@@ -994,7 +1007,11 @@
 					<input id="svc-note" class="input" bind:value={serviceNote} placeholder="用途说明" />
 				</div>
 				<div class="row-actions" style="gap: 6px;">
-					<button class="btn btn-small" onclick={saveService} disabled={savingService || editorModels.length === 0}>
+					<button
+						class="btn btn-small"
+						onclick={saveService}
+						disabled={savingService || editorModels.length === 0}
+					>
 						{savingService ? '保存中…' : '保存服务'}
 					</button>
 					<button
@@ -1111,12 +1128,7 @@
 	<div class="card">
 		<h3 class="card-title">长期记忆</h3>
 		<div class="row-actions" style="margin-bottom: 10px;">
-			<input
-				id="memory-enabled"
-				class="checkbox"
-				type="checkbox"
-				bind:checked={memoryEnabled}
-			/>
+			<input id="memory-enabled" class="checkbox" type="checkbox" bind:checked={memoryEnabled} />
 			<label for="memory-enabled" class="muted"
 				>启用记忆召回（按关键词与重要度把相关记忆注入上下文）</label
 			>
@@ -1194,8 +1206,7 @@
 				id="theme-preset"
 				class="select"
 				value={themePresetId}
-				onchange={(event) =>
-					selectThemePreset((event.currentTarget as HTMLSelectElement).value)}
+				onchange={(event) => selectThemePreset((event.currentTarget as HTMLSelectElement).value)}
 			>
 				{#each THEME_PRESETS as preset (preset.id)}
 					<option value={preset.id}>{preset.label}</option>
@@ -1228,7 +1239,9 @@
 				/>
 			</div>
 			{#if themeBackground !== ''}
-				<p class="muted" style="margin: 4px 0 0;">已启用背景图（建议使用压缩后的图片，base64 会随设置持久化）。</p>
+				<p class="muted" style="margin: 4px 0 0;">
+					已启用背景图（建议使用压缩后的图片，base64 会随设置持久化）。
+				</p>
 				<div class="field">
 					<label for="theme-bg-opacity">背景图透明度：{Math.round(themeOpacity * 100)}%</label>
 					<input
@@ -1373,6 +1386,60 @@
 		</div>
 	</div>
 
+	<div class="card">
+		<h3 class="card-title">开源协议声明</h3>
+		<p class="muted" style="margin: 0 0 12px;">
+			列出 CosBox 直接依赖与参考过的开源项目及对应许可证。
+		</p>
+		<button class="btn" onclick={() => (showCredits = true)}>查看开源协议声明</button>
+	</div>
+
+	{#if showCredits}
+		<div
+			class="prompt-backdrop"
+			role="presentation"
+			onclick={(event) => {
+				if (event.target === event.currentTarget) {
+					showCredits = false;
+				}
+			}}
+		>
+			<div class="prompt-modal credits-modal" role="dialog" aria-label="开源协议声明">
+				<div class="prompt-modal-head">
+					<span class="prompt-modal-title">开源协议声明</span>
+					<button class="btn btn-small" onclick={() => (showCredits = false)}>关闭</button>
+				</div>
+				<div class="prompt-modal-body">
+					<p class="muted" style="margin: 0 0 12px;">
+						CosBox 基于以下开源项目构建，并在设计与实现中参考了它们的做法。
+						各项目完整许可证文本以其官方仓库为准。
+					</p>
+					{#each getCreditGroups() as group (group.label)}
+						{#if group.items.length > 0}
+							<h4 class="credit-group-title">{group.label}</h4>
+							<div class="credit-list">
+								{#each group.items as item (item.name)}
+									<div class="credit-row">
+										<a
+											class="credit-name"
+											href={item.url}
+											target="_blank"
+											rel="external noreferrer"
+										>
+											{item.name}
+										</a>
+										<span class="license-badge">{item.license}</span>
+										<span class="muted credit-usage">{item.usage}</span>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					{/each}
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<button class="btn btn-primary" onclick={save} disabled={saving}>保存设置</button>
 </div>
 
@@ -1429,5 +1496,52 @@
 		padding: 8px;
 		margin-bottom: 10px;
 		background: var(--panel);
+	}
+	.credit-group-title {
+		margin: 14px 0 6px;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-dim);
+	}
+	.credit-list {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.credit-row {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		flex-wrap: wrap;
+		padding: 4px 0;
+		border-bottom: 1px solid var(--border);
+	}
+	.credit-row:last-child {
+		border-bottom: none;
+	}
+	.credit-name {
+		font-weight: 600;
+		color: var(--accent);
+		text-decoration: none;
+	}
+	.credit-name:hover {
+		text-decoration: underline;
+	}
+	.license-badge {
+		font-size: 11px;
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--accent) 15%, transparent);
+		color: var(--accent);
+		border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+		white-space: nowrap;
+	}
+	.credit-usage {
+		font-size: 12px;
+		flex: 1;
+		min-width: 180px;
+	}
+	.credits-modal {
+		width: min(720px, 94vw);
 	}
 </style>
