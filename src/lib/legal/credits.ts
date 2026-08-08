@@ -245,6 +245,13 @@ export const OPEN_SOURCE_CREDITS: readonly OpenSourceCredit[] = [
 		usage: 'SQLite + 向量检索的 Agent 记忆插件调研',
 		category: 'reference'
 	},
+	{
+		name: 'awesome-design-md',
+		license: 'MIT',
+		url: 'https://github.com/VoltAgent/awesome-design-md',
+		usage: '内置主题预设（Claude / Discord / The Verge）的设计分析参考',
+		category: 'reference'
+	},
 	// ---------- 非开源设计参考 ----------
 	{
 		name: 'Claude Code',
