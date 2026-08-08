@@ -2529,3 +2529,65 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 ### 门禁
 
 - 749 个单元测试全过（新增 1 个「可能」措辞用例）；check / lint 全绿。
+
+## 2026-08-08（续）：模型服务商预设扩充（OpenCode GO/Zen、MiniMax、GLM Coding Plan、Cerebras）
+
+### 需求
+
+为模型服务商补充更多预设，重点加入 opencode 的 GO 订阅网关（联网调研端点与模型清单）。
+
+### 调研结论
+
+- OpenCode GO（`opencode.ai/zen/go/v1`）：首月 $5、之后 $10/月的开源模型订阅网关，
+  Key 在 `opencode.ai/auth` 获取；OpenCode Zen（`opencode.ai/zen/v1`）为其按量计费网关。
+  **关键约束**：GO/Zen 的 MiniMax/Qwen 系模型只走 Anthropic `/messages` 端点，
+  Claude/GPT/Gemini 系走原生 Responses 端点——CosBox 只发 `/chat/completions`，
+  因此预设只收录 Chat Completions 可用的模型，并在 notes 注明。
+- MiniMax：`api.minimax.io/v1`（国际）/ `api.minimaxi.com/v1`（国内），M3 支持 1M 上下文。
+- 智谱 GLM Coding Plan：`open.bigmodel.cn/api/coding/paas/v4` 订阅专属端点
+  （与通用 `/api/paas/v4` 不通用），海外可用 `api.z.ai/api/coding/paas/v4`。
+- Cerebras：`api.cerebras.ai/v1`，晶圆级芯片极速推理，模型列表动态更新。
+
+### 实现
+
+- `providers.ts` 新增 5 个预设：OpenCode GO（默认 kimi-k2.6）、OpenCode Zen（默认 minimax-m3）、
+  MiniMax、GLM Coding Plan（默认 glm-5.2）、Cerebras（默认 gpt-oss-120b），
+  各带候选模型与 notes 说明。
+- `model-info.ts` 补充新预设默认模型条目：glm-5.2（1M 窗口，$1.4/$4.4）、
+  minimax-m3（1M 窗口，$0.3/$1.2）、gpt-oss-120b（131K 窗口，$0.35/$0.75）。
+- `providers.test.ts` 新增全量不变式「defaultModel 必须在候选模型列表内」+ 新预设存在性断言；
+  README 服务商列表同步。
+
+### 门禁
+
+- 751 个单元测试全过（新增 2 条用例）；check / lint / prettier 全绿。
+
+## 2026-08-08（续）：OpenCode GO 连接失败「Failed to fetch」——CORS 代理修复
+
+### 现象与定位
+
+用户填写正确 Key 后仍报「无法连接模型服务：Failed to fetch」。本机实测排除 Key 问题：
+
+- 服务器端直连 `opencode.ai/zen/go/v1` 正常：`GET /models` → 200；
+  带假 Key 的 `POST /chat/completions` → 401（Key 校验链路正常）；
+- 浏览器端 `OPTIONS` 预检请求 → 404 且无任何 CORS 响应头。
+
+**根因**：opencode.ai 的 API 不支持浏览器 CORS（为 CLI / 服务端客户端设计），
+浏览器在发实际请求前的预检直接被拒，`fetch` 抛 `TypeError: Failed to fetch`——与 Key 无关。
+
+### 实现
+
+- `vite.config.ts` 新增 `/llm-proxy` 代理 → `https://opencode.ai`（`dev` 与 `preview` 都配置，
+  `changeOrigin` + rewrite 剥离前缀），浏览器走同源路径绕过 CORS。
+- `providers.ts` 两个 OpenCode 预设 baseUrl 改为相对路径
+  `/llm-proxy/zen/go/v1` 与 `/llm-proxy/zen/v1`；notes 注明「静态部署需自建同路径反向代理」。
+- `providers.test.ts` baseUrl 完整性断言允许 `/llm-proxy/` 相对路径；README 补充 CORS 说明。
+
+### 验证
+
+- 起 dev server 实测：`GET /llm-proxy/zen/go/v1/models` → 200（返回真实模型列表）；
+  `POST /llm-proxy/zen/go/v1/chat/completions`（假 Key）→ 上游 401，Authorization 透传正常。
+
+### 门禁
+
+- 751 个单元测试全过；check / lint / prettier 全绿；代理链路实测通过。
