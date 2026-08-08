@@ -104,6 +104,16 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		requiresApiKey: true
 	},
 	{
+		id: 'glm-coding',
+		label: '智谱 GLM Coding Plan',
+		baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+		defaultModel: 'glm-5.2',
+		models: ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
+		requiresApiKey: true,
+		notes:
+			'GLM Coding Plan 订阅专属端点（与通用 /api/paas/v4 不通用）；海外可改用 https://api.z.ai/api/coding/paas/v4'
+	},
+	{
 		id: 'qwen',
 		label: '通义千问 Qwen',
 		baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -111,6 +121,15 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen3-flagship'],
 		requiresApiKey: true,
 		notes: '阿里云百炼 OpenAI 兼容模式'
+	},
+	{
+		id: 'minimax',
+		label: 'MiniMax',
+		baseUrl: 'https://api.minimax.io/v1',
+		defaultModel: 'MiniMax-M3',
+		models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5', 'MiniMax-M2.1', 'MiniMax-M2'],
+		requiresApiKey: true,
+		notes: '国际端点；国内用户可改用 https://api.minimaxi.com/v1；M3 支持 1M 上下文'
 	},
 	{
 		id: 'mistral',
@@ -135,6 +154,15 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		notes: '以高速推理著称，模型列表动态更新'
 	},
 	{
+		id: 'cerebras',
+		label: 'Cerebras',
+		baseUrl: 'https://api.cerebras.ai/v1',
+		defaultModel: 'gpt-oss-120b',
+		models: ['gpt-oss-120b', 'llama-3.3-70b', 'gemma-4-31b'],
+		requiresApiKey: true,
+		notes: '晶圆级芯片极速推理；模型列表动态更新，以 GET /v1/models 为准'
+	},
+	{
 		id: 'xai',
 		label: 'xAI Grok',
 		baseUrl: 'https://api.x.ai/v1',
@@ -155,6 +183,45 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		],
 		requiresApiKey: true,
 		notes: '统一网关，模型 ID 格式为 vendor/model，以 OpenRouter 列表为准'
+	},
+	{
+		id: 'opencode-go',
+		label: 'OpenCode GO（订阅）',
+		// opencode.ai 不支持浏览器 CORS，经 Vite dev/preview 代理（/llm-proxy）转发；
+		// 静态部署时需自建同路径反向代理，或改回 https://opencode.ai/zen/go/v1。
+		baseUrl: '/llm-proxy/zen/go/v1',
+		defaultModel: 'kimi-k2.6',
+		models: [
+			'kimi-k2.6',
+			'kimi-k2.7-code',
+			'glm-5.2',
+			'glm-5.1',
+			'deepseek-v4-pro',
+			'deepseek-v4-flash',
+			'mimo-v2.5',
+			'grok-4.5'
+		],
+		requiresApiKey: true,
+		notes:
+			'首月 $5、之后 $10/月的开源模型订阅网关，Key 在 opencode.ai/auth 获取；经 /llm-proxy 开发代理转发（opencode.ai 不允许浏览器 CORS 直连）。MiniMax/Qwen 系模型仅走 Anthropic /messages 端点，此处不可用'
+	},
+	{
+		id: 'opencode-zen',
+		label: 'OpenCode Zen（按量计费）',
+		baseUrl: '/llm-proxy/zen/v1',
+		defaultModel: 'minimax-m3',
+		models: [
+			'minimax-m3',
+			'minimax-m2.7',
+			'glm-5.1',
+			'kimi-k2.6',
+			'deepseek-v4-pro',
+			'deepseek-v4-flash',
+			'deepseek-v4-flash-free'
+		],
+		requiresApiKey: true,
+		notes:
+			'OpenCode 按量计费网关；经 /llm-proxy 开发代理转发（opencode.ai 不允许浏览器 CORS 直连）。Claude/GPT/Gemini 系走原生端点，此处仅可用 Chat Completions 模型'
 	},
 	{
 		id: 'ollama',

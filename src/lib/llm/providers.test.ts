@@ -16,7 +16,8 @@ describe('LLM_PROVIDER_PRESETS', () => {
 		for (const preset of LLM_PROVIDER_PRESETS) {
 			expect(preset.id.trim()).not.toBe('');
 			expect(preset.label.trim()).not.toBe('');
-			expect(preset.baseUrl).toMatch(/^https?:\/\//);
+			// 允许绝对端点，或 /llm-proxy/ 相对路径（无浏览器 CORS 的服务走开发代理）。
+			expect(preset.baseUrl).toMatch(/^(https?:\/\/|\/llm-proxy\/)/);
 			expect(preset.defaultModel.trim()).not.toBe('');
 			expect(preset.models.length).toBeGreaterThan(0);
 			expect(ids.has(preset.id)).toBe(false);
@@ -28,6 +29,25 @@ describe('LLM_PROVIDER_PRESETS', () => {
 		for (const preset of LLM_PROVIDER_PRESETS) {
 			expect(preset.baseUrl.endsWith('/')).toBe(false);
 		}
+	});
+
+	it('默认模型都在候选模型列表内', () => {
+		for (const preset of LLM_PROVIDER_PRESETS) {
+			expect(preset.models).toContain(preset.defaultModel);
+		}
+	});
+
+	it('包含订阅/网关类预设（OpenCode GO、GLM Coding Plan 等）', () => {
+		// OpenCode 系走 /llm-proxy 相对路径：opencode.ai 不支持浏览器 CORS，
+		// 由 vite.config.ts 的开发/预览代理转发（见 providers.ts 注释）。
+		expect(findProviderPreset('opencode-go')?.baseUrl).toBe('/llm-proxy/zen/go/v1');
+		expect(findProviderPreset('opencode-go')?.models).toContain('kimi-k2.6');
+		expect(findProviderPreset('opencode-zen')?.baseUrl).toBe('/llm-proxy/zen/v1');
+		expect(findProviderPreset('glm-coding')?.baseUrl).toBe(
+			'https://open.bigmodel.cn/api/coding/paas/v4'
+		);
+		expect(findProviderPreset('minimax')?.baseUrl).toBe('https://api.minimax.io/v1');
+		expect(findProviderPreset('cerebras')?.baseUrl).toBe('https://api.cerebras.ai/v1');
 	});
 });
 
@@ -59,9 +79,9 @@ describe('isDeepSeekModel', () => {
 	it('providerId 或模型名命中 DeepSeek 时返回 true', () => {
 		expect(isDeepSeekModel({ providerId: 'deepseek', model: 'deepseek-v4-flash' })).toBe(true);
 		expect(isDeepSeekModel({ providerId: 'custom', model: 'deepseek-v4-pro' })).toBe(true);
-		expect(
-			isDeepSeekModel({ providerId: 'siliconflow', model: 'deepseek-ai/DeepSeek-V3' })
-		).toBe(true);
+		expect(isDeepSeekModel({ providerId: 'siliconflow', model: 'deepseek-ai/DeepSeek-V3' })).toBe(
+			true
+		);
 	});
 
 	it('非 DeepSeek 配置返回 false', () => {

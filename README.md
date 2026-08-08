@@ -24,9 +24,13 @@ npm run dev        # http://localhost:5173
 ```
 
 默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。在「设置」页可直接选择主流服务商预设——
-OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、智谱 GLM、百度千帆、腾讯混元、
-零一万物、SiliconFlow、Mistral、xAI Grok、Groq、OpenRouter、Together AI、Ollama、LiteLLM Proxy、
-vLLM、Azure OpenAI——自动填充兼容端点与常用模型候选；也可以选「自定义」填任意 OpenAI-compatible 端点。
+OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、智谱 GLM、GLM Coding Plan、
+百度千帆、腾讯混元、零一万物、MiniMax、SiliconFlow、Mistral、xAI Grok、Groq、Cerebras、
+OpenRouter、OpenCode GO、OpenCode Zen、Together AI、Ollama、LiteLLM Proxy、vLLM、Azure OpenAI——
+自动填充兼容端点与常用模型候选；也可以选「自定义」填任意 OpenAI-compatible 端点。
+OpenCode GO/Zen 的 API 不支持浏览器 CORS（OPTIONS 预检直接 404，直连会 `Failed to fetch`），
+预设默认走 `/llm-proxy` 相对路径，由 `vite.config.ts` 的开发/预览代理转发到 opencode.ai；
+`npm run dev` / `npm run preview` 下开箱即用，静态部署需自建同路径反向代理。
 此外支持 Tavily / Serper / Brave 网络搜索，发送消息时可把实时结果注入 LLM 上下文。
 
 ## 脚本
