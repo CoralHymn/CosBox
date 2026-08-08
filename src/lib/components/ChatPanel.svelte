@@ -58,6 +58,8 @@
 		onExportLog: () => void;
 		/** 流式分段草稿：正在生成、尚未落快照的 assistant 分段；null 表示未在生成。 */
 		streamingSegments: MessageSegment[] | null;
+		/** 后处理阶段文案（补调重试/状态确认等）；非 null 时气泡下方显示状态条。 */
+		streamingPhase: string | null;
 		/** 全部分支 tip（用于消息气泡下方的分支切换）。 */
 		branches: BranchSummary[];
 		/** 全部快照节点（用于计算分支备选路径）。 */
@@ -100,6 +102,7 @@
 		recentLog,
 		onExportLog,
 		streamingSegments,
+		streamingPhase,
 		branches,
 		snapshots,
 		headId,
@@ -213,6 +216,7 @@
 	$effect(() => {
 		void conversation;
 		void streamingSegments;
+		void streamingPhase;
 		if (listEl !== null) {
 			listEl.scrollTop = listEl.scrollHeight;
 		}
@@ -314,6 +318,13 @@
 							...(streamingSegments.length > 0 ? { segments: streamingSegments } : {})
 						}}
 					/>
+				{/if}
+				{#if streamingPhase !== null}
+					<!-- 正文已输出后的后处理状态条：补调重试/状态判断/确认不再是黑盒停顿。 -->
+					<div class="phase-bar" role="status">
+						<span class="phase-dot"></span>
+						{streamingPhase}
+					</div>
 				{/if}
 			</div>
 		{/if}

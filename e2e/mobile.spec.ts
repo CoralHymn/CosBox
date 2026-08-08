@@ -16,7 +16,7 @@ test('移动端：左侧抽屉导航 + 右上角状态浮层 + 聊天可用 + �
 	await expect(page.locator('.nav-backdrop.show')).toBeVisible();
 	// 等待抽屉滑入动画完成
 	await expect.poll(() => navRail.evaluate((el) => el.getBoundingClientRect().left)).toBe(0);
-	await expect(page.locator('.nav-item')).toHaveCount(10);
+	await expect(page.locator('.nav-item')).toHaveCount(11);
 
 	// 点击抽屉里的「状态」：抽屉关闭并切换页面
 	await navRail.getByRole('button', { name: /状态/ }).click();

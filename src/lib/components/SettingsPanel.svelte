@@ -85,6 +85,7 @@
 	let stream = $state(false);
 	let allowAiStateTools = $state(false);
 	let llmStateConfirm = $state(false);
+	let textToolFallback = $state(true);
 	let memoryEnabled = $state(true);
 	let memoryInjectLimit = $state(5);
 	let memoryAutoExtract = $state(false);
@@ -190,6 +191,7 @@
 		stream = config.stream === true;
 		allowAiStateTools = config.allowAiStateTools === true;
 		llmStateConfirm = config.llmStateConfirm === true;
+		textToolFallback = config.textToolFallback !== false;
 		memoryEnabled = config.memoryEnabled !== false;
 		memoryInjectLimit = config.memoryInjectLimit ?? 5;
 		memoryAutoExtract = config.memoryAutoExtract === true;
@@ -325,6 +327,7 @@
 			stream,
 			allowAiStateTools,
 			llmStateConfirm,
+			textToolFallback,
 			memoryEnabled,
 			memoryInjectLimit,
 			memoryAutoExtract,
@@ -1117,6 +1120,18 @@
 			/>
 			<label for="llm-state-confirm" class="muted"
 				>使用 LLM 状态确认（AI 未调用工具时，由另一个 LLM 判断并补执行）</label
+			>
+		</div>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input
+				id="text-tool-fallback"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={textToolFallback}
+				disabled={!allowAiStateTools}
+			/>
+			<label for="text-tool-fallback" class="muted"
+				>文本形式工具调用双通道（结构化调用缺失时解析文本形式调用兜底；取消勾选则强制只走 JSON）</label
 			>
 		</div>
 		<p class="muted" style="margin: 0;">
