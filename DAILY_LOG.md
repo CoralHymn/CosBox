@@ -2591,3 +2591,27 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 ### 门禁
 
 - 751 个单元测试全过；check / lint / prettier 全绿；代理链路实测通过。
+
+## 2026-08-08（续）：开源协议声明
+
+### 需求
+
+在「设置」中加入开源协议声明，列出 CosBox 直接依赖与参考/调研过的全部开源项目
+及对应许可证；经确认采用「点击后打开小窗」样式，避免设置页被长列表占满。
+
+### 实现
+
+- 新增 `src/lib/legal/credits.ts`：集中维护声明数据，分为「直接依赖 /
+  参考·调研的开源项目 / 非开源设计参考」三组；许可证信息于 2026-08 逐项
+  联网核对上游仓库（opencode=MIT、Chatbox=GPL-3.0、SillyTavern=AGPL-3.0、
+  LiteLLM=MIT（enterprise/ 除外）、Ollama=MIT、vLLM=Apache-2.0、
+  mem0/Letta/Zep=Apache-2.0、LangMem/LangChain/OmniRoute=MIT 等；
+  opencode-mem 仓库未标注许可证，如实注明「调研参考」）。
+- 设置页「开源协议声明」卡片仅保留一行说明与「查看开源协议声明」按钮，
+  点击后复用全局 `prompt-backdrop / prompt-modal` 弹窗展示完整分组列表；
+  支持点击遮罩或「关闭」按钮退出，移动端沿用 94vw 宽度。
+- 新增 `src/lib/legal/credits.test.ts`：锁定分组结构、字段完整性与名称唯一性。
+
+### 门禁
+
+- 754 个单元测试全过（新增 3 条）；check / lint / prettier / build 全绿。
