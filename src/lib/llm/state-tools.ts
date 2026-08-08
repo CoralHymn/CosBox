@@ -25,6 +25,16 @@ export interface ExecutedToolCall {
 	output: string;
 }
 
+/** 工具执行失败时回馈模型的前缀。 */
+export const TOOL_ERROR_PREFIX = '工具执行失败：';
+/** 模型调用了未注册工具时的回馈前缀。 */
+export const TOOL_UNKNOWN_PREFIX = '未知工具：';
+
+/** 工具输出是否为失败结果（气泡错误样式与反馈链路共用同一判定）。 */
+export function isToolErrorOutput(output: string): boolean {
+	return output.startsWith(TOOL_ERROR_PREFIX) || output.startsWith(TOOL_UNKNOWN_PREFIX);
+}
+
 /** 状态工具定义：JSON Schema + 宿主侧执行函数。 */
 export interface StateToolDefinition extends StateToolSchema {
 	execute(args: Record<string, unknown>, ctx: StateToolContext): Promise<string>;
@@ -80,16 +90,17 @@ const REMOVE_TOKENS = new Set(['无', '脱', 'null', 'none']);
 export const gotoLocationTool: StateToolDefinition = {
 	name: 'goto_location',
 	description:
-		'切换角色的当前地点。locationId 优先匹配地点库中的条目；否则使用 name 前往（可附 category 与 description）。',
+		'切换角色的当前地点（剧情中移动/换场景时必须调用）。name 为地点名称，必填；' +
+		'若同时提供 locationId 则优先按地点库 id 精确匹配。地点库外的名称会新建地点，可附 category（大类）与 description。',
 	parameters: {
 		type: 'object',
 		properties: {
-			locationId: { type: 'string', description: '地点库中的 id（可选）' },
-			name: { type: 'string', description: '地点名称（必填其一）' },
+			name: { type: 'string', description: '地点名称（必填），如「教室」「便利店」' },
+			locationId: { type: 'string', description: '地点库中的 id；提供时优先按 id 匹配（可选）' },
 			category: { type: 'string', description: '地点大类，如「学校」（可选）' },
 			description: { type: 'string', description: '地点描述（可选）' }
 		},
-		required: []
+		required: ['name']
 	},
 	async execute(args, ctx) {
 		const place = ctx.getState().places;
@@ -160,11 +171,13 @@ export const gotoLocationTool: StateToolDefinition = {
 /** 推进世界时间：minutes 可为负数（回拨）。 */
 export const advanceTimeTool: StateToolDefinition = {
 	name: 'advance_time',
-	description: '推进世界时间。minutes 为要推进的分钟数，可为负数表示回拨。',
+	description:
+		'推进世界时间。剧情时间发生流逝（赶路、跳过一段时间、进入下一时段等）时必须调用，' +
+		'不要只在正文里描述时间变化。minutes 为推进的分钟数，如 30 表示半小时后、1440 表示一天后；可为负数表示回拨。',
 	parameters: {
 		type: 'object',
 		properties: {
-			minutes: { type: 'number', description: '推进的分钟数' }
+			minutes: { type: 'number', description: '推进的分钟数，如 30；负数为回拨' }
 		},
 		required: ['minutes']
 	},
@@ -186,23 +199,30 @@ export const advanceTimeTool: StateToolDefinition = {
 export const setOutfitTool: StateToolDefinition = {
 	name: 'set_outfit',
 	description:
-		'更换角色穿着。slot 为槽位（headwear/top/underwear/underpants/bottom/socks/shoes/accessory，也可用中文：帽子/上衣/内衣/内裤/下装/袜子/鞋/配饰）；slot 可省略——提供衣柜中已存在的衣物名称时会自动识别槽位。item 必须是衣柜中已存在的衣物名称（精确名称，如「白色衬衫」），或用 null / 「无」表示脱掉。配饰是多件列表槽位：slot=配饰 + item=名称 添加一件，action=remove 移除指定一件，item=无 或 action=clear 清空全部配饰。',
+		'更换角色穿着或脱掉衣物。item 必填：衣柜中的衣物名称（用衣柜里的精确名称，如「白色衬衫」），' +
+		'脱掉该部位衣物时传「无」。slot 为穿着槽位，可省略——省略时按衣柜中该衣物自动识别槽位；' +
+		'可选值：headwear/top/underwear/underpants/bottom/socks/shoes/accessory，也接受中文（帽子/上衣/内衣/内裤/下装/袜子/鞋/配饰）。' +
+		'配饰是多件列表槽位：slot=配饰 + item=名称 添加一件；action=remove 移除指定一件；action=clear 或 item=无 清空全部配饰。',
 	parameters: {
 		type: 'object',
 		properties: {
+			item: {
+				type: 'string',
+				description: '衣柜中的衣物名称（精确名称）；脱掉衣物/清空配饰时传「无」'
+			},
 			slot: {
 				type: 'string',
-				description: '穿着槽位',
-				enum: [...OUTFIT_SLOTS, ACCESSORY_SLOT]
+				description:
+					'穿着槽位（可选，省略时按衣物自动识别）：headwear/top/underwear/underpants/bottom/socks/shoes/accessory 或中文'
 			},
-			item: { type: 'string', description: '衣柜中的衣物名称或 null' },
 			action: {
 				type: 'string',
-				description: '配饰操作：add=添加一件（默认）、remove=移除指定一件、clear=清空全部；仅 slot=配饰 时有效',
+				description:
+					'仅 slot=配饰 时使用：add=添加一件（默认）、remove=移除指定一件、clear=清空全部',
 				enum: ['add', 'remove', 'clear']
 			}
 		},
-		required: ['slot', 'item']
+		required: ['item']
 	},
 	async execute(args, ctx) {
 		const rawSlot = typeof args.slot === 'string' ? args.slot.trim().toLowerCase() : '';
@@ -246,10 +266,7 @@ export const setOutfitTool: StateToolDefinition = {
 			const action = typeof args.action === 'string' ? args.action.trim().toLowerCase() : 'add';
 			if (value === null || action === 'clear') {
 				if (current.length > 0) {
-					await ctx.update(
-						{ outfit: { accessories: [] } },
-						{ desc: 'AI 更换穿着：配饰 → 无' }
-					);
+					await ctx.update({ outfit: { accessories: [] } }, { desc: 'AI 更换穿着：配饰 → 无' });
 				}
 				return '已清空配饰';
 			}
@@ -336,12 +353,17 @@ function matchesSlotKind(
 /** 设置角色属性（如心情、金钱、好感度），数字/布尔字符串会自动转换。 */
 export const setAttributeTool: StateToolDefinition = {
 	name: 'set_attribute',
-	description: '设置或更新角色属性表中的一项（如 mood/money/affection）。',
+	description:
+		'设置或更新角色属性表中的一项（属性名参考状态中的属性表，如 mood/money/affection）。' +
+		'剧情导致属性变化（花钱、心情变化、好感度增减等）时调用。',
 	parameters: {
 		type: 'object',
 		properties: {
-			key: { type: 'string', description: '属性名' },
-			value: { type: 'string', description: '属性值，数字与布尔会自动转换' }
+			key: { type: 'string', description: '属性名，如 mood / money' },
+			value: {
+				type: 'string',
+				description: '属性值，按字符串传（数字与布尔会自动转换），如 "100"、"开心"'
+			}
 		},
 		required: ['key', 'value']
 	},
@@ -381,7 +403,7 @@ export async function executeStateTool(
 ): Promise<ExecutedToolCall> {
 	const definition = definitions.find((item) => item.name === call.name);
 	if (definition === undefined) {
-		return { id: call.id, name: call.name, output: `未知工具：${call.name}` };
+		return { id: call.id, name: call.name, output: `${TOOL_UNKNOWN_PREFIX}${call.name}` };
 	}
 	try {
 		const output = await definition.execute(call.arguments, ctx);
@@ -390,7 +412,7 @@ export async function executeStateTool(
 		return {
 			id: call.id,
 			name: call.name,
-			output: `工具执行失败：${err instanceof Error ? err.message : '未知错误'}`
+			output: `${TOOL_ERROR_PREFIX}${err instanceof Error ? err.message : '未知错误'}`
 		};
 	}
 }

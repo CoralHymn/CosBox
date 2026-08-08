@@ -561,6 +561,8 @@ test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并�
 
 	// 工具调用 → 状态快照 → 最终回复
 	await expect(page.getByText(/这套很适合现在/)).toBeVisible();
+	// 工具段在可折叠的「工作过程」区：落库后默认收起，展开再断言。
+	await page.locator('.message.assistant .work-process summary').click();
 	await expect(page.getByText('黑色卫衣').first()).toBeVisible();
 	await expect
 		.poll(async () => page.locator('.chip').filter({ hasText: '快照' }).textContent())
@@ -635,7 +637,9 @@ test('AI 一次回复可包含多段：工具轮次叙事文本与最终回复�
 	await page.getByPlaceholder(/输入消息/).fill('好了快穿上吧，别着凉了');
 	await page.getByRole('button', { name: '发送' }).click();
 
-	// AI 一轮回复合并为单条气泡：两段正文与工具分段都保留
+	// AI 一轮回复合并为单条气泡：中间叙事与工具段在可折叠「工作过程」区，最终回复在下方。
+	// 展开工作过程区后，叙事文本与工具分段都保留。
+	await page.locator('.message.assistant .work-process summary').click();
 	await expect(
 		page.getByText('（愣了一下，低头看看自己，脸颊一下子红了）啊！？我……')
 	).toBeVisible();

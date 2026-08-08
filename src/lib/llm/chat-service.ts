@@ -31,6 +31,7 @@ import type {
 	LlmClient,
 	LlmConfig,
 	StateToolSchema,
+	ToolCall,
 	TokenUsage
 } from './types';
 
@@ -71,6 +72,8 @@ export type PromptPreviewResult =
 export interface RoundToolFeedback {
 	name: string;
 	output: string;
+	/** 调用参数摘要（如「minutes=30」），展示用。 */
+	args?: string;
 }
 
 /** agent 循环中的一轮：叙事文本（可空）+ 该轮执行的工具反馈。 */
@@ -106,6 +109,15 @@ export interface GenerateReplyOptions {
 	onDelta?: (delta: string) => void;
 	/** 流式思考增量回调（reasoning_content）：供 UI 实时展示 AI 思考过程。 */
 	onThinkingDelta?: (delta: string) => void;
+	/** 工具开始执行事件：供 UI 流式展示「工具调用中」。 */
+	onToolStart?: (call: ToolCall) => void;
+	/** 工具执行结果事件（含失败文本），与 onToolStart 成对。 */
+	onToolResult?: (result: ExecutedToolCall) => void;
+	/**
+	 * 流式思考命中重复循环、当前请求被中断重启：首次请求已流式输出的内容将被丢弃，
+	 * UI 应清空流式草稿，避免「流式看到、完成后被吞」。
+	 */
+	onRestart?: () => void;
 	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
 	enableStateJudge?: boolean;
 	/** LLM 状态确认使用的模型配置；缺省回退主对话配置（可指定便宜模型省 token）。 */
@@ -216,13 +228,7 @@ export class ChatService {
 				const maxTurns = options.maxToolTurns ?? DEFAULT_MAX_TOOL_TURNS;
 				for (let turn = 0; turn < maxTurns; turn += 1) {
 					debug = buildDebugView(messages[0]!.content, messages, config, options);
-					let result = await this.callWithLoopIntercept(
-						messages,
-						config,
-						options,
-						signal,
-						'tools'
-					);
+					let result = await this.callWithLoopIntercept(messages, config, options, signal, 'tools');
 					usage = mergeUsage(usage, result.usage);
 					// 记录本轮模型第一次响应携带的思考：后续补调/重试可能替换 result，
 					// 若替换后的结果没有思考（如非流式兜底），落库时仍保留原始思考，
@@ -236,12 +242,7 @@ export class ChatService {
 					// 流中出现了 tool_calls delta 但格式无效（函数名为空等）：模型确实试图调用，
 					// 但静默丢弃会让它误以为调用已生效。回写失败提示重试一次，让它重新发出。
 					if (result.malformedToolCall === true && result.toolCalls.length === 0) {
-						const retried = await this.retryMalformedToolCall(
-							messages,
-							config,
-							options,
-							signal
-						);
+						const retried = await this.retryMalformedToolCall(messages, config, options, signal);
 						usage = mergeUsage(usage, retried?.usage);
 						if (retried !== null) {
 							result = retried;
@@ -302,12 +303,7 @@ export class ChatService {
 						} else {
 							// 带工具的重试仍失败：去掉工具声明、改非流式再试，
 							// 规避 DeepSeek V4 思考模式在工具声明下的「只思考不产出」问题。
-							const plain = await this.retryPlainText(
-								messages,
-								config,
-								signal,
-								options.onThinkingDelta
-							);
+							const plain = await this.retryPlainText(messages, config, signal);
 							usage = mergeUsage(usage, plain?.usage);
 							if (plain !== null) {
 								result = plain;
@@ -338,13 +334,20 @@ export class ChatService {
 							);
 							if (minutes !== null) {
 								const now = options.toolContext.getState().schedule.time;
+								const hostCall: ToolCall = {
+									id: 'host_infer',
+									name: 'advance_time',
+									arguments: { minutes }
+								};
+								options.onToolStart?.(hostCall);
 								await options.toolContext.advanceTime(minutes);
 								const next = addMinutes(now, minutes);
 								const output = `时间推进到 ${formatWorldTime(next)}`;
+								options.onToolResult?.({ id: 'host_infer', name: 'advance_time', output });
 								executedTools.push({ id: 'host_infer', name: 'advance_time', output });
 								rounds.push({
 									content: null,
-									tools: [{ name: 'advance_time', output }]
+									tools: [{ name: 'advance_time', output, args: `minutes=${minutes}` }]
 								});
 							}
 						}
@@ -375,22 +378,24 @@ export class ChatService {
 							finishReason: result.finishReason,
 							judgeDebug,
 							rounds,
-							replySegments: ensureFirstThinkingInSegments(
-								result.segments,
-								firstResultThinking
-							)
+							replySegments: ensureFirstThinkingInSegments(result.segments, firstResultThinking)
 						};
 					}
 					const toolMessages: ChatMessage[] = [];
 					const roundTools: RoundToolFeedback[] = [];
 					const feedbackLines: string[] = [];
 					for (const call of result.toolCalls) {
+						const argsText = formatToolArguments(call.arguments);
+						options.onToolStart?.(call);
 						const outcome = await executeStateTool(options.tools, call, options.toolContext);
+						options.onToolResult?.(outcome);
 						executedTools.push(outcome);
-						roundTools.push({ name: call.name, output: outcome.output });
-						feedbackLines.push(
-							`- ${call.name}(${formatToolArguments(call.arguments)}) → ${outcome.output}`
-						);
+						roundTools.push({
+							name: call.name,
+							output: outcome.output,
+							...(argsText !== '' ? { args: argsText } : {})
+						});
+						feedbackLines.push(`- ${call.name}(${argsText}) → ${outcome.output}`);
 						toolMessages.push({
 							role: 'tool',
 							content: outcome.output,
@@ -444,13 +449,7 @@ export class ChatService {
 			}
 		}
 
-		let result = await this.callWithLoopIntercept(
-			messages,
-			config,
-			options,
-			signal,
-			'plain'
-		);
+		let result = await this.callWithLoopIntercept(messages, config, options, signal, 'plain');
 		// 与工具路径一致：重试可能替换 result，兜底保留第一次响应携带的思考，
 		// 防止「只思考无正文」重试成功但替换结果丢失思考、落库后不再展示。
 		const firstResultThinking = result.thinking;
@@ -464,7 +463,7 @@ export class ChatService {
 			if (retried !== null) {
 				result = retried;
 			} else {
-				const plain = await this.retryPlainText(messages, config, signal, options.onThinkingDelta);
+				const plain = await this.retryPlainText(messages, config, signal);
 				usage = mergeUsage(usage, plain?.usage);
 				if (plain !== null) {
 					result = plain;
@@ -571,6 +570,7 @@ export class ChatService {
 	/**
 	 * 思考型模型只输出思考、无正文时重试一次：追加「正文必填」系统提示后重新请求。
 	 * 重试仍为思考型空回复（或请求失败）时返回 null，由调用方保留原结果。
+	 * 重试不走流式回调：其结果可能被丢弃，流式展示会造成「看到却被吞」。
 	 */
 	private async retryThinkingOnly(
 		messages: ReadonlyArray<ChatMessage>,
@@ -591,14 +591,10 @@ export class ChatService {
 					? await this.client.chatWithTools(
 							retryMessages,
 							options.tools,
-							config,
-							signal,
-							options.onDelta,
-							{ onThinkingDelta: options.onThinkingDelta }
+							{ ...config, stream: false },
+							signal
 						)
-					: await this.client.chat(retryMessages, config, signal, options.onDelta, {
-							onThinkingDelta: options.onThinkingDelta
-						});
+					: await this.client.chat(retryMessages, { ...config, stream: false }, signal);
 			return result.toolCalls.length > 0 ||
 				(result.content !== null && result.content.trim() !== '')
 				? result
@@ -631,14 +627,10 @@ export class ChatService {
 					? await this.client.chatWithTools(
 							retryMessages,
 							options.tools,
-							config,
-							signal,
-							options.onDelta,
-							{ onThinkingDelta: options.onThinkingDelta }
+							{ ...config, stream: false },
+							signal
 						)
-					: await this.client.chat(retryMessages, config, signal, options.onDelta, {
-							onThinkingDelta: options.onThinkingDelta
-						});
+					: await this.client.chat(retryMessages, { ...config, stream: false }, signal);
 			return result.toolCalls.length > 0 ||
 				(result.content !== null && result.content.trim() !== '')
 				? result
@@ -664,6 +656,7 @@ export class ChatService {
 			const attemptController = new AbortController();
 			let thinkingAccum = '';
 			let loopAborted = false;
+			const isRetry = retryNudge !== null;
 			const onExternalAbort = (): void => attemptController.abort();
 			if (signal !== undefined) {
 				if (signal.aborted) {
@@ -685,6 +678,11 @@ export class ChatService {
 					retryNudge === null
 						? [...messages]
 						: [...messages, { role: 'system', content: retryNudge }];
+				// 重启请求不接入流式回调：首次请求的输出已随中断丢弃，重启结果若再流式
+				// 展示，被丢弃部分与重启部分会混在同一段草稿里（「完成后被吞」的源头之一）。
+				const deltaForClient = isRetry ? undefined : options.onDelta;
+				const thinkingForClient = isRetry ? undefined : wrappedThinkingDelta;
+				const attemptConfig = isRetry ? { ...config, stream: false } : config;
 				if (kind === 'tools') {
 					if (
 						this.client.chatWithTools === undefined ||
@@ -696,25 +694,27 @@ export class ChatService {
 					return await this.client.chatWithTools(
 						requestMessages,
 						options.tools,
-						config,
+						attemptConfig,
 						attemptController.signal,
-						options.onDelta,
-						{ onThinkingDelta: wrappedThinkingDelta }
+						deltaForClient,
+						{ onThinkingDelta: thinkingForClient }
 					);
 				}
 				return await this.client.chat(
 					requestMessages,
-					config,
+					attemptConfig,
 					attemptController.signal,
-					options.onDelta,
-					{ onThinkingDelta: wrappedThinkingDelta }
+					deltaForClient,
+					{ onThinkingDelta: thinkingForClient }
 				);
 			} catch (err) {
 				if (signal?.aborted) {
 					throw err;
 				}
-				// 流式思考命中循环导致中断：注入「停止重复」提示重试一次。
+				// 流式思考命中循环导致中断：通知 UI 清空已展示的草稿（这部分内容不会落库），
+				// 再注入「停止重复」提示重试一次。
 				if (loopAborted) {
+					options.onRestart?.();
 					return await attempt(REPETITION_NUDGE);
 				}
 				throw err;
@@ -732,17 +732,14 @@ export class ChatService {
 	private async retryPlainText(
 		messages: ReadonlyArray<ChatMessage>,
 		config: LlmConfig,
-		signal?: AbortSignal,
-		onThinkingDelta?: (delta: string) => void
+		signal?: AbortSignal
 	): Promise<LlmChatResult | null> {
 		const retryMessages: ChatMessage[] = [
 			...messages,
 			{ role: 'system', content: THINKING_ONLY_NUDGE }
 		];
 		try {
-			const result = await this.client.chat(retryMessages, { ...config, stream: false }, signal, undefined, {
-				onThinkingDelta
-			});
+			const result = await this.client.chat(retryMessages, { ...config, stream: false }, signal);
 			return result.content !== null && result.content.trim() !== '' ? result : null;
 		} catch {
 			return null;
@@ -771,10 +768,7 @@ export class ChatService {
 					'如果不需要调用，请直接输出正文。'
 			}
 		];
-		const attempt = async (
-			forceToolCall: boolean,
-			stream: boolean
-		): Promise<LlmChatResult | null> => {
+		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
 			if (
 				this.client.chatWithTools === undefined ||
 				options.tools === undefined ||
@@ -784,34 +778,35 @@ export class ChatService {
 				return null;
 			}
 			try {
+				// 补调重试不接入流式回调且统一非流式：结果可能被丢弃，流式展示会「看到却被吞」；
+				// 且部分代理只在非流式转发 tool_calls，非流式补调更可靠。
 				return await this.client.chatWithTools(
 					retryMessages,
 					options.tools,
-					{ ...config, stream },
+					{ ...config, stream: false },
 					signal,
-					options.onDelta,
-					{ forceToolCall, onThinkingDelta: options.onThinkingDelta }
+					undefined,
+					{ forceToolCall }
 				);
 			} catch {
 				return null;
 			}
 		};
-		// 第一档：提示 + 常规流式；第二档：tool_choice=required + 非流式
-		// （部分代理只在流式转发时丢失 tool_calls，非流式可绕开）。
-		// DeepSeek V4 思考模式不接受 tool_choice（400），第二档退化为「强提示 + 非流式」，
+		// 第一档：提示 + 常规请求；第二档：tool_choice=required 强制。
+		// DeepSeek V4 思考模式不接受 tool_choice（400），第二档退化为「强提示」，
 		// 仍保留非流式绕过代理丢调用的价值；只采纳真正发出 tool_calls 的结果。
-		const first = await attempt(false, config.stream === true);
+		const first = await attempt(false);
 		if (first && first.toolCalls.length > 0) {
 			return first;
 		}
-		const forced = await attempt(!isDeepSeekModel(config), false);
+		const forced = await attempt(!isDeepSeekModel(config));
 		return forced && forced.toolCalls.length > 0 ? forced : null;
 	}
 
 	/**
 	 * 流中出现 tool_calls delta 但格式无效（函数名为空等）时补发重试：
 	 * 追加「宿主没收到合法调用」的系统提示，让模型重新发出结构化 tool_calls。
-	 * 第一档流式 + 第二档非流式（DeepSeek 思考模式跳过 tool_choice），
+	 * 第一档常规 + 第二档 tool_choice 强制（DeepSeek 思考模式跳过 tool_choice），
 	 * 只采纳真正发出 tool_calls 的结果，避免把普通正文当调用。
 	 */
 	private async retryMalformedToolCall(
@@ -824,10 +819,7 @@ export class ChatService {
 			...messages,
 			{ role: 'system', content: MALFORMED_TOOL_NUDGE }
 		];
-		const attempt = async (
-			forceToolCall: boolean,
-			stream: boolean
-		): Promise<LlmChatResult | null> => {
+		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
 			if (
 				this.client.chatWithTools === undefined ||
 				options.tools === undefined ||
@@ -840,20 +832,20 @@ export class ChatService {
 				return await this.client.chatWithTools(
 					retryMessages,
 					options.tools,
-					{ ...config, stream },
+					{ ...config, stream: false },
 					signal,
-					options.onDelta,
-					{ forceToolCall, onThinkingDelta: options.onThinkingDelta }
+					undefined,
+					{ forceToolCall }
 				);
 			} catch {
 				return null;
 			}
 		};
-		const first = await attempt(false, config.stream === true);
+		const first = await attempt(false);
 		if (first && first.toolCalls.length > 0) {
 			return first;
 		}
-		const forced = await attempt(!isDeepSeekModel(config), false);
+		const forced = await attempt(!isDeepSeekModel(config));
 		return forced && forced.toolCalls.length > 0 ? forced : null;
 	}
 
@@ -874,10 +866,7 @@ export class ChatService {
 			...messages,
 			{ role: 'system', content: TIME_CLAIM_NUDGE }
 		];
-		const attempt = async (
-			forceToolCall: boolean,
-			stream: boolean
-		): Promise<LlmChatResult | null> => {
+		const attempt = async (forceToolCall: boolean): Promise<LlmChatResult | null> => {
 			if (
 				this.client.chatWithTools === undefined ||
 				options.tools === undefined ||
@@ -890,20 +879,20 @@ export class ChatService {
 				return await this.client.chatWithTools(
 					retryMessages,
 					options.tools,
-					{ ...config, stream },
+					{ ...config, stream: false },
 					signal,
-					options.onDelta,
-					{ forceToolCall, onThinkingDelta: options.onThinkingDelta }
+					undefined,
+					{ forceToolCall }
 				);
 			} catch {
 				return null;
 			}
 		};
-		const first = await attempt(false, config.stream === true);
+		const first = await attempt(false);
 		if (first && first.toolCalls.length > 0) {
 			return first;
 		}
-		const forced = await attempt(!isDeepSeekModel(config), false);
+		const forced = await attempt(!isDeepSeekModel(config));
 		return forced && forced.toolCalls.length > 0 ? forced : null;
 	}
 
@@ -1375,7 +1364,7 @@ function buildLastResponse(result: LlmChatResult): DebugLastResponse {
 }
 
 /** 把工具参数格式化为紧凑文本，如「slot=上衣, item=白色衬衫」。 */
-function formatToolArguments(args: Record<string, unknown>): string {
+export function formatToolArguments(args: Record<string, unknown>): string {
 	return Object.entries(args)
 		.map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
 		.join(', ');

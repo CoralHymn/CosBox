@@ -2621,3 +2621,38 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 经用户提醒，声明清单补入 `VoltAgent/awesome-design-md`（MIT）——
   内置主题预设（Claude / Discord / The Verge）的设计分析参考；
   许可证已联网核对，名称唯一性与字段完整性测试同步覆盖。
+
+## 2026-08-08（续二）：AI 气泡双层布局 + 工具调用实时反馈 + 工具 schema 修复
+
+### 需求
+
+- AI 气泡交错输出（思考→正文→思考→正文）在流式阶段被压成「一段思考 + 一段正文」，
+  后续思考/正文在原位追加；补调重试的输出被丢弃时「流式看到、完成后被吞」。
+- 对齐主流 agent（Claude / ChatGPT）：可折叠「工作过程区」+ 下方最终答案。
+- 工具调用要有「调用中」实时反馈；调用失败的错误样式要可见
+  （失败文本一直有回馈模型，但 UI 从未区分展示）。
+- 排查「工具老是调用不起来」：对标主流实践修正 schema 与描述的矛盾。
+
+### 实现
+
+- `types.ts`：`MessageSegment` 增加 `toolArgs`（参数摘要）与 `status`（running/error）。
+- `+page.svelte`：`streamingDraft/streamingThinking` 两字符串改为
+  `streamingSegments` 分段数组（同类型续接、异类型新开段，保留交替顺序）；
+  新增 `onToolStart/onToolResult/onRestart` 处理；落库分段携带参数与失败状态。
+- `chat-service.ts`：新增 `onToolStart/onToolResult/onRestart` 选项，工具执行
+  （含 host_infer 兜底）发出事件；轮次反馈携带参数摘要；所有补调/重试改非流式
+  且不接入草稿回调（可被丢弃的结果不再流式展示）；思考循环中断时通知 UI 清空草稿。
+- `MessageBubble.svelte`：双层渲染——最后一次工具调用及之前的分段进可折叠
+  「工作过程（N 步）」区（流式中展开、完成后收起），之后的正文为最终答案；
+  工具段显示参数与「调用中…/失败红字」；无工具段时思考归过程区、正文归最终答案。
+- `ChatPanel.svelte`：流式草稿气泡传 segments。
+- `state-tools.ts`：`set_outfit` 去掉与中文别名矛盾的英文 enum、required 改
+  `['item']`；`goto_location` required 改 `['name']`；各工具描述前置关键约束与示例；
+  导出 `isToolErrorOutput` 统一失败判定。
+- `openai-client.ts`：流式 tool_calls 兼容代理以对象（非字符串）下发 arguments。
+- 测试：新增工具事件、重试流式隔离、onRestart 用例；既有 rounds 断言补充 args；
+  e2e 两处改为展开工作过程区后断言。
+
+### 门禁
+
+- 756 个单元测试全过（新增 2 条）；45 条 e2e 全过；check / lint / prettier 全绿。

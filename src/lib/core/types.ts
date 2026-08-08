@@ -156,6 +156,10 @@ export interface MessageSegment {
 	content: string;
 	/** 工具段：工具名（如 advance_time / set_outfit），展示用。 */
 	toolName?: string;
+	/** 工具段：参数摘要（如「minutes=30」），展示用。 */
+	toolArgs?: string;
+	/** 工具段状态：running=执行中（流式 transient）；error=执行失败。 */
+	status?: 'running' | 'error';
 }
 
 /** 会话中展示用的消息视图（由快照链重建而来）。 */

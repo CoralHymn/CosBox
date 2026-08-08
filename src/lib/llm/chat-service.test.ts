@@ -173,14 +173,17 @@ describe('ChatService', () => {
 			chatWithTools
 		};
 		const service = new ChatService(client);
+		const onRestart = vi.fn();
 		const { reply } = await service.generateReply(
 			{ state: createInitialState(), conversation: [], worldInfo: [] },
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), onRestart }
 		);
 		expect(reply).toBe('（自然回应）我们走吧。');
 		// 首次请求被实时中断，第二次为带「停止重复」提示的重启请求。
 		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		// 中断时通知 UI 清空流式草稿（首次请求已展示的内容不会落库）。
+		expect(onRestart).toHaveBeenCalledTimes(1);
 		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
 		expect(retryMessages.some((message) => message.content.includes('重复循环'))).toBe(true);
 	});
@@ -1200,7 +1203,11 @@ describe('ChatService', () => {
 		expect(rounds[0]!.content).toBe('（愣了一下，脸颊红了）啊！？');
 		expect(rounds[0]!.thinking).toBe('让我想想');
 		expect(rounds[0]!.tools).toEqual([
-			{ name: 'set_outfit', output: expect.stringContaining('黑色卫衣') }
+			{
+				name: 'set_outfit',
+				output: expect.stringContaining('黑色卫衣'),
+				args: 'slot=top, item=黑色卫衣'
+			}
 		]);
 		expect(reply).toBe('（扣好扣子）呼——好了。');
 	});
@@ -1226,8 +1233,61 @@ describe('ChatService', () => {
 		expect(rounds).toHaveLength(1);
 		expect(rounds[0]!.content).toBeNull();
 		expect(rounds[0]!.tools).toEqual([
-			{ name: 'goto_location', output: expect.stringContaining('食堂') }
+			{ name: 'goto_location', output: expect.stringContaining('食堂'), args: 'name=食堂' }
 		]);
+	});
+
+	it('agent 循环：工具执行按序发出 onToolStart / onToolResult 事件', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: null,
+					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+				})
+				.mockResolvedValueOnce({ content: '到了', toolCalls: [] })
+		};
+		const service = new ChatService(client);
+		const events: string[] = [];
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{
+				tools: [...STATE_TOOLS],
+				toolContext: makeToolContext(),
+				onToolStart: (call) => events.push(`start:${call.name}`),
+				onToolResult: (result) => events.push(`result:${result.name}:${result.output}`)
+			}
+		);
+		expect(events).toHaveLength(2);
+		expect(events[0]).toBe('start:goto_location');
+		expect(events[1]).toContain('result:goto_location:');
+		expect(events[1]).toContain('食堂');
+	});
+
+	it('工具路径：补调重试不接入流式回调且改为非流式（避免草稿吞句）', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '只思考' })
+			.mockResolvedValueOnce({ content: '补上的正文', toolCalls: [], thinking: '重试思考' });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const onDelta = vi.fn();
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), onDelta }
+		);
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		// 重试请求：不传流式增量回调、强制非流式。
+		expect(chatWithTools.mock.calls[1]![4]).toBeUndefined();
+		expect(chatWithTools.mock.calls[1]![5]).toBeUndefined();
+		expect(chatWithTools.mock.calls[1]![2]).toMatchObject({ stream: false });
+		expect(onDelta).not.toHaveBeenCalled();
 	});
 
 	it('agent 循环：超过最大轮数时已产生的轮次仍返回', async () => {
