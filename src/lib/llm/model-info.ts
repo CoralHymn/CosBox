@@ -68,6 +68,10 @@ const MODEL_CATALOG: Record<string, ModelInfo> = {
 	'kimi-k2.6': { contextWindow: 128_000, pricing: { input: 0.95, output: 4, cachedInput: null } },
 	'kimi-k2.5': { contextWindow: 128_000, pricing: { input: 0.6, output: 3, cachedInput: null } },
 	'glm-5': { contextWindow: 200_000, pricing: { input: 1, output: 3.2, cachedInput: null } },
+	'glm-5.2': {
+		contextWindow: 1_000_000,
+		pricing: { input: 1.4, output: 4.4, cachedInput: 0.26 }
+	},
 	'grok-4.3': { contextWindow: 1_000_000, pricing: { input: 1.25, output: 2.5, cachedInput: 0.2 } },
 	'grok-4.20': { contextWindow: 1_000_000, pricing: { input: 2, output: 6, cachedInput: 0.5 } },
 	'grok-4.5': { contextWindow: 1_000_000, pricing: { input: 2, output: 6, cachedInput: 0.5 } },
@@ -78,6 +82,14 @@ const MODEL_CATALOG: Record<string, ModelInfo> = {
 	'llama-3.1-8b': {
 		contextWindow: 128_000,
 		pricing: { input: 0.05, output: 0.08, cachedInput: null }
+	},
+	'gpt-oss-120b': {
+		contextWindow: 131_072,
+		pricing: { input: 0.35, output: 0.75, cachedInput: null }
+	},
+	'minimax-m3': {
+		contextWindow: 1_000_000,
+		pricing: { input: 0.3, output: 1.2, cachedInput: 0.06 }
 	},
 	'mistral-large': {
 		contextWindow: 100_000,
