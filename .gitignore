@@ -7,7 +7,7 @@ test-results/
 tmp/
 .DS_Store
 *.local
-.trae/
+
 .env
 .env.*
 !.env.example
