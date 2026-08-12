@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "CosBox",
   "version": "0.0.1",
-  "identifier": "com.cosbox.app",
+  "identifier": "cc.benng.cosbox",
   "build": {
     "frontendDist": "../build",
     "devUrl": "http://localhost:5173",

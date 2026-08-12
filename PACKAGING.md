@@ -22,10 +22,10 @@ Tauri 2 薄壳封装（系统 WebView）。本文件记录环境要求、常用�
 ## 常用命令
 
 ```bash
-npm run tauri dev          # Windows 桌面开发壳（自动起 Vite dev server）
-npm run tauri build        # Windows 发布构建：NSIS 安装包 + MSI
-npm run tauri android dev  # Android 开发（adb 有设备时）
-npm run tauri android build# Android 发布构建：APK / AAB
+npm run tauri dev           # Windows 桌面开发壳（自动起 Vite dev server）
+npm run tauri build         # Windows 发布构建：NSIS 安装包 + MSI
+npm run tauri android dev   # Android 开发（adb 有设备时）
+npm run tauri android build # Android 发布构建：APK / AAB
 ```
 
 产物位置：
