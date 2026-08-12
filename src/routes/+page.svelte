@@ -68,6 +68,7 @@
 	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
 	import type { SyncSettings } from '../lib/sync/types';
 	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
+	import { checkForUpdate, isTauri } from '../lib/platform/updater';
 	import { rebuildFromNodes } from '../lib/core/snapshot';
 	import { createInitialState } from '../lib/core/state';
 	import type { SearchResult } from '../lib/search/types';
@@ -268,6 +269,19 @@
 			session.subscribe(() => syncService.notifyChanged());
 			worldInfo.subscribe(() => syncService.notifyChanged());
 			settings.subscribe(() => syncService.notifyChanged());
+			// 桌面版启动时静默检查更新：仅在新版本可用时提示，去「设置 → 关于」更新。
+			if (isTauri()) {
+				void checkForUpdate()
+					.then((info) => {
+						if (info !== null) {
+							toasts.push(
+								'info',
+								`发现新版本 v${info.version}，可在「设置 → 关于」中更新。`
+							);
+						}
+					})
+					.catch(() => undefined);
+			}
 		} catch (err) {
 			toasts.error(err);
 		} finally {
