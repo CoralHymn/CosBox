@@ -1640,3 +1640,41 @@ assistant「自己的话」发回上下文，与最终正文高度相似，诱�
 
 **代价**：上下文丢失假正文里的非状态叙事细节（状态事实由工具反馈承载）；
 侧边导航多一个入口；监控数据只存本地（滚动窗口上限 300 轮/500 事件）。
+
+## D103：Tauri 2 双端打包——共享 Web 层 + 每平台薄壳
+
+**背景**：CosBox 需打包为 Windows 与 Android 应用。Web 层为纯静态 SPA
+（adapter-static，SSR 关闭），所有网络请求均为浏览器侧 fetch（LLM / 搜索 /
+同步服务器），无后端渲染，天然适配 WebView 封装。
+
+**选择**：
+
+1. 双端统一 Tauri 2：Windows 用系统 WebView2，Android 用系统 WebView；
+   不引入 Electron（包体大）、不引入 Capacitor（WebView 层之外无收益）、
+   不原生重写、不引入 SSR / 后端渲染。
+2. 共享 Web 层唯一代码库，`src/lib/platform/` 适配层两个端口：
+   - `WorkspaceStore`：Web 保持 Dexie / IndexedDB；打包版迁移
+     `tauri-plugin-sql`（SQLite）——Android WebView 的 IndexedDB 存在清数据 /
+     更新丢失风险。
+   - `FilePort`：Web 保留 `download.ts`（Blob 下载）；Windows 用
+     `tauri-plugin-dialog`；Android 用 SAF / share（WebView Blob 下载体验差）。
+3. LLM 请求出口 `llmFetch` 注入：Web 端原生 fetch（`/llm-proxy` 相对路径由
+   Vite 代理转发，见 D99）；打包版用 `tauri-plugin-http`（Rust reqwest 发出，
+   绕开浏览器 CORS），把 `/llm-proxy/...` 前缀还原为
+   `https://opencode.ai/...`，其余绝对端点原样透传；流式 / Abort 需真机回归。
+4. 调试设备：MuMu 12 模拟器（adb connect 127.0.0.1:16384），构建 x86_64
+   变体（Tauri CLI 对 armDebug split APK 在 x86_64 设备有已知问题 #14168）；
+   发布以 arm64 真机为主。MuMu 属第三方模拟器，Tauri 设备发现偏向官方 AVD，
+   必要时走 `tauri android build` + `adb install` 手动路径。
+5. Node 同步服务器不进安装包（独立部署；如未来要求内置，走 Rust 重写或
+   sidecar）。
+
+**理由**：Tauri 安装包小（Windows 5–15 MB、Android 10–20 MB，WebView 系统
+自带），与项目零依赖理念一致；单代码库维护，业务逻辑不分裂；plugin-http
+顺带解决 Android 局域网 http 端点（cleartext 仅 debug 放行）与 WebView
+CORS 双重问题。
+
+**代价**：Android WebView IndexedDB 持久性风险需 SQLite 迁移消化；CORS 处理
+多一层注入抽象；`/llm-proxy` 在打包版无 Vite 后端，静态部署与打包版都依赖
+同路径反向代理或 plugin-http 还原；首发仅 Android / Windows，iOS 需另评估
+（Tauri 支持但本机非 macOS）。

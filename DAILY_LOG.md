@@ -2699,3 +2699,43 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 
 - 763 个单元测试全过（新增 7 条：stripTextToolCalls 3 条、双通道/护栏/开关/确认 4 条）；
   45 条 e2e 全过（mobile 导航项断言 10→11）；check / lint / prettier 全绿。
+
+## 2026-08-11：Tauri 2 打包骨架——Windows + Android 双端薄壳初始化
+
+### 背景
+
+- 目标：CosBox 打包为 Windows 与 Android 应用。确认方案：保留共享 Web 层
+  （SvelteKit SPA 唯一代码库），双端均采用 Tauri 2 薄壳（Windows 用系统
+  WebView2，Android 用系统 WebView）；不引入 Electron / Capacitor，不原生重写。
+- 机器环境补齐：Android SDK 命令行版装至 `D:\Android\Sdk`（platform-tools
+  37.0.1 / platforms;android-36 / build-tools;36.0.0 / ndk;27.1.12297006，
+  许可全部接受）；Rust 1.97.1 + 四个 Android target（aarch64 / armv7 / i686 /
+  x86_64）；用户级环境变量 ANDROID_HOME / NDK_HOME / JAVA_HOME。
+- 测试环境：使用 MuMu 12 模拟器（adb connect 127.0.0.1:16384），不建 AVD。
+
+### 实现
+
+- `@tauri-apps/cli` 加入 devDependencies；`tauri init` 生成 `src-tauri/`
+  （frontendDist `../build`、devUrl `http://localhost:5173`，before 命令接
+  `npm run dev` / `npm run build`）。
+- `tauri.conf.json`：identifier 定为 `com.cosbox.app`（Android applicationId
+  与 Windows 升级路径由此派生）；`Cargo.toml` 补元数据（描述 / 作者 / 协议）。
+- `tauri android init` 生成 `src-tauri/gen/android/` Gradle 工程：
+  compileSdk 36 / minSdk 24 / targetSdk 36；debug 构建
+  `usesCleartextTraffic = true`（开发期可连局域网 http 端点），release 保持关闭。
+- `.gitignore`：`target/`、`gen/schemas`、Android `build/` 产物均忽略
+  （git check-ignore 实测生效）；补 `*.jks` / `*.keystore` 防签名文件误提交。
+
+### 验证
+
+- `cargo check` 通过（1m03s，crates.io 直连）；`npm run build` 产物正常落到
+  `build/`（与 frontendDist 对齐）。
+- git 未跟踪清单 64 项均为源码/配置，无编译产物混入。
+
+### 待办（功能开发完成后）
+
+- 应用图标：`tauri icon <源图>` 生成全平台规格。
+- Android 首次构建：联网下载 Gradle / AGP 依赖后 `tauri android build`。
+- 平台适配层：`src/lib/platform/` 端口（WorkspaceStore / FilePort / llmFetch），
+  见 D103 与 PACKAGING.md。
+- 发布签名 keystore 与自动更新（tauri-plugin-updater）配置。
