@@ -27,6 +27,13 @@
 		type ThemeConfig
 	} from '../theme/theme';
 	import { getCreditGroups } from '../legal/credits';
+	import {
+		APP_VERSION,
+		checkForUpdate,
+		downloadAndInstall,
+		isTauri,
+		type UpdateInfo
+	} from '../platform/updater';
 	import ModelCombobox from './ModelCombobox.svelte';
 
 	interface Props {
@@ -132,6 +139,11 @@
 	/** 「获取模型列表」后勾选待批量添加的模型 id。 */
 	let selectedFetchedModels = $state<string[]>([]);
 	let savingService = $state(false);
+	/** 「关于」卡片：更新检查状态。 */
+	let updateBusy = $state(false);
+	let updateStatus = $state('');
+	let updateInfo = $state<UpdateInfo | null>(null);
+	let installProgress = $state('');
 
 	/** 主题颜色项：rgba 项只能文本输入，其余用取色器。 */
 	const themeColorKeys: { key: ThemeColorKey; label: string; rgba: boolean }[] = [
@@ -733,6 +745,53 @@
 				.join('')}`;
 		}
 		return '#000000';
+	}
+
+	/** 检查更新（桌面版）；Web 版提示不支持。 */
+	async function checkUpdates(): Promise<void> {
+		updateBusy = true;
+		updateStatus = '';
+		updateInfo = null;
+		installProgress = '';
+		try {
+			const info = await checkForUpdate();
+			if (info === null) {
+				updateStatus = '已是最新版本';
+			} else {
+				updateInfo = info;
+				updateStatus = `发现新版本 v${info.version}`;
+			}
+		} catch (err) {
+			updateStatus = `检查更新失败：${err instanceof Error ? err.message : '未知错误'}`;
+		} finally {
+			updateBusy = false;
+		}
+	}
+
+	/** 下载并安装新版本；完成后自动重启应用。 */
+	async function installUpdateNow(): Promise<void> {
+		updateBusy = true;
+		installProgress = '正在下载并安装…';
+		updateStatus = '';
+		try {
+			await downloadAndInstall((progress) => {
+				if (progress.total !== null && progress.total > 0) {
+					const percent = Math.min(
+						100,
+						Math.round((progress.downloaded / progress.total) * 100)
+					);
+					installProgress = `正在下载并安装… ${percent}%`;
+				} else {
+					installProgress = '正在下载并安装…';
+				}
+			});
+			// 正常流程会在安装完成后自动重启，这里到不了。
+		} catch (err) {
+			installProgress = '';
+			updateStatus = `更新失败：${err instanceof Error ? err.message : '未知错误'}`;
+		} finally {
+			updateBusy = false;
+		}
 	}
 </script>
 
@@ -1407,6 +1466,33 @@
 			列出 CosBox 直接依赖与参考过的开源项目及对应许可证。
 		</p>
 		<button class="btn" onclick={() => (showCredits = true)}>查看开源协议声明</button>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">关于</h3>
+		<p class="muted" style="margin: 0 0 10px;">
+			CosBox v{APP_VERSION}（测试版）。{isTauri()
+				? '更新检查地址：cosbox.benng.cc'
+				: 'Web 演示版不支持自动更新，请使用桌面版。'}
+		</p>
+		{#if isTauri()}
+			<div class="row-actions">
+				<button class="btn" onclick={checkUpdates} disabled={updateBusy}>
+					{updateBusy && updateInfo === null ? '检查中…' : '检查更新'}
+				</button>
+				{#if updateInfo !== null}
+					<button class="btn btn-primary" onclick={installUpdateNow} disabled={updateBusy}>
+						{installProgress !== '' ? installProgress : `立即更新到 v${updateInfo.version}`}
+					</button>
+				{/if}
+				{#if updateStatus}
+					<span class="muted">{updateStatus}</span>
+				{/if}
+			</div>
+			{#if updateInfo !== null && updateInfo.notes !== ''}
+				<p class="muted" style="margin: 8px 0 0;">更新说明：{updateInfo.notes}</p>
+			{/if}
+		{/if}
 	</div>
 
 	{#if showCredits}
