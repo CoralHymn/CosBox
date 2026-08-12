@@ -1,4 +1,4 @@
-package com.cosbox.app
+package cc.benng.cosbox
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
