@@ -14,6 +14,7 @@
 - Dexie.js（IndexedDB）
 - nanoid
 - OpenAI-compatible API（内置离线 demo provider，可用 LiteLLM Proxy 等任意兼容端点）
+- Tauri 2（Windows WebView2 / Android WebView 打包壳，骨架已就绪）
 - Vitest + Playwright
 
 ## 快速开始
@@ -21,6 +22,7 @@
 ```bash
 npm install
 npm run dev        # http://localhost:5173
+npm run tauri dev  # Tauri 桌面壳（首次编译约 1–3 分钟）
 ```
 
 默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。在「设置」页可直接选择主流服务商预设——
@@ -44,6 +46,9 @@ OpenCode GO/Zen 的 API 不支持浏览器 CORS（OPTIONS 预检直接 404，直
 | `npm test`                  | Vitest 单元测试                               |
 | `npm run test:coverage`     | 单元测试 + 覆盖率（核心层 100% 语句/行/函数） |
 | `npm run test:e2e`          | Playwright 端到端测试                         |
+| `npm run tauri dev`         | Tauri 桌面开发壳（Windows）                   |
+| `npm run tauri android dev` | Android 开发（需 adb 连接真机/模拟器）        |
+| `npm run tauri build`       | 打包 Windows 安装包（NSIS / MSI）             |
 
 ## 功能（P0–P5）
 
@@ -68,6 +73,8 @@ src/lib/
   import-export/ chara_card_v3 映射
   stores/        Svelte 5 runes 响应式封装
   components/    UI 组件（显式 props，禁止 rest 透传）
+src-tauri/      Tauri 壳（tauri.conf.json、Rust 入口、gen/android Gradle 工程）
 ```
 
-详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [DECISIONS.md](./DECISIONS.md)。
+详见 [ARCHITECTURE.md](./ARCHITECTURE.md)、[DECISIONS.md](./DECISIONS.md) 与
+[PACKAGING.md](./PACKAGING.md)。
