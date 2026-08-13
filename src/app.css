@@ -1151,6 +1151,8 @@ button:disabled {
 		flex-wrap: wrap;
 		gap: 8px;
 		padding: 6px 10px;
+		/* 顶部安全区：状态栏/刘海下留出内容空间 */
+		padding-top: calc(6px + env(safe-area-inset-top, 0px));
 	}
 
 	.header-spacer {
@@ -1188,6 +1190,9 @@ button:disabled {
 		overflow-y: auto;
 		border-right: 1px solid var(--border);
 		padding: 14px 10px;
+		/* 抽屉贴边全高：上下都避开安全区（横屏时底部有手势条） */
+		padding-top: calc(14px + env(safe-area-inset-top, 0px));
+		padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
 		gap: 4px;
 		-webkit-overflow-scrolling: touch;
 	}
@@ -1307,7 +1312,8 @@ button:disabled {
 
 	.mobile-state-panel {
 		position: fixed;
-		top: 52px;
+		/* 头部在安全区内增高，浮层同步下移 */
+		top: calc(52px + env(safe-area-inset-top, 0px));
 		right: 10px;
 		width: min(320px, calc(100vw - 20px));
 		max-height: 58vh;
@@ -1351,6 +1357,10 @@ button:disabled {
 
 	.composer {
 		padding: 8px 10px;
+		/* 底部安全区：输入条避开手势条；横屏时左右避开圆角/刘海 */
+		padding-left: calc(10px + env(safe-area-inset-left, 0px));
+		padding-right: calc(10px + env(safe-area-inset-right, 0px));
+		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 		gap: 8px;
 	}
 
@@ -1379,13 +1389,24 @@ button:disabled {
 		flex-wrap: wrap;
 		justify-content: flex-start;
 		gap: 6px;
+		/* 底部安全区 */
+		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 	}
 
-	/* 提示条占满宽度 */
+	/* 全屏弹窗的头部/底部避开安全区 */
+	.prompt-modal-head {
+		padding-top: calc(12px + env(safe-area-inset-top, 0px));
+	}
+
+	.prompt-modal-body {
+		padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+	}
+
+	/* 提示条占满宽度，底部避开手势条 */
 	.toasts {
 		left: 12px;
 		right: 12px;
-		bottom: 12px;
+		bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 	}
 
 	.toast {
