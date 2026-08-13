@@ -28,3 +28,8 @@ tauri-plugin-log = "2"
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# Android 专用：通过 JNI + MediaStore 把导出文件写入公共「下载」目录（无需存储权限）。
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

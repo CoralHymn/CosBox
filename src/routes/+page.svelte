@@ -1308,9 +1308,20 @@
 	}
 
 	/** 导出单个配置段（地点/衣柜/日程）为 JSON 模板。 */
-	function handleExportConfig(kind: GeneratorKind, items: GeneratedItem[]): void {
-		downloadTextFile(`${KIND_LABELS[kind]}-${stamp()}.json`, serializeConfigPart(kind, items));
-		toasts.success(`已导出${KIND_LABELS[kind]}`);
+	async function handleExportConfig(kind: GeneratorKind, items: GeneratedItem[]): Promise<void> {
+		try {
+			const saved = await downloadTextFile(
+				`${KIND_LABELS[kind]}-${stamp()}.json`,
+				serializeConfigPart(kind, items)
+			);
+			toasts.success(
+				saved !== null
+					? `已导出${KIND_LABELS[kind]}，保存于：${saved}`
+					: `已导出${KIND_LABELS[kind]}`
+			);
+		} catch (err) {
+			toasts.error(err);
+		}
 	}
 
 	/** 导入单个配置段：解析、去重合并进世界配置。 */
@@ -1367,10 +1378,14 @@
 		await manager.restoreWorkspace(data.config, data.headId);
 	}
 
-	function handleExportWorkspace(): void {
-		const data = collectWorkspaceData();
-		downloadBytes(`cosbox-${stamp()}.cbox`, serializeWorkspace(data));
-		toasts.success('工作区已导出');
+	async function handleExportWorkspace(): Promise<void> {
+		try {
+			const data = collectWorkspaceData();
+			const saved = await downloadBytes(`cosbox-${stamp()}.cbox`, serializeWorkspace(data));
+			toasts.success(saved !== null ? `工作区已导出，保存于：${saved}` : '工作区已导出');
+		} catch (err) {
+			toasts.error(err);
+		}
 	}
 
 	/** 导入工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
@@ -1388,7 +1403,7 @@
 		return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
 	}
 
-	function handleExport(): void {
+	async function handleExport(): Promise<void> {
 		try {
 			const attributes = session.state.attributes;
 			const name =
@@ -1412,21 +1427,25 @@
 						: undefined,
 				tags
 			});
-			downloadTextFile(`${name}.chara-v3.json`, serializeCharaCard(card));
-			toasts.success('角色卡已导出');
+			const saved = await downloadTextFile(`${name}.chara-v3.json`, serializeCharaCard(card));
+			toasts.success(saved !== null ? `角色卡已导出，保存于：${saved}` : '角色卡已导出');
 		} catch (err) {
 			toasts.error(err);
 		}
 	}
 
 	/** 导出最近消息日志（从最近一次用户发言开始的全部文本）。 */
-	function handleExportLog(): void {
+	async function handleExportLog(): Promise<void> {
 		if (recentLog.trim() === '') {
 			toasts.push('info', '暂无最近日志，发送一条消息后即可导出');
 			return;
 		}
-		downloadTextFile(`cosbox-log-${stamp()}.txt`, recentLog);
-		toasts.success('最近日志已导出');
+		try {
+			const saved = await downloadTextFile(`cosbox-log-${stamp()}.txt`, recentLog);
+			toasts.success(saved !== null ? `最近日志已导出，保存于：${saved}` : '最近日志已导出');
+		} catch (err) {
+			toasts.error(err);
+		}
 	}
 </script>
 
