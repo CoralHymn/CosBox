@@ -1663,11 +1663,15 @@
 	{#if tauriDesktop}
 		<Titlebar
 			workspaceName={currentWorkspaceName}
+			timeText={formatWorldTime(session.state.schedule.time)}
+			{providerLabel}
+			snapshotCount={session.snapshots.length}
+			{busy}
 			onOpenWorkspace={() => (workspaceModalOpen = true)}
 			onExitToLanding={handleExitToLanding}
 		/>
 	{/if}
-	{#if entered}
+	{#if entered && !tauriDesktop}
 		<header class="header">
 			{#if isMobile}
 				<button

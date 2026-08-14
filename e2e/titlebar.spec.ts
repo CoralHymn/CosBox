@@ -6,9 +6,11 @@ test.beforeEach(async ({ page }) => {
 	await page.addInitScript('window.__TAURI_INTERNALS__ = {};');
 });
 
-test('Tauri 桌面：自定义标题栏承载窗口控制与工作区切换，内容占满剩余空间', async ({ page }) => {
+test('Tauri 桌面：自定义标题栏承载窗口控制/工作区切换/状态信息，内容占满剩余空间', async ({
+	page
+}) => {
 	await page.goto('/');
-	// 标题栏：40px，含工作区切换器与最小化/最大化/关闭。
+	// 标题栏：40px，含工作区切换器、窗口控制。
 	const titlebarBox = await page.locator('.titlebar').boundingBox();
 	expect(titlebarBox).not.toBeNull();
 	expect(titlebarBox!.height).toBe(40);
@@ -23,8 +25,12 @@ test('Tauri 桌面：自定义标题栏承载窗口控制与工作区切换，�
 
 	await enterDefaultWorkspace(page);
 
-	// 进入工作区后：顶栏 + 内容区都正常（回归护栏：曾被压成 54px 细条）。
-	await expect(page.getByRole('banner')).toBeVisible();
+	// 进入工作区后：不再有独立 54px 顶栏，状态 chips 并入标题栏，
+	// 内容区占满剩余空间（回归护栏：曾被压成 54px 细条）。
+	await expect(page.locator('.header')).toHaveCount(0);
+	await expect(page.locator('.titlebar').locator('.chip').first()).toContainText('周一 08:00');
+	await expect(page.locator('.titlebar').getByText('演示模式')).toBeVisible();
+	await expect(page.locator('.titlebar').getByText(/快照/)).toBeVisible();
 	const bodyBox = await page.locator('.body').boundingBox();
 	expect(bodyBox).not.toBeNull();
 	expect(bodyBox!.height).toBeGreaterThan(500);

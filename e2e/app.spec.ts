@@ -479,9 +479,9 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 	const bgVar = () =>
 		page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
 
-	// 默认主题
-	await expect(page.locator('#theme-preset')).toHaveValue('default');
-	await expect.poll(bgVar).toBe('#0e1016');
+	// 默认主题（The Verge 酸薄荷）
+	await expect(page.locator('#theme-preset')).toHaveValue('verge');
+	await expect.poll(bgVar).toBe('#131313');
 
 	// 切换到 Discord 预设：即时应用
 	await page.locator('#theme-preset').selectOption('discord');
@@ -503,7 +503,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 
 	// 恢复默认主题
 	await page.getByRole('button', { name: '恢复默认主题' }).click();
-	await expect.poll(bgVar).toBe('#0e1016');
+	await expect.poll(bgVar).toBe('#131313');
 
 	// 背景图：上传后由 theme-backdrop 图层承载（JS 直接设置，不走 CSS 变量）
 	const svg =
@@ -532,7 +532,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 		.poll(() =>
 			page.evaluate(() => getComputedStyle(document.querySelector('.card')!).backgroundColor)
 		)
-		.toBe('rgba(23, 27, 38, 0.25)');
+		.toBe('rgba(45, 45, 45, 0.25)');
 	// 透明度滑杆存在且可调
 	await expect(page.locator('#theme-bg-opacity')).toBeVisible();
 	await page.locator('#theme-bg-opacity').fill('50');
