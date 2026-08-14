@@ -1,52 +1,51 @@
 {
-  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "CosBox",
-  "version": "0.0.1",
-  "identifier": "cc.benng.cosbox",
-  "build": {
-    "frontendDist": "../build",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
-  },
-  "app": {
-    "windows": [
-      {
-        "title": "CosBox",
-        "width": 800,
-        "height": 600,
-        "resizable": true,
-        "fullscreen": false
-      }
-    ],
-    "security": {
-      "csp": null
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "createUpdaterArtifacts": true,
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
-    }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGRjBCMjA1Mjc0Q0UzRjIKUldUeTQwd25CYkx3bjJELzcyZkNNeDhsdTJhY3dDT09EanZaaTkvMS93aUZxZzJ2b0t0aXJIZy8K",
-      "endpoints": [
-        "https://cosbox.benng.cc/updates/{{target}}/{{arch}}/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
-  }
+	"$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+	"productName": "CosBox",
+	"version": "0.0.1",
+	"identifier": "cc.benng.cosbox",
+	"build": {
+		"frontendDist": "../build",
+		"devUrl": "http://localhost:5173",
+		"beforeDevCommand": "npm run dev",
+		"beforeBuildCommand": "npm run build"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "CosBox",
+				"width": 800,
+				"height": 600,
+				"resizable": true,
+				"fullscreen": false,
+				"decorations": false
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"createUpdaterArtifacts": true,
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		],
+		"android": {
+			"debugApplicationIdSuffix": ".debug"
+		}
+	},
+	"plugins": {
+		"updater": {
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGRjBCMjA1Mjc0Q0UzRjIKUldUeTQwd25CYkx3bjJELzcyZkNNeDhsdTJhY3dDT09EanZaaTkvMS93aUZxZzJ2b0t0aXJIZy8K",
+			"endpoints": ["https://cosbox.benng.cc/updates/{{target}}/{{arch}}/latest.json"],
+			"windows": {
+				"installMode": "passive"
+			}
+		}
+	}
 }
