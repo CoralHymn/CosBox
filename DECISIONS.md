@@ -1064,9 +1064,9 @@ conversation 重建会让 `message` prop 变化并重跑 `$effect`，把用户�
 **选择**：
 
 1. 新增 `theme/theme.ts`：`ThemeConfig`（预设 id + 颜色覆盖 + 背景图 data URL
-   + 透明度）与内置预设（默认深色、Claude 暖奶油、Discord 深靛蓝、
-   The Verge 酸薄荷，灵感来自 `tmp/` 下的设计分析）；`resolveThemeCss` 纯函数
-   计算 CSS 变量映射，`applyThemeToDocument` 写入 `:root`。
+   - 透明度）与内置预设（默认深色、Claude 暖奶油、Discord 深靛蓝、
+     The Verge 酸薄荷，灵感来自 `tmp/` 下的设计分析）；`resolveThemeCss` 纯函数
+     计算 CSS 变量映射，`applyThemeToDocument` 写入 `:root`。
 2. 设置页新增「主题」卡片：预设下拉、背景图选择/移除、透明度滑杆、15 个颜色
    变量（取色器 + 文本输入）；**修改即时生效并自动保存**（与其它设置走
    「保存设置」不同，主题需要实时预览）。
@@ -1146,7 +1146,7 @@ Mem0 = LLM 提取 + 检索 + 合并；Letta/MemGPT = 分层记忆（核心常驻
 **选择**：
 
 1. **存储**：IndexedDB 新表 `memories`，条目 = 事实正文 + 分类 + 触发词 + 重要度(1-5)
-   + 置顶 + 来源 + 使用统计。
+   - 置顶 + 来源 + 使用统计。
 2. **写入**：LLM 提取（jsonMode，输出候选数组）→ 面板勾选导入（去重：归一化 + 包含
    判定）；可选「回复后自动提取」，重复自动跳过。
 3. **召回**：纯函数 `recallMemories`——置顶必注入、非置顶仅关键词命中才注入，
@@ -1221,6 +1221,7 @@ tool_calls」：流式输出表现为思考→正文→停顿→思考→正文�
 调用已生效，宿主既不执行也不反馈，AI 便继续输出。
 
 **选择**：
+
 1. `parseStreamedResult` 记录 `segments`（thinking/text 交替顺序），`LlmChatResult`
    与 `generateReply` 携带 `replySegments`，气泡按序分段展示；
 2. 收到 tool_calls delta 但函数名为空/参数残缺时标记 `malformedToolCall`，
@@ -1246,6 +1247,7 @@ DeepSeek 跳过 tool_choice）未被回退，问题出在解析层。
 
 **选择**：参照 opencode / Chatbox 的做法，双层注入，且都不依赖「等模型漏调后再
 兜底」：
+
 1. 常驻「工具使用」导言强化为工具使用策略（Tool usage policy）：明确「先发出
    tool_calls、收到工具反馈后再写正文」「允许一次回复并行多个工具调用」「未调用
    工具 = 状态未同步、正文状态描述将被视为剧情事实错误」；
@@ -1272,6 +1274,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 `{"memories": [...]}`，`parseExtractedMemories` 判定「不是数组」直接抛错。
 
 **选择**：
+
 1. 提示词改为要求输出 `{"memories": [...]}`，与 `json_object` 模式语义一致；
 2. 解析器兼容三种形态：裸数组、对象包装（memories / items / results / data 键）、
    散落在叙述文本中的 JSON 块（新增平衡括号扫描，容忍被 maxTokens 截断的候选块）；
@@ -1294,6 +1297,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 `ChatMessageView.content`（分段消息保存时已合并为纯正文）。
 
 **选择**：
+
 1. 报错信息携带模型原始返回（截断 160 字符），把「猜返回形态」变成「看返回形态」；
 2. 解析器再放宽：对象任意数组值包装（如 `{"result": [...]}`）兼容，空对象 `{}`
    视为无新记忆而不是报错；
@@ -1330,6 +1334,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 请求；且提取提示词每次都注入全部既有记忆，提示词体积随记忆库增长无限膨胀。
 
 **选择**（对齐主流 agent 的做法）：
+
 1. **防抖批处理**：自动提取改为对话静默 45 秒后运行一次，期间新消息会重置计时器
    （LangMem `ReflectionExecutor` 同款延迟处理：等待对话平息、取消冗余任务）；
 2. **无变化跳过**：记录最近一次成功提取时已覆盖的非系统消息数，没有新对话就不再
@@ -1369,6 +1374,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 
 **问题**：流式输出时思考正常实时显示，完成后落库的消息里思考段消失。排查发现
 两条丢失路径：
+
 1. 兜底/重试（只思考无正文、思考提到工具名补调、时间描述补调、残缺 tool_calls）
    会用新请求的结果**替换** `result`，替换结果的 `segments` 通常只剩正文；
    `thinking` 字段（`preferThinking` 保留首轮思考）只在 `replySegments` 为空时
@@ -1376,6 +1382,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 2. 重试结果自带新思考时，首轮思考会被新思考顶掉（流式看过 X、落库只剩 Y）。
 
 **选择**：
+
 1. `chat-service` 返回前新增 `ensureFirstThinkingInSegments`：把本回合首次响应
    的思考并入最终分段（分段已有相同思考则不重复插入），两条 return 路径统一走；
 2. `+page.svelte` 落库时做安全网：`replySegments` 完全不含思考段而最终 `thinking`
@@ -1398,6 +1405,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 中文意图措辞全部漏检；`retryTimeClaim` 也只扫描正文、不扫描思考。
 
 **选择**：
+
 1. 新增 `TOOL_INTENT_PATTERNS`：按工具分组，同时匹配英文工具名与中文意图措辞
    （推进时间/时间流逝/时段变化 → advance_time；去/回/离开+地点 → goto_location；
    换上/脱下/穿好等 → set_outfit；好感/信任/心情变化 → set_attribute），
@@ -1444,6 +1452,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 正文，浪费 token 且体验差。
 
 **选择**：
+
 1. 新增 `detectThinkingLoop`：把思考按句末标点切分为句段，两种重复信号命中即
    判定循环——同一句段连续出现 ≥3 次，或长度 1-3 的句段序列完整重复 ≥3 轮
    （覆盖用户给出的循环样例）；
@@ -1464,6 +1473,7 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 
 **选择**：在 ChatService 新增 `callWithLoopIntercept` 看门狗，包住工具路径与
 纯文本路径的主 LLM 调用：
+
 1. 为每次请求创建内部 AbortController（与外部取消信号联动）；
 2. `onThinkingDelta` 包装后累计思考文本，实时跑 `detectThinkingLoop`——命中即
    `abort()` 中断当前请求，把「停止重复、尽快输出正文」的 `REPETITION_NUDGE`
@@ -1487,6 +1497,7 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 对应库内条目。
 
 **选择**：
+
 1. 新增 `resolveLocationPlace` / `normalizeLocationState`（core/state）：优先按
    id 精确匹配；id 对不上时回退按「分类 + 名称」匹配，命中则回填库内条目的
    id/分类/名称/描述；无匹配（真自定义地点）原样保留；
@@ -1510,14 +1521,15 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 调用」而被迫调用 goto_location 确认地点，产生误调用。
 
 **选择**：把三条针对性提醒改为条件措辞：
+
 - 时间：「本次发言**可能**涉及时间流逝或时段变化：如果剧情确实发生了时间流逝，
   请调用 advance_time …」；
 - 地点：「本次发言**可能**涉及地点变化：如果剧情确实发生了地点变化，请调用
   goto_location …」；
 - 穿着：「本次发言**可能**涉及穿着变化：如果剧情确实发生了穿着变化，请调用
   set_outfit …」；
-通用提醒补一句「关键词命中只是提醒你复核，不代表状态一定变化」，让模型在判断
-无需变更时可以放心不调用。
+  通用提醒补一句「关键词命中只是提醒你复核，不代表状态一定变化」，让模型在判断
+  无需变更时可以放心不调用。
 
 **理由**：关键词命中是启发式信号（仅代表「可能」），不该被模型当成硬性指令；
 把「复核职责」交还模型，能同时降低误调用与漏调用——真发生变化时模型仍会调用，
@@ -1580,8 +1592,8 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 **选择**：
 
 1. 气泡改为双层：可折叠「工作过程区」（最后一次工具调用及之前的思考/工具/中间叙事）
-   + 下方最终答案（最后一次工具调用之后的正文）；无工具段时思考归过程区、正文归最终答案；
-   拆不出最终正文时回退「全部正文都是最终答案」，不丢内容。
+   - 下方最终答案（最后一次工具调用之后的正文）；无工具段时思考归过程区、正文归最终答案；
+     拆不出最终正文时回退「全部正文都是最终答案」，不丢内容。
 2. 流式状态从 `streamingDraft + streamingThinking` 两字符串改为
    `streamingSegments: MessageSegment[]`，按流中实际顺序分段（同类型续接、异类型新开段）。
 3. 新增 `onToolStart/onToolResult` 事件：工具执行实时显示「调用中…」与结果，
@@ -1627,8 +1639,8 @@ assistant「自己的话」发回上下文，与最终正文高度相似，诱�
    流式气泡下方状态条（正文已输出后仍可见）；`onToolStart/onToolResult` 透传到
    confirmation，确认阶段执行的在流式气泡实时可见。
 5. 监控：`metrics.svelte.ts`（计数器 + 每轮样本 + 事件流水，KV 防抖持久化、滚动窗口）
-   + 侧边「监控」tab（无依赖 SVG spline 折线图：Token 消耗/耗时/工具与兜底，
-   计数卡，最近事件流水，可清空）。
+   - 侧边「监控」tab（无依赖 SVG spline 折线图：Token 消耗/耗时/工具与兜底，
+     计数卡，最近事件流水，可清空）。
 6. 开关：设置 → AI 行为新增「文本形式工具调用双通道」（默认勾选，随
    allowAiStateTools 禁用）；关闭后主循环/补调/确认一律只认结构化 tool_calls，
    供监控指标飙升时强制模型只走 JSON。
@@ -1678,3 +1690,109 @@ CORS 双重问题。
 多一层注入抽象；`/llm-proxy` 在打包版无 Vite 后端，静态部署与打包版都依赖
 同路径反向代理或 plugin-http 还原；首发仅 Android / Windows，iOS 需另评估
 （Tauri 支持但本机非 macOS）。
+
+## D104：多工作区存储——单库加 workspaceId 分区列，而非每工作区一个数据库
+
+**背景**：多工作区要求每个工作区（快照版本图 / 世界书 / 长期记忆 / 角色档案 /
+开发者开关 / 世界配置覆盖）相互隔离，可创建 / 切换 / 重命名 / 复制 / 删除。
+
+**选择**：
+
+1. 保留唯一 Dexie 库，`snapshots / worldInfo / memories` 三表增加 `workspaceId`
+   列与索引（schema v3，存量行经 upgrade 统一盖章 `default` 工作区）；
+   仓储按构造时注入的 `WorkspaceScope`（可变 id 持有者）过滤读写。
+2. 工作区级 kv 键统一前缀 `ws:{id}:`（`lastHeadId`、`config.overrides`、
+   `settings.profile`、`settings.developer`、`sync.lastUpdatedAt`、
+   `context.usage`），由 `createScopedKv` 包装；应用级键
+   （`settings.llm/sync/theme`、`metrics.v1`、注册表）保持裸键。
+3. 复制 / 导入为新工作区时，三表全部 **remap id**（nanoid 新 id + 重写
+   parentId 引用），因为 id 是全局主键、跨工作区导入同一份数据会冲突。
+
+**理由**：仓储 / manager / stores 在启动时构造一次并被组件持有，换库需要整体
+重建依赖图；单库可原子执行导入 / 复制 / 删除的跨表操作；IndexedDB 配额按源
+（origin）计，多库不增加配额；迁移路径单一。切换工作区 = `scope.set()` +
+重载，仓储对象零重建。
+
+**代价**：所有表查询都必须走 repo 边界过滤，不能再直接 `db.table.toArray()`；
+快照 id 全局唯一（nanoid 冲突概率可忽略），复制 / 导入必须 remap。
+
+## D105：切换语义——runExclusive 串行化「停 → 换 → 重载」，busy 期间禁切
+
+**背景**：切换工作区若与 pending 的 update / addMessage 并发，新快照会盖上新
+工作区的 `workspaceId`（scope 已变），造成跨工作区脏写。
+
+**选择**：
+
+1. `CharacterManager.runExclusive(task)`：把外部编排任务排到变更队列之后，
+   保证切换发生时所有 pending 变更已按旧工作区落地。
+2. `WorkspaceService.switchTo`：在独占任务内依次 `registry.setCurrent` →
+   `scope.set` → `manager.resetInternal()`（清内存态 + 重新 init，空工作区自动
+   建根快照），随后 `registry.touch` + 宿主重载钩子（世界书 / 记忆 / 用量 /
+   工作区级设置重读、瞬态复位、同步重装）。
+3. UI 层：生成回复（busy）或切换进行中时禁用进入 / 切换 / 删除按钮，双保险。
+
+**理由**：与既有「一切变更串行化」原则一致；重置复用 `restoreWorkspace` 已有
+的重初始化路径，无新增快照语义；busy 禁切避免打断用户正在进行的对话。
+
+**代价**：切换期间（毫秒级）UI 不可交互；`runExclusive` 增加一个公共入口，
+调用方必须遵守「scope 在独占任务内切换」的约定。
+
+## D106：.cbox v2——补长期记忆与工作区名，向后兼容 v1
+
+**背景**：多工作区引入后，.cbox 需要携带长期记忆（既有缺口：记忆不随工作区
+导出/同步）与工作区名（导入为新工作区时取名）。
+
+**选择**：
+
+1. `WORKSPACE_VERSION = 2`：新增 `memories.json`，manifest 增加可选
+   `workspaceName`；`parseWorkspace` 同时接受 v1（缺失记忆按空数组、无名称）。
+2. `WorkspaceData` 增加 `memories` 与 `workspaceName?`，同步载荷随之携带记忆。
+3. 导入分两条路径：导入到当前工作区（整体恢复 + 记忆）与导入为新工作区
+   （remap id 落新分区并切换，名称自动去重）。
+
+**理由**：ZIP 容器零依赖读写已就绪，加一个文件即可；v1 文件继续可读保证老
+存档不失效；同步复用同一载荷结构，服务端无需理解内容。
+
+**代价**：老客户端解析 v2 文件会因版本号报错（需升级客户端）；解析需容忍
+`memories.json` 缺失（部分导出工具省略空数组）。
+
+## D107：初始界面——每次启动先进入工作区选择，不直接进对话
+
+**背景**：用户要求首次打开不直接进入 chat，而是先看到工作区选择界面（可选
+工作区、可新增）。
+
+**选择**：
+
+1. 每次启动 / 刷新都先渲染「工作区选择」初始界面（品牌 + 工作区列表 +
+   新建 + 导入 .cbox），点选进入后才初始化会话（manager / 世界书 / 记忆 /
+   用量）并启动同步。
+2. 应用内通过导航栏顶部切换器打开同款管理列表（弹层），并可「退出到工作区
+   选择」；退出时停止同步，重新进入同一工作区走完整切换流程。
+
+**理由**：满足「打开先选择」的预期，且把「首次启动初始化」与「进入工作区」
+解耦；初始界面复用同一套管理组件，无第二套 UI 逻辑。
+
+**代价**：每次启动多一次点击（未做「记住上次自动进入」；如需可在注册表加
+偏好项）；进入前不初始化会话，启动路径的时序由 `booted → entered` 两阶段管理。
+
+## D108：同步协议 v2——服务端按工作区分槽
+
+**背景**：多工作区后，服务端单槽会被不同工作区互相覆盖。
+
+**选择**：
+
+1. 路由 `GET/PUT /api/workspace/{workspaceId}`，`/api/workspace` 保留为
+   `default` 槽别名（旧客户端兼容）；`workspaceId` 白名单
+   `^[A-Za-z0-9_-]{1,64}$`，槽位上限 64。
+2. 存储改为 `data/workspaces.json`（`{ version: 2, slots: { <id>: { data,
+updatedAt } } }`），启动时把旧 `workspace.json` 单槽载荷迁移进 `default` 槽。
+3. 客户端：`SyncDeps` 增加 `getWorkspaceId()`，URL 拼工作区 id，
+   `sync.lastUpdatedAt` 走作用域 kv；切换工作区时 `reloadForWorkspace()`
+   （重读游标 + 立即拉取）；`server/index.mjs` 重构出 `createHandler()` 供
+   `node --test` 测试（`npm run test:server`）。
+
+**理由**：按 id 分槽语义正确且改动集中在路由与文件格式；default 别名 + 启动
+迁移保证升级平滑；沿用 Bearer 鉴权、限流、50MB 上限、原子写入。
+
+**代价**：旧客户端连新服务端只能同步 default 槽（行为等同旧版单槽）；
+数据文件格式升级后如需回退旧服务端需手动处理；槽位上限 64 为防御性限制。

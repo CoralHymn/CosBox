@@ -36,7 +36,7 @@ describe('MemoryRepository', () => {
 	it('初始为空，upsert 后可读回', async () => {
 		expect(await repo.getAll()).toEqual([]);
 		await repo.upsert(memory('m1'));
-		expect(await repo.getAll()).toEqual([memory('m1')]);
+		expect(await repo.getAll()).toEqual([{ ...memory('m1'), workspaceId: 'default' }]);
 	});
 
 	it('bulkPut 批量写入', async () => {

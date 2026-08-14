@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { enterDefaultWorkspace } from './utils';
 
 // 移动端视口：验证左侧抽屉导航、右上角状态浮层、聊天可用、无横向溢出
 test.use({ viewport: { width: 390, height: 844 } });
@@ -6,6 +7,7 @@ test.use({ viewport: { width: 390, height: 844 } });
 test('移动端：左侧抽屉导航 + 右上角状态浮层 + 聊天可用 + 无横向溢出', async ({ page }) => {
 	await page.goto('/');
 	await expect(page.getByText('CosBox')).toBeVisible();
+	await enterDefaultWorkspace(page);
 
 	// 汉堡按钮打开左侧抽屉
 	const menuToggle = page.getByRole('button', { name: '打开菜单' });

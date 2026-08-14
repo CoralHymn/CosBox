@@ -2162,6 +2162,7 @@ DeepSeek V4 思考模式的回传要求在上一提交已补齐（每条 assista
 ### 排查指引
 
 若仍出现不思考，打开「开发者：查看最近一次完整提示词」核对：
+
 1. `reasoningSummary` 是否「缺失 0 条」——缺失 > 0 说明请求序列化漏了字段；
 2. 「最近响应：思考=0 字」说明端点本次没有返回 `reasoning_content`
    （模型 / 代理侧），可对比上一轮思考 > 0 的请求体差异。
@@ -2777,7 +2778,6 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
   `CosBoxBridge.getAppContext`，合并 manifest 含 bridge provider。
 - 待实机回归：导出各项应写入系统「下载」目录并 toast 显示 content:// URI。
 
-
 ### 同日补充：导出不再闪退，但出现「发生未知错误，请重试」
 
 - 实机复测：旧崩溃已消除（说明 JNI_OnLoad / 桥接类链路生效），但导出 toast
@@ -2800,7 +2800,6 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 待实机回归：若仍失败，toast 会直接显示具体原因（如 MediaStore insert 异常
   文本），据此可一步定位。
 
-
 ### 同日补充：实机出现黑屏 —— 系并发构建污染前端包
 
 - 现象：安装 12:15 构建的 APK 后，打开应用直接黑屏。
@@ -2816,3 +2815,92 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 经验：`tauri android build` 执行期间不要并行跑任何会碰 `.svelte-kit` 的命令
   （`npm run check` / `svelte-kit sync`），否则前端包可能被污染。
 
+## 2026-08-14（续）：多工作区（多存档）——初始界面 + 切换/管理 + 同步分槽
+
+### 背景
+
+- 单一存档已无法满足多角色/多剧情并行的需求；用户要求：打开应用先进入
+  「工作区选择」初始界面（可选工作区、可新增），而不是直接进入对话。
+- 既有 .cbox 工作区是「整包导出导入」，不是可切换的多存档；远程同步服务端
+  只有单槽，多工作区会互相覆盖。
+
+### 设计决策（详见 DECISIONS D104–D108）
+
+- **D104 存储**：单库加 `workspaceId` 分区列（schema v3），三张业务表
+  （快照/世界书/记忆）按 `WorkspaceScope` 过滤；工作区级 kv 键前缀
+  `ws:{id}:`；复制/导入为新工作区时三表 **remap id**（id 是全局主键）。
+- **D105 切换**：`CharacterManager.runExclusive` 把切换编排排到 pending 变更
+  之后（防跨工作区脏写），scope 切换 + `resetInternal()` 重载；busy 期间禁切。
+- **D106 .cbox v2**：新增 `memories.json` 与 `workspaceName`，兼容 v1；
+  顺带修复「记忆不随工作区导出/同步」的既有缺口。
+- **D107 初始界面**：每次启动/刷新先进工作区选择页，进入后才初始化会话与
+  同步；应用内导航栏切换器打开同款管理弹层，可退出回初始界面。
+- **D108 同步 v2**：服务端 `GET/PUT /api/workspace/{id}` 按工作区分槽
+  （`/api/workspace` 为 default 槽别名），存储 `data/workspaces.json` 并在
+  启动时迁移旧单槽文件；客户端切换工作区时 `reloadForWorkspace()`。
+
+### 完成内容
+
+- **db 层**：schema v3 + 存量盖章 `default` 的升级迁移；`WorkspaceScope`、
+  `scoped-kv`（`createScopeKv` / `createWorkspaceKv` / `workspaceKvPrefix`）；
+  快照/世界书/记忆三仓储按 scope 过滤、写入统一盖章，并新增显式
+  `workspaceId` 参数的重载（复制/删除/导出非当前工作区用）；kv-repo 增加
+  `getAllWithPrefix` / `removeByPrefix`。
+- **workspace 模块**：`WorkspaceRegistry`（注册表 CRUD + 首启迁移旧裸键进
+  `ws:default:` + 名称去重校验）与 `WorkspaceService`（switchTo /
+  createWorkspace / duplicateWorkspace / removeWorkspace /
+  importAsNewWorkspace / collectWorkspaceData / exportWorkspace；
+  复制/导入全量 remap id，失败回滚）。
+- **manager/stores**：`CharacterManager` deps 改作用域 kv，新增
+  `runExclusive` / `reset` / `resetInternal`；settings store 拆分应用级
+  （llm/sync/theme）与工作区级（profile/developer），新增
+  `reloadWorkspaceScoped()`；context-usage 走作用域 kv；世界书/记忆 store
+  切换后重载。
+- **UI**：`WorkspaceHome`（初始界面）+ `WorkspaceManager`（列表/新建/重命名/
+  复制/导出/删除/导入）+ `WorkspaceModal`（应用内管理弹层）+ NavRail 顶部
+  工作区切换器与「退出到工作区选择」；`+page.svelte` 启动改为
+  booted（注册表+设置）→ entered（进入工作区）两阶段，进入/切换/创建/删除/
+  导出/导入全接线；删除确认弹窗展示数据量。
+- **同步**：`server/index.mjs` 重构出 `createHandler`（多槽 + default 别名 +
+  id 白名单 + 槽位上限 64 + v1 迁移）；新增 `server/index.test.mjs`
+  （`npm run test:server`，node --test 8 用例）；客户端 SyncService 支持
+  异步 collect、`getWorkspaceId`、`reloadForWorkspace`。
+- **测试**：新增 registry/service/scoped-kv/schema 迁移等单测 30+ 条；
+  单测总数 804 全绿；e2e 全量适配「启动先进初始界面」（新增 `e2e/utils.ts`
+  的 `enterDefaultWorkspace` 助手 + `workspace.spec.ts` 6 条工作区流程），
+  51/51 通过（含既有 45 条全量回归）。
+
+### 验证
+
+- `npm run check` 0 错误 0 警告；`npm run lint` 通过；`npm test` 804 用例全绿；
+  `npm run test:server` 8 用例全绿；`npm run test:e2e` 51/51 通过。
+- 覆盖率：本次改动的 db/import-export/workspace 文件全部保持 100% 语句/行/函数
+  （manager 仅剩改动前就存在的防御死代码 537 行）；全局 100% 阈值在本轮改动前
+  即未达标（基线 96.97%，存量缺口在 llm/context 等与多工作区无关的文件，
+  本轮实测 97.91% 已较基线提升）。
+- 兼容性：旧存档首启自动归入「默认工作区」；v1 .cbox 可继续导入；旧客户端
+  连新服务端落 default 槽（行为等同旧版单槽）。
+
+### 遗留与下一步
+
+- 「记住上次工作区并自动进入」偏好项（当前每次启动都停在选择页）。
+- 每工作区独立模型配置（当前应用级共享，Key 不随工作区导出/同步的安全
+  边界不变）。
+- 打包版 Android 的 SQLite 迁移（D103）落地时，多工作区分区键需要一并映射。
+
+### 同日补充：初始界面被压成顶部 54px 细条（布局修复）
+
+- 现象：未进入工作区时，初始界面全部缩在左上角一条极窄区域里，
+  看起来像「控件全部消失、只剩背景」；dev 与 preview、Edge 与 Chrome 一致。
+- 根因：`.app` 是 `grid-template-rows: 54px 1fr` 双行网格，初始界面不渲染
+  header，`.body` 作为唯一流内子元素被自动放进第一行（54px 顶栏行），
+  整个界面高度被压成 54px；此前只加 `display: flex` 修列宽、没跨行，
+  所以宽度对了但高度仍塌缩。
+- 处理：`.body.landing { grid-row: 1 / -1; display: flex; }` 显式跨两行 +
+  `.body.landing .content { flex: 1; overflow-y: auto; }` 让内容区横向撑满；
+  桌面端 `.home` 恢复为居中 720px 卡片（1280/1920 宽验证 x=280/x=600），
+  移动端 390px 满宽。
+- 回归护栏：`workspace.spec.ts` 首条用例新增几何断言（`.home` 高度 > 500、
+  `.ws-create` 宽度 > 500），塌缩成细条会直接红。Playwright 51/51 通过。
+- 教训：多工作区改动涉及外壳网格布局时，`isVisible` 不足以防回归（细条里的
+  元素仍算可见），必须断言 boundingBox 几何尺寸。

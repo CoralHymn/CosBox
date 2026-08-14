@@ -1,0 +1,13 @@
+import { expect, type Page } from '@playwright/test';
+
+/**
+ * 多工作区后的启动流程：每次打开/刷新都会先进入工作区选择初始界面，
+ * 需要点选「默认工作区」进入主界面（主界面以顶栏世界时间状态条为标志，
+ * 桌面与移动端都渲染 `.header .chip`）。
+ */
+export async function enterDefaultWorkspace(page: Page): Promise<void> {
+	const entry = page.locator('.ws-enter').filter({ hasText: '默认工作区' });
+	await expect(entry).toBeVisible();
+	await entry.click();
+	await expect(page.getByRole('banner').locator('.chip').first()).toContainText('周一 08:00');
+}

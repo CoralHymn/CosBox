@@ -1,7 +1,8 @@
 # CosBox 数据同步服务器
 
 零依赖 Node.js 服务端，为 CosBox 提供**实时数据同步**：快照/世界配置/世界书/
-角色档案/开发者开关会同步到服务器（**不含模型配置与 API Key**）。
+角色档案/开发者开关/长期记忆会同步到服务器（**不含模型配置与 API Key**）。
+多工作区按 `workspaceId` 分槽存储，各工作区独立同步互不覆盖。
 
 - 服务端文件：`index.mjs`（Node >= 18，无第三方依赖）
 - 一键安装：`install.sh`
@@ -162,17 +163,23 @@ server {
 
 ## 四、API 说明
 
-| 方法 | 路径             | 鉴权        | 说明                                                  |
-| ---- | ---------------- | ----------- | ----------------------------------------------------- |
-| GET  | `/api/health`    | 无          | 连接测试                                              |
-| GET  | `/api/workspace` | Bearer 密钥 | 读取最近一次同步数据（`{data, updatedAt}` 或 `null`） |
-| PUT  | `/api/workspace` | Bearer 密钥 | 写入同步数据（`{data, updatedAt}`，≤50MB）            |
+| 方法 | 路径                  | 鉴权        | 说明                                                          |
+| ---- | --------------------- | ----------- | ------------------------------------------------------------- |
+| GET  | `/api/health`         | 无          | 连接测试                                                      |
+| GET  | `/api/workspace/{id}` | Bearer 密钥 | 读取该工作区最近一次同步数据（`{data, updatedAt}` 或 `null`） |
+| PUT  | `/api/workspace/{id}` | Bearer 密钥 | 写入该工作区同步数据（`{data, updatedAt}`，≤50MB）            |
+| GET  | `/api/workspace`      | Bearer 密钥 | `default` 槽别名（旧客户端兼容）                              |
+| PUT  | `/api/workspace`      | Bearer 密钥 | `default` 槽别名（旧客户端兼容）                              |
+
+`{id}` 为工作区 id（`[A-Za-z0-9_-]{1,64}`），由客户端按本地工作区自动拼接；
+服务端把各工作区存进 `data/workspaces.json`（`{ version: 2, slots: {...} }`），
+启动时自动把旧版单槽 `data/workspace.json` 迁移进 `default` 槽。
 
 安全措施：
 
 - 所有数据接口强制 Bearer 密钥，时序安全比较；
 - 10 分钟内鉴权失败 ≥20 次临时限流（429）；
-- 请求体 ≤50MB；
+- 请求体 ≤50MB；工作区槽位上限 64（防滥用）；
 - 原子写入（临时文件 + 重命名），避免半截数据；
 - 数据不含模型配置与 API Key。
 

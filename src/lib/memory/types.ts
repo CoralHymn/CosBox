@@ -15,6 +15,11 @@ export const MEMORY_CATEGORIES = [
 /** 长期记忆条目：一句话事实 + 触发词 + 权重，随上下文召回注入。 */
 export interface MemoryEntry {
 	id: string;
+	/**
+	 * 所属工作区（多工作区分区键）。应用层创建时可省略，
+	 * 由 db 层（MemoryRepository）统一盖章；落库后必存在。
+	 */
+	workspaceId?: string;
 	/** 记忆正文（事实陈述，AI 注入时原样使用）。 */
 	content: string;
 	/** 分类（预设之一或自定义）。 */

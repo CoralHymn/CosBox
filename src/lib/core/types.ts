@@ -205,6 +205,11 @@ export type SnapshotDelta =
 /** 版本图节点：单父多子的增量快照。 */
 export interface SnapshotNode {
 	id: string;
+	/**
+	 * 所属工作区（多工作区分区键）。应用层创建时可省略，
+	 * 由 db 层（SnapshotRepository）统一盖章；落库后必存在。
+	 */
+	workspaceId?: string;
 	timestamp: number;
 	parentId: string | null;
 	metadata: SnapshotMetadata;
@@ -224,6 +229,11 @@ export interface BranchSummary {
 /** 世界信息条目：关键词触发式设定注入。 */
 export interface WorldInfoEntry {
 	id: string;
+	/**
+	 * 所属工作区（多工作区分区键）。应用层创建时可省略，
+	 * 由 db 层（WorldInfoRepository）统一盖章；落库后必存在。
+	 */
+	workspaceId?: string;
 	/** 触发关键词（大小写不敏感，多词关键词按字面连续匹配）。 */
 	keys: string[];
 	/** 命中后注入到上下文的内容。 */

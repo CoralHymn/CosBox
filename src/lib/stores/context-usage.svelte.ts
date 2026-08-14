@@ -1,4 +1,4 @@
-import type { KvRepository } from '../db/kv-repo';
+import type { ScopedKv } from '../db/scoped-kv';
 import type { CompactionState } from '../llm/compaction';
 import type { TokenUsage } from '../llm/types';
 
@@ -53,8 +53,9 @@ function isPersistedContextUsage(value: unknown): value is PersistedContextUsage
 /**
  * 上下文用量持久化 store：把最近一次请求的 token 用量与压缩状态写入 IndexedDB，
  * 应用重启后侧栏仍能显示上次的用量面板（而非空白占位）。
+ * kv 为工作区作用域：每个工作区各自保留最近一次用量。
  */
-export function createContextUsageStore(kv: KvRepository) {
+export function createContextUsageStore(kv: ScopedKv) {
 	let usage = $state<PersistedContextUsage | null>(null);
 	let loaded = $state(false);
 

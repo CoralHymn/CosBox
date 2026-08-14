@@ -19,18 +19,19 @@ import type {
 	SnapshotNode,
 	StatePatch
 } from '../core/types';
-import type { KvRepository } from '../db/kv-repo';
+import type { ScopedKv } from '../db/scoped-kv';
 import type { SnapshotRepository } from '../db/snapshot-repo';
 
-/** kv 中保存的「上次 checkout 的 head 快照 id」。 */
+/** kv 中保存的「上次 checkout 的 head 快照 id」（工作区作用域键）。 */
 const LAST_HEAD_KEY = 'lastHeadId';
-/** kv 中保存的世界配置覆盖（地点库 / 衣柜 / 日程条目，不进版本历史）。 */
+/** kv 中保存的世界配置覆盖（地点库 / 衣柜 / 日程条目，不进版本历史，工作区作用域键）。 */
 const CONFIG_OVERRIDES_KEY = 'config.overrides';
 
 /** CharacterManager 依赖注入（便于测试替换时钟与 id 生成）。 */
 export interface CharacterManagerDeps {
 	snapshots: SnapshotRepository;
-	kv: KvRepository;
+	/** 工作区作用域的 kv：head / 配置覆盖等键自动带当前工作区前缀。 */
+	kv: ScopedKv;
 	/** 可选：确定性时钟。 */
 	now?: () => number;
 }
@@ -412,10 +413,40 @@ export class CharacterManager {
 			} else {
 				await this.deps.kv.set(LAST_HEAD_KEY, headId);
 			}
-			this.initialized = false;
-			this.initPromise = null;
-			await this.init();
+			await this.resetInternal();
 		});
+	}
+
+	/**
+	 * 独占任务：串行化到变更队列之后执行（工作区切换编排用）。
+	 * 保证切换发生时所有 pending 的 update/addMessage/checkout 已按旧工作区落地。
+	 * 注意：不在这里 ensureInit——切换任务会在任务体内先切 scope 再 resetInternal，
+	 * 提前 init 会把根快照建到旧工作区。
+	 */
+	runExclusive<T>(task: () => Promise<T>): Promise<T> {
+		return this.enqueue(task);
+	}
+
+	/**
+	 * 重置并重载当前工作区（切换工作区后调用）：清空内存态、丢弃初始化标记，
+	 * 重新走 init（空工作区自动建根快照）。供队列内调用；
+	 * 外部请经 runExclusive 编排以保证与 pending 变更的顺序。
+	 */
+	async resetInternal(): Promise<void> {
+		this.initialized = false;
+		this.initPromise = null;
+		this.state = createInitialState();
+		this.headId = null;
+		this.conversation = [];
+		this.snapshots = [];
+		this.branches = [];
+		this.configOverrides = {};
+		await this.init();
+	}
+
+	/** 串行化的重置入口（测试与需要队列隔离的调用方用）。 */
+	reset(): Promise<void> {
+		return this.enqueue(() => this.resetInternal());
 	}
 
 	private async doAdvanceTime(minutes: number): Promise<SnapshotNode> {
