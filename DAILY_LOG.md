@@ -2739,3 +2739,41 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 平台适配层：`src/lib/platform/` 端口（WorkspaceStore / FilePort / llmFetch），
   见 D103 与 PACKAGING.md。
 - 发布签名 keystore 与自动更新（tauri-plugin-updater）配置。
+
+## 2026-08-14：修复 Android 端导出闪退（写入系统「下载」目录）
+
+### 背景
+
+- 实机测试：Android 上任何导出（导出工作区 / 角色卡 / 配置段 / 日志）都会闪退，
+  而不是保存到系统「下载」目录。
+- 定位：`android_save.rs` 用 `ndk_context::android_context()` 取 JavaVM/Activity，
+  但该函数在上下文未初始化时直接 `expect` panic。逐一核对 tao 0.35 / wry 0.55 /
+  tauri 2.11 源码，Tauri v2 运行时根本不调用 `ndk_context::initialize_android_context`
+  （tao 用自己 vendored 的 ndk_glue），所以每次导出必然 panic → 进程崩溃。
+
+### 实现
+
+- 弃用 ndk-context（`Cargo.toml` 移除依赖），改用两条自有通路：
+  - `android_save.rs` 定义 `JNI_OnLoad`（app_lib 加载时回调，全依赖树无同名符号），
+    保存进程级 `JavaVM`，并用全局引用预热 `CosBoxBridge` 类
+    （后台线程上 FindClass 只能解析系统类，应用类必须用启动时缓存的引用）。
+  - 新增 Kotlin `CosBoxBridge`（ContentProvider，manifest 注册，进程启动时由系统
+    实例化）保存 Application Context，Rust 经 JNI 调 `getAppContext()` 取得。
+  - `build.rs` 把 tauri.conf.json 的 identifier 注入 `COSBOX_ANDROID_IDENTIFIER`，
+    JNI 类名与打包配置自动同步。
+- MediaStore 逻辑保留：API 29+ 写 `MediaStore.Downloads`（relative_path
+  `Download/`），API < 29 回落 `getExternalFilesDir("Download")`；新增文件名非法
+  字符清洗（\ / : * ? " < > | 与控制字符 → `_`），避免角色名等导致 insert 抛异常。
+- 传输加固：导出字节由「TypedArray → 超长 JSON 数字数组」改为 base64 字符串，
+  消除大工作区导出时 WebView 内存暴涨这条潜在闪退路径。
+- release 开 R8：`proguard-rules.pro` 加 `CosBoxBridge.getAppContext` keep 规则。
+
+### 验证
+
+- `cargo check`（桌面）+ `cargo check --target aarch64-linux-android` 通过；
+  `svelte-check` 0 错误；Vitest 763 用例全绿（新增 Android base64 传输用例）。
+- `tauri android build --target aarch64` 全流程构建通过（APK + AAB）；解包验证：
+  `libapp_lib.so` 导出 `JNI_OnLoad`、引用 `CosBoxBridge`，R8 后 classes.dex 保留
+  `CosBoxBridge.getAppContext`，合并 manifest 含 bridge provider。
+- 待实机回归：导出各项应写入系统「下载」目录并 toast 显示 content:// URI。
+
