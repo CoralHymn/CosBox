@@ -2904,3 +2904,36 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
   `.ws-create` 宽度 > 500），塌缩成细条会直接红。Playwright 51/51 通过。
 - 教训：多工作区改动涉及外壳网格布局时，`isVisible` 不足以防回归（细条里的
   元素仍算可见），必须断言 boundingBox 几何尺寸。
+
+### 同日补充：工作区切换位置重排 + Tauri 桌面自定义标题栏
+
+- 用户反馈：切换器放导航栏顶部很突兀；桌面版要去掉 Windows 系统标题栏，
+  改用 VSCode 式自定义标题栏（软件控制最小化/最大化/关闭）。
+- 落地方案：
+  - **Web / 移动端**：工作区切换器 + 退出按钮固定在导航栏（工具区）最下方
+    （`margin-top: auto` 钉底，移动端即抽屉底部、整体左下角）。
+  - **Tauri 桌面版**：`tauri.conf.json` 主窗口 `decorations: false`；新增
+    `Titlebar.svelte`（40px，`data-tauri-drag-region` 拖拽区 + 品牌 +
+    工作区切换器 + 退出 + 最小化/最大化/关闭，窗口控制经
+    `@tauri-apps/api/window` 动态引入）；capabilities 增加
+    `core:window:allow-minimize / allow-toggle-maximize / allow-close /
+    allow-start-dragging`；`.app.titlebar-mode` 网格改为 40px/54px/1fr，
+    初始界面 body 从第 2 行起跨行。
+  - 平台判定：`isTauri() && userAgent 不含 Android`（Android 仍走移动端抽屉）。
+- 验证：svelte-check 0 错；lint 通过；e2e 51/51（Web/移动端布局回归）。
+  待实机：`tauri dev` 下确认拖拽、最小化/最大化/关闭与无边框窗口效果。
+
+### 同日补充：修复桌面端进入工作区后控件被压成 54px 细条 + 控件图标替换
+
+- Bug：Tauri 桌面（标题栏模式）进入工作区后，内容区被压在上方 54px 细条。
+  根因：标题栏模式的网格是 40px/54px/1fr 三行，但 header 渲染条件写成了
+  `entered && !tauriDesktop`，标题栏模式下 header 不渲染，`.body` 落到中间
+  54px 行。修复：header 恢复为 `entered` 时渲染（标题栏模式隐藏 header 品牌
+  避免重复），三行网格各就其位。
+- 图标替换：工作区相关控件去掉 emoji，改用 iconify（Lucide 风格）内联 SVG——
+  新增 `components/icons.ts`（路径常量表）+ `components/Icon.svelte`；
+  切换器 🗂️→layers、退出 ⇤→log-out、重命名 ✏️→pencil、复制 ⧉→copy、
+  导出 ⬇️→download、删除 🗑️→trash-2；标题栏窗口控制 ─/□/✕→minus/square/x。
+- 回归护栏：新增 `e2e/titlebar.spec.ts`（注入 `__TAURI_INTERNALS__` 模拟
+  标题栏模式，断言标题栏 40px、窗口控制按钮存在、初始界面与进入后 body
+  高度 > 500）。e2e 52/52 通过；svelte-check 0 错；lint 通过。

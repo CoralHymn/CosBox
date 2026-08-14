@@ -102,6 +102,7 @@
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
 	import WorkspaceHome from '../lib/components/WorkspaceHome.svelte';
 	import WorkspaceModal from '../lib/components/WorkspaceModal.svelte';
+	import Titlebar from '../lib/components/Titlebar.svelte';
 
 	/** 自动记忆提取的固定触发阈值：累计 N 条新对话消息后提取一次（用户/角色各算一条）。 */
 	const AUTO_MEMORY_EXTRACT_EVERY_MSGS = 10;
@@ -142,6 +143,11 @@
 	const searchClient = new WebSearchClient();
 
 	let tab = $state<TabId>('chat');
+	/**
+	 * Tauri 桌面版（非 Android WebView）：渲染自定义标题栏（窗口控制 + 工作区切换器），
+	 * 隐藏导航栏底部的工作区切换区；Web / 移动端在导航栏（工具区）最下方切换。
+	 */
+	const tauriDesktop = isTauri() && !navigator.userAgent.includes('Android');
 	/** 是否处于移动端视口（≤768px）：决定是否渲染抽屉/状态浮层等移动端元素。 */
 	let isMobile = $state(false);
 	/** 移动端左侧抽屉导航是否打开。 */
@@ -1650,10 +1656,17 @@
 	}
 </script>
 
-<div class="app" class:nav-open={mobileNavOpen}>
+<div class="app" class:nav-open={mobileNavOpen} class:titlebar-mode={tauriDesktop}>
 	<!-- 主题背景图图层：图片与透明度由 JS 直接设置，不走 CSS 变量
 	     （超长 data URL 存 CSS 变量在部分浏览器会解析失败）。 -->
 	<div class="theme-backdrop" aria-hidden="true"></div>
+	{#if tauriDesktop}
+		<Titlebar
+			workspaceName={currentWorkspaceName}
+			onOpenWorkspace={() => (workspaceModalOpen = true)}
+			onExitToLanding={handleExitToLanding}
+		/>
+	{/if}
 	{#if entered}
 		<header class="header">
 			{#if isMobile}
@@ -1732,6 +1745,7 @@
 			<NavRail
 				active={tab}
 				workspaceName={currentWorkspaceName}
+				hideWorkspace={tauriDesktop}
 				onOpenWorkspace={() => (workspaceModalOpen = true)}
 				onExitToLanding={handleExitToLanding}
 				onSelect={(next) => {
@@ -1888,7 +1902,7 @@
 		</main>
 	</div>
 
-	{#if entered && workspaceModalOpen}
+	{#if workspaceModalOpen}
 		<WorkspaceModal
 			workspaces={workspaceList}
 			currentId={currentWorkspaceId}

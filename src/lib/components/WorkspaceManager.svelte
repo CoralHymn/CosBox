@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { WorkspaceMeta } from '../workspace/types';
+	import Icon from './Icon.svelte';
 
 	interface Props {
 		workspaces: WorkspaceMeta[];
@@ -136,7 +137,7 @@
 							aria-label="重命名"
 							onclick={() => startRename(ws)}
 						>
-							✏️
+							<Icon name="pencil" size={14} />
 						</button>
 						<button
 							class="btn btn-small"
@@ -145,7 +146,7 @@
 							disabled={busy}
 							onclick={() => onDuplicate(ws.id)}
 						>
-							⧉
+							<Icon name="copy" size={14} />
 						</button>
 						<button
 							class="btn btn-small"
@@ -154,7 +155,7 @@
 							disabled={busy}
 							onclick={() => onExport(ws.id)}
 						>
-							⬇️
+							<Icon name="download" size={14} />
 						</button>
 						<button
 							class="btn btn-small"
@@ -163,7 +164,7 @@
 							disabled={busy || workspaces.length <= 1}
 							onclick={() => onDelete(ws.id)}
 						>
-							🗑️
+							<Icon name="trash-2" size={14} />
 						</button>
 					</div>
 				{/if}

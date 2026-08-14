@@ -1611,9 +1611,9 @@ button:disabled {
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	padding: 10px 10px 8px;
-	border-bottom: 1px solid var(--border);
-	margin-bottom: 8px;
+	padding: 8px 10px 10px;
+	border-top: 1px solid var(--border);
+	margin-top: auto;
 }
 
 .nav-workspace-switch {
@@ -1667,4 +1667,148 @@ button:disabled {
 		padding: calc(24px + env(safe-area-inset-top, 0px)) 16px
 			calc(24px + env(safe-area-inset-bottom, 0px));
 	}
+}
+
+/* ===== Tauri 桌面版自定义标题栏（VSCode 式：窗口控制 + 工作区切换器） ===== */
+
+.titlebar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 40px;
+	padding: 0 0 0 12px;
+	background: var(--bg-app-header, var(--bg-elevated));
+	border-bottom: 1px solid var(--border);
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+/* 标题栏模式下网格改为 标题栏 40px + 顶栏 54px + 内容 1fr。 */
+.app.titlebar-mode {
+	grid-template-rows: 40px 54px 1fr;
+}
+
+/* 标题栏已展示品牌，避免与顶栏品牌重复。 */
+.app.titlebar-mode .header .brand {
+	display: none;
+}
+
+/* 初始界面（无顶栏）在标题栏模式下从第 2 行开始，跨到最后。 */
+.app.titlebar-mode .body.landing {
+	grid-row: 2 / -1;
+}
+
+.titlebar-brand {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13.5px;
+	font-weight: 700;
+	color: var(--text);
+}
+
+.titlebar-ws {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	max-width: 280px;
+	background: var(--accent-dim);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+	padding: 4px 10px;
+	cursor: pointer;
+	font-size: 12.5px;
+}
+
+.titlebar-ws:hover {
+	border-color: var(--border-strong);
+}
+
+.titlebar-ws-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.titlebar-caret {
+	color: var(--text-faint);
+	font-size: 11px;
+}
+
+.titlebar-exit {
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-dim);
+	padding: 4px 8px;
+	cursor: pointer;
+	font-size: 13px;
+	line-height: 1;
+}
+
+.titlebar-exit:hover {
+	color: var(--text);
+	border-color: var(--border-strong);
+}
+
+.titlebar-spacer {
+	flex: 1;
+	height: 100%;
+}
+
+.titlebar-controls {
+	display: flex;
+	height: 100%;
+}
+
+.titlebar-control {
+	width: 46px;
+	height: 100%;
+	border: none;
+	background: transparent;
+	color: var(--text-dim);
+	cursor: pointer;
+	font-size: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.titlebar-control:hover {
+	background: var(--panel);
+	color: var(--text);
+}
+
+.titlebar-close:hover {
+	background: #e81123;
+	color: #ffffff;
+}
+
+/* ===== 内联 SVG 图标（Icon.svelte）对齐 ===== */
+
+.icon {
+	display: block;
+	flex-shrink: 0;
+}
+
+.nav-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.nav-workspace-exit,
+.titlebar-exit,
+.titlebar-control,
+.ws-actions .btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.titlebar-ws-icon {
+	display: flex;
+	align-items: center;
+	color: var(--accent);
 }
