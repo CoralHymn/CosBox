@@ -5,7 +5,10 @@ import {
 	clampOpacity,
 	DEFAULT_THEME_COLORS,
 	DEFAULT_THEME_CONFIG,
+	findOfficialBackground,
 	findThemePreset,
+	getEffectiveBackgroundUrl,
+	OFFICIAL_BACKGROUNDS,
 	resolveThemeCss,
 	THEME_PRESETS,
 	themeFromPreset,
@@ -64,12 +67,36 @@ describe('findThemePreset', () => {
 	});
 });
 
+describe('OFFICIAL_BACKGROUNDS', () => {
+	it('每个官方背景字段完整、id 唯一且指向 static 资源', () => {
+		const ids = new Set<string>();
+		for (const bg of OFFICIAL_BACKGROUNDS) {
+			expect(bg.id.trim()).not.toBe('');
+			expect(bg.label.trim()).not.toBe('');
+			expect(bg.description.trim()).not.toBe('');
+			expect(bg.thumbnailPath.startsWith('/backgrounds/thumbs/')).toBe(true);
+			expect(bg.fullPath.startsWith('/backgrounds/')).toBe(true);
+			expect(ids.has(bg.id)).toBe(false);
+			ids.add(bg.id);
+		}
+		expect(OFFICIAL_BACKGROUNDS.length).toBeGreaterThan(0);
+	});
+
+	it('findOfficialBackground 按 id 命中；未知 id 返回 undefined', () => {
+		const first = OFFICIAL_BACKGROUNDS[0];
+		expect(first).toBeDefined();
+		expect(findOfficialBackground(first!.id)).toBe(first);
+		expect(findOfficialBackground('nope')).toBeUndefined();
+	});
+});
+
 describe('themeFromPreset', () => {
 	it('用预设完整颜色构造主题并保留背景图设置', () => {
 		const base: ThemeConfig = {
 			presetId: 'custom',
 			colors: {},
 			backgroundImage: 'data:image/png;base64,xxx',
+			officialBackgroundId: 'hourglass',
 			backgroundOpacity: 0.5,
 			backgroundBlur: 12
 		};
@@ -77,6 +104,7 @@ describe('themeFromPreset', () => {
 		expect(result.presetId).toBe('verge');
 		expect(result.colors.accent).toBe('#3cffd0');
 		expect(result.backgroundImage).toBe(base.backgroundImage);
+		expect(result.officialBackgroundId).toBe('hourglass');
 		expect(result.backgroundOpacity).toBe(0.5);
 		expect(result.backgroundBlur).toBe(12);
 	});
@@ -113,6 +141,7 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 			presetId: 'custom',
 			colors: { bg: '#123456', accent: '#abcdef' },
 			backgroundImage: 'data:image/png;base64,abc',
+			officialBackgroundId: '',
 			backgroundOpacity: 0.4,
 			backgroundBlur: 0
 		});
@@ -148,6 +177,42 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 		expect(vars['--bg-app-surface']).toBe('rgba(255, 0, 0, 0.25)');
 		expect(vars['--bg-app-surface-2']).toBe('rgba(0, 255, 0, 0.25)');
 		expect(vars['--bg-app-surface-3']).toBe('transparent');
+	});
+
+	it('官方背景生效：输出背景图层变量（无需自定义 data URL）', () => {
+		const vars = resolveThemeCss({
+			...DEFAULT_THEME_CONFIG,
+			officialBackgroundId: 'dark-grid',
+			backgroundOpacity: 0.8,
+			backgroundBlur: 6
+		});
+		expect(vars['--bg-app-header']).toBe('transparent');
+		expect(vars['--bg-app-panel']).toBe('transparent');
+		expect(vars['--bg-app-surface']).toBe('rgba(45, 45, 45, 0.25)');
+	});
+
+	it('getEffectiveBackgroundUrl：自定义 data URL 优先，官方背景兜底，都没有时为空', () => {
+		expect(
+			getEffectiveBackgroundUrl({
+				...DEFAULT_THEME_CONFIG,
+				backgroundImage: 'data:image/png;base64,abc',
+				officialBackgroundId: 'hourglass'
+			})
+		).toBe('data:image/png;base64,abc');
+		expect(
+			getEffectiveBackgroundUrl({
+				...DEFAULT_THEME_CONFIG,
+				officialBackgroundId: 'hourglass'
+			})
+		).toBe('/backgrounds/hourglass.webp');
+		expect(getEffectiveBackgroundUrl({ ...DEFAULT_THEME_CONFIG })).toBe('');
+		// 未知官方 id 回退为空，不输出背景图层变量
+		expect(
+			getEffectiveBackgroundUrl({ ...DEFAULT_THEME_CONFIG, officialBackgroundId: 'ghost' })
+		).toBe('');
+		expect(resolveThemeCss({ ...DEFAULT_THEME_CONFIG, officialBackgroundId: 'ghost' })[
+			'--bg-app-header'
+		]).toBeUndefined();
 	});
 
 	it('无 document 环境下 applyThemeToDocument 安全跳过（node 测试环境）', () => {
