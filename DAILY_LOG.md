@@ -2777,3 +2777,42 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
   `CosBoxBridge.getAppContext`，合并 manifest 含 bridge provider。
 - 待实机回归：导出各项应写入系统「下载」目录并 toast 显示 content:// URI。
 
+
+### 同日补充：导出不再闪退，但出现「发生未知错误，请重试」
+
+- 实机复测：旧崩溃已消除（说明 JNI_OnLoad / 桥接类链路生效），但导出 toast
+  显示「发生未知错误，请重试」。
+- 定位：Tauri v2 的 `invoke` 拒绝值就是 Rust 命令返回的错误字符串（非 Error
+  对象），`toUserMessage` 对非 Error 值一律返回通用文案，把真实原因吞掉了；
+  `android_save.rs` 的 `take_exception` 结果此前也被丢弃。
+- 处理（本轮改动）：
+  - `toUserMessage` 透传非空字符串（Rust 侧错误都是可读中文）；toast 的
+    error 出口加 console.error 留痕。
+  - MediaStore 写公共下载目录失败时：先取回并清除 pending 的 Java 异常细节，
+    再自动回落写入应用专属外部 Download 目录（Android/data/<包名>/files/Download），
+    保证导出始终有文件产出；两路都失败时返回合并后的完整原因。
+  - `relative_path` 改回官方示例写法 `Download`（去掉尾部斜杠）。
+  - 复核 `libapp_lib.so` 动态符号表：`JNI_OnLoad` 确实导出（`llvm-nm -D`），
+    ART 加载时会调用，排除「JavaVM 未初始化」路径。
+- 验证：`cargo check`（桌面 + aarch64-linux-android）通过；svelte-check 0 错；
+  Vitest 相关用例全绿；`tauri android build --target aarch64` 产出新 APK，
+  解包复核 JNI_OnLoad / CosBoxBridge / getAppContext 均保留。
+- 待实机回归：若仍失败，toast 会直接显示具体原因（如 MediaStore insert 异常
+  文本），据此可一步定位。
+
+
+### 同日补充：实机出现黑屏 —— 系并发构建污染前端包
+
+- 现象：安装 12:15 构建的 APK 后，打开应用直接黑屏。
+- 排查：Tauri v2 的前端资源是编译期内嵌进 `libapp_lib.so` 的（`generate_context!`），
+  APK 的 `assets/` 里没有前端属正常现象。用 `llvm-nm` 确认 `JNI_OnLoad` 导出，
+  并比对 .so 内嵌的 chunk 名，均正常。
+- 根因：12:15 那次 `tauri android build` 与并发的 `npm run check`
+  （内部执行 `svelte-kit sync`）同时读写 `.svelte-kit`，vite 读到了半写入的
+  生成代码，产物虽构建成功但内嵌包损坏 → WebView 白屏/黑屏。
+- 处理：干净重建（无任何并发 npm 进程），`svelte-check` 0 错、Vitest 全绿、
+  Playwright e2e 45/45 通过（生产包，含 .cbox 工作区导出导入用例），
+  最终 APK 内嵌包与 e2e 验证的 `build/` 一致（chunk 名 `app.BXykyrII.js`）。
+- 经验：`tauri android build` 执行期间不要并行跑任何会碰 `.svelte-kit` 的命令
+  （`npm run check` / `svelte-kit sync`），否则前端包可能被污染。
+
