@@ -135,6 +135,7 @@ export function createSettingsStore(kv: KvRepository, scopedKv: ScopedKv) {
 			presetId: next.presetId,
 			colors: { ...next.colors },
 			backgroundImage: next.backgroundImage,
+			officialBackgroundId: next.officialBackgroundId,
 			backgroundOpacity: next.backgroundOpacity,
 			backgroundBlur: next.backgroundBlur
 		};

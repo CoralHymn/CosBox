@@ -21,7 +21,9 @@
 	import type { SyncSettings } from '../sync/types';
 	import {
 		DEFAULT_THEME_CONFIG,
+		OFFICIAL_BACKGROUNDS,
 		THEME_PRESETS,
+		findOfficialBackground,
 		findThemePreset,
 		type ThemeColorKey,
 		type ThemeConfig
@@ -105,6 +107,7 @@
 	let themePresetId = $state(DEFAULT_THEME_CONFIG.presetId);
 	let themeColors = $state<Partial<Record<ThemeColorKey, string>>>({});
 	let themeBackground = $state('');
+	let officialBackgroundId = $state('');
 	let themeOpacity = $state(1);
 	let themeBlur = $state(0);
 	let themeBusy = $state(false);
@@ -227,6 +230,7 @@
 		themePresetId = theme.presetId;
 		themeColors = { ...theme.colors };
 		themeBackground = theme.backgroundImage;
+		officialBackgroundId = theme.officialBackgroundId;
 		themeOpacity = theme.backgroundOpacity;
 		themeBlur = theme.backgroundBlur;
 	});
@@ -238,6 +242,7 @@
 			presetId: themePresetId,
 			colors: { ...base, ...themeColors },
 			backgroundImage: themeBackground,
+			officialBackgroundId,
 			backgroundOpacity: themeOpacity,
 			backgroundBlur: themeBlur
 		};
@@ -278,19 +283,28 @@
 		void persistTheme();
 	}
 
-	/** 选择背景图：读取为 data URL 并即时保存。 */
+	/** 选择官方背景：与自定义上传互斥，选中后清除已上传的 data URL。 */
+	function selectOfficialBackground(id: string): void {
+		officialBackgroundId = officialBackgroundId === id ? '' : id;
+		themeBackground = '';
+		void persistTheme();
+	}
+
+	/** 选择自定义背景图：读取为 data URL 并即时保存（清除官方背景选择）。 */
 	async function pickThemeBackground(): Promise<void> {
 		const file = themeInput?.files?.[0];
 		if (file === undefined) {
 			return;
 		}
 		const dataUrl = await readFileAsDataUrl(file);
+		officialBackgroundId = '';
 		themeBackground = dataUrl;
 		void persistTheme();
 	}
 
-	/** 移除背景图。 */
+	/** 移除背景图（官方或自定义）。 */
 	function removeThemeBackground(): void {
+		officialBackgroundId = '';
 		themeBackground = '';
 		void persistTheme();
 	}
@@ -299,6 +313,7 @@
 	function resetTheme(): void {
 		themePresetId = DEFAULT_THEME_CONFIG.presetId;
 		themeColors = {};
+		officialBackgroundId = '';
 		themeBackground = '';
 		themeOpacity = 1;
 		themeBlur = 0;
@@ -1292,13 +1307,38 @@
 			</p>
 		</div>
 
+		<fieldset class="field official-bg-fieldset">
+			<legend>官方背景</legend>
+			<p class="muted" style="margin: 0 0 8px;">
+				内置预设背景，点选即时生效；与自定义上传互斥。
+			</p>
+			<div class="official-bg-grid">
+				{#each OFFICIAL_BACKGROUNDS as bg (bg.id)}
+					<button
+						type="button"
+						class="official-bg-card"
+						class:selected={officialBackgroundId === bg.id}
+						onclick={() => selectOfficialBackground(bg.id)}
+						title={bg.description}
+					>
+						<img class="official-bg-thumb" src={bg.thumbnailPath} alt={bg.label} loading="lazy" />
+						<span class="official-bg-label">{bg.label}</span>
+					</button>
+				{/each}
+			</div>
+		</fieldset>
+
 		<div class="field">
-			<label for="theme-bg-file">背景图</label>
+			<label for="theme-bg-file">自定义背景图</label>
 			<div class="row-actions">
 				<button class="btn btn-small" onclick={() => themeInput?.click()}>
-					{themeBackground === '' ? '选择背景图' : '更换背景图'}
+					{officialBackgroundId !== ''
+						? '上传自定义图片'
+						: themeBackground === ''
+							? '选择背景图'
+							: '更换背景图'}
 				</button>
-				{#if themeBackground !== ''}
+				{#if themeBackground !== '' || officialBackgroundId !== ''}
 					<button class="btn btn-small btn-danger" onclick={removeThemeBackground}>
 						移除背景图
 					</button>
@@ -1312,9 +1352,13 @@
 					onchange={pickThemeBackground}
 				/>
 			</div>
-			{#if themeBackground !== ''}
+			{#if themeBackground !== '' || officialBackgroundId !== ''}
 				<p class="muted" style="margin: 4px 0 0;">
-					已启用背景图（建议使用压缩后的图片，base64 会随设置持久化）。
+					{#if officialBackgroundId !== ''}
+						已启用官方背景「{findOfficialBackground(officialBackgroundId)?.label ?? officialBackgroundId}」，透明度与磨砂可继续调整。
+					{:else}
+						已启用自定义背景图（建议使用压缩后的图片，base64 会随设置持久化）。
+					{/if}
 				</p>
 				<div class="field">
 					<label for="theme-bg-opacity">背景图透明度：{Math.round(themeOpacity * 100)}%</label>
