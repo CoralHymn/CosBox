@@ -54,11 +54,16 @@ export class CosBoxDatabase extends Dexie {
 	}
 }
 
-/** v2 → v3：把存量行补上默认工作区 id（数据量小，toArray + bulkPut 足够）。 */
+/**
+ * v2 → v3：把存量行补上默认工作区 id。
+ * 用 `toCollection().modify()` 游标原地更新：老存档（尤其大快照表）迁移时
+ * 不再把全表读进内存再整表回写，避免打开页面卡顿（D104 优化）。
+ */
 interface UpgradeTxLike {
 	table(name: string): {
-		toArray(): Promise<unknown[]>;
-		bulkPut(rows: unknown[]): Promise<unknown>;
+		toCollection(): {
+			modify(changes: Record<string, unknown>): Promise<unknown>;
+		};
 	};
 }
 
@@ -66,11 +71,7 @@ async function stampWorkspaceId(
 	tx: UpgradeTxLike,
 	table: 'snapshots' | 'worldInfo' | 'memories'
 ): Promise<void> {
-	const rows = (await tx.table(table).toArray()) as { workspaceId?: string }[];
-	if (rows.length === 0) {
-		return;
-	}
-	await tx.table(table).bulkPut(rows.map((row) => ({ ...row, workspaceId: DEFAULT_WORKSPACE_ID })));
+	await tx.table(table).toCollection().modify({ workspaceId: DEFAULT_WORKSPACE_ID });
 }
 
 let sharedDb: CosBoxDatabase | null = null;

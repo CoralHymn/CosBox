@@ -2937,3 +2937,21 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 回归护栏：新增 `e2e/titlebar.spec.ts`（注入 `__TAURI_INTERNALS__` 模拟
   标题栏模式，断言标题栏 40px、窗口控制按钮存在、初始界面与进入后 body
   高度 > 500）。e2e 52/52 通过；svelte-check 0 错；lint 通过。
+
+### 同日补充：导航图标 Lucide 化 + 桌面状态 chips 并入标题栏 + 默认主题改 The Verge + 迁移提速
+
+- **图标**：导航栏全部 tab emoji（💬🧍📍👗🗓️🌳📖🧠📈📦⚙️）替换为 Lucide
+  风格内联 SVG（message-circle/user/map-pin/shirt/calendar-days/git-branch/
+  book-open/brain/activity/package/settings），切换器/标题栏下拉箭头 ▾ 改
+  chevron-down；`icons.ts` 路径常量表扩充。
+- **桌面标题栏**：时间/模型/快照/思考中 chips 并入 40px 标题栏（时间等状态
+  信息不再单独占一条 54px 顶栏，画面更紧凑）；标题栏模式网格简化为
+  `40px 1fr`，桌面端不再渲染 header（移动端不受影响）。
+- **默认主题**：The Verge 酸薄荷成为默认（`DEFAULT_THEME_COLORS`、
+  `DEFAULT_THEME_CONFIG.presetId='verge'`、app.css :root 同步），旧的蓝紫
+  主题保留为「CosBox 深色（旧默认）」预设；已有用户保存的主题不受影响。
+- **迁移提速**：v2→v3 盖章从 `toArray + bulkPut`（全表读入内存再整表回写，
+  大快照表会卡）改为 `toCollection().modify()` 游标原地更新，老存档首次
+  打开明显更快、内存占用更低。
+- 验证：svelte-check 0 错；lint 通过；单测 804 全绿；e2e 52/52（主题用例
+  同步断言 verge 默认值）。

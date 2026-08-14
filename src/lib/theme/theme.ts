@@ -45,23 +45,26 @@ export interface ThemePreset {
 	colors: Record<ThemeColorKey, string>;
 }
 
-/** CosBox 内置默认主题（与 app.css :root 保持一致）。 */
+/**
+ * CosBox 内置默认主题（The Verge 酸薄荷：近黑画布 + 酸薄荷 + 紫外紫，
+ * 与 app.css :root 保持一致）。
+ */
 export const DEFAULT_THEME_COLORS: Record<ThemeColorKey, string> = {
-	bg: '#0e1016',
-	'bg-elevated': '#141821',
-	panel: '#171b26',
-	'panel-2': '#1d2230',
-	border: '#2a3040',
-	'border-strong': '#374055',
-	text: '#e8eaf1',
-	'text-dim': '#9aa3b8',
-	'text-faint': '#6b7387',
-	accent: '#7c9cff',
-	'accent-dim': 'rgba(124, 156, 255, 0.14)',
-	'accent-2': '#b18cff',
-	ok: '#4ade80',
-	warn: '#fbbf24',
-	err: '#f87171'
+	bg: '#131313',
+	'bg-elevated': '#1a1a1a',
+	panel: '#2d2d2d',
+	'panel-2': '#232323',
+	border: '#313131',
+	'border-strong': '#4a4a4a',
+	text: '#ffffff',
+	'text-dim': '#949494',
+	'text-faint': '#6b6b6b',
+	accent: '#3cffd0',
+	'accent-dim': 'rgba(60, 255, 208, 0.12)',
+	'accent-2': '#5200ff',
+	ok: '#3cffd0',
+	warn: '#f5c542',
+	err: '#ff5d5d'
 };
 
 /**
@@ -73,9 +76,25 @@ export const DEFAULT_THEME_COLORS: Record<ThemeColorKey, string> = {
 export const THEME_PRESETS: readonly ThemePreset[] = [
 	{
 		id: 'default',
-		label: '默认（CosBox 深色）',
-		description: '内置深色主题，蓝紫主色。',
-		colors: { ...DEFAULT_THEME_COLORS }
+		label: 'CosBox 深色（旧默认）',
+		description: '旧版内置深色主题，蓝紫主色。',
+		colors: {
+			bg: '#0e1016',
+			'bg-elevated': '#141821',
+			panel: '#171b26',
+			'panel-2': '#1d2230',
+			border: '#2a3040',
+			'border-strong': '#374055',
+			text: '#e8eaf1',
+			'text-dim': '#9aa3b8',
+			'text-faint': '#6b7387',
+			accent: '#7c9cff',
+			'accent-dim': 'rgba(124, 156, 255, 0.14)',
+			'accent-2': '#b18cff',
+			ok: '#4ade80',
+			warn: '#fbbf24',
+			err: '#f87171'
+		}
 	},
 	{
 		id: 'claude',
@@ -145,9 +164,9 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
 	}
 ];
 
-/** 默认主题配置：内置默认色 + 无背景图。 */
+/** 默认主题配置：The Verge 酸薄荷 + 无背景图。 */
 export const DEFAULT_THEME_CONFIG: ThemeConfig = {
-	presetId: 'default',
+	presetId: 'verge',
 	colors: {},
 	backgroundImage: '',
 	backgroundOpacity: 1,
@@ -160,7 +179,10 @@ export function findThemePreset(id: string): ThemePreset | undefined {
 }
 
 /** 用预设完整颜色构造主题配置（保留背景图设置）。 */
-export function themeFromPreset(presetId: string, base: ThemeConfig = DEFAULT_THEME_CONFIG): ThemeConfig {
+export function themeFromPreset(
+	presetId: string,
+	base: ThemeConfig = DEFAULT_THEME_CONFIG
+): ThemeConfig {
 	const preset = findThemePreset(presetId);
 	return {
 		presetId,

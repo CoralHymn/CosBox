@@ -45,8 +45,9 @@ describe('THEME_PRESETS', () => {
 		}
 	});
 
-	it('默认预设与 DEFAULT_THEME_COLORS 一致', () => {
-		expect(findThemePreset('default')?.colors).toEqual(DEFAULT_THEME_COLORS);
+	it('The Verge 预设与 DEFAULT_THEME_COLORS 一致（默认主题）', () => {
+		expect(findThemePreset('verge')?.colors).toEqual(DEFAULT_THEME_COLORS);
+		expect(DEFAULT_THEME_CONFIG.presetId).toBe('verge');
 	});
 });
 
@@ -120,9 +121,9 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 		expect(vars['--panel']).toBe(DEFAULT_THEME_COLORS.panel);
 		expect(vars['--bg-app-header']).toBe('transparent');
 		expect(vars['--bg-app-panel']).toBe('transparent');
-		// 内容面半透明：由主题色动态换算 rgba
-		expect(vars['--bg-app-surface']).toBe('rgba(23, 27, 38, 0.25)');
-		expect(vars['--bg-app-surface-2']).toBe('rgba(29, 34, 48, 0.25)');
+		// 内容面半透明：由主题色动态换算 rgba（默认 The Verge）
+		expect(vars['--bg-app-surface']).toBe('rgba(45, 45, 45, 0.25)');
+		expect(vars['--bg-app-surface-2']).toBe('rgba(35, 35, 35, 0.25)');
 		// bg 被覆盖为 #123456，surface-3 按覆盖后的颜色换算
 		expect(vars['--bg-app-surface-3']).toBe('rgba(18, 52, 86, 0.25)');
 	});

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TabId } from '../stores/ui.svelte';
 	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	interface Props {
 		active: TabId;
@@ -24,25 +25,25 @@
 		hideWorkspace = false
 	}: Props = $props();
 
-	const tabs: { id: TabId; label: string; icon: string }[] = [
-		{ id: 'chat', label: '对话', icon: '💬' },
-		{ id: 'state', label: '状态', icon: '🧍' },
-		{ id: 'locations', label: '地点', icon: '📍' },
-		{ id: 'wardrobe', label: '衣柜', icon: '👗' },
-		{ id: 'schedule', label: '日程', icon: '🗓️' },
-		{ id: 'versions', label: '版本', icon: '🌳' },
-		{ id: 'world', label: '世界书', icon: '📖' },
-		{ id: 'memory', label: '记忆', icon: '🧠' },
-		{ id: 'monitor', label: '监控', icon: '📈' },
-		{ id: 'transfer', label: '导入导出', icon: '📦' },
-		{ id: 'settings', label: '设置', icon: '⚙️' }
+	const tabs: { id: TabId; label: string; icon: IconName }[] = [
+		{ id: 'chat', label: '对话', icon: 'message-circle' },
+		{ id: 'state', label: '状态', icon: 'user' },
+		{ id: 'locations', label: '地点', icon: 'map-pin' },
+		{ id: 'wardrobe', label: '衣柜', icon: 'shirt' },
+		{ id: 'schedule', label: '日程', icon: 'calendar-days' },
+		{ id: 'versions', label: '版本', icon: 'git-branch' },
+		{ id: 'world', label: '世界书', icon: 'book-open' },
+		{ id: 'memory', label: '记忆', icon: 'brain' },
+		{ id: 'monitor', label: '监控', icon: 'activity' },
+		{ id: 'transfer', label: '导入导出', icon: 'package' },
+		{ id: 'settings', label: '设置', icon: 'settings' }
 	];
 </script>
 
 <nav class="nav-rail">
 	{#each tabs as tab (tab.id)}
 		<button class="nav-item" class:active={tab.id === active} onclick={() => onSelect(tab.id)}>
-			<span class="nav-icon">{tab.icon}</span>
+			<span class="nav-icon"><Icon name={tab.icon} size={15} /></span>
 			<span>{tab.label}</span>
 		</button>
 	{/each}
@@ -52,7 +53,7 @@
 			<button class="nav-workspace-switch" title="管理工作区" onclick={onOpenWorkspace}>
 				<span class="nav-icon"><Icon name="layers" size={15} /></span>
 				<span class="nav-workspace-name">{workspaceName}</span>
-				<span class="nav-workspace-caret">▾</span>
+				<span class="nav-workspace-caret"><Icon name="chevron-down" size={11} /></span>
 			</button>
 			<button
 				class="nav-workspace-exit"

@@ -1,19 +1,19 @@
 :root {
-	--bg: #0e1016;
-	--bg-elevated: #141821;
-	--panel: #171b26;
-	--panel-2: #1d2230;
-	--border: #2a3040;
-	--border-strong: #374055;
-	--text: #e8eaf1;
-	--text-dim: #9aa3b8;
-	--text-faint: #6b7387;
-	--accent: #7c9cff;
-	--accent-dim: rgba(124, 156, 255, 0.14);
-	--accent-2: #b18cff;
-	--ok: #4ade80;
-	--warn: #fbbf24;
-	--err: #f87171;
+	--bg: #131313;
+	--bg-elevated: #1a1a1a;
+	--panel: #2d2d2d;
+	--panel-2: #232323;
+	--border: #313131;
+	--border-strong: #4a4a4a;
+	--text: #ffffff;
+	--text-dim: #949494;
+	--text-faint: #6b6b6b;
+	--accent: #3cffd0;
+	--accent-dim: rgba(60, 255, 208, 0.12);
+	--accent-2: #5200ff;
+	--ok: #3cffd0;
+	--warn: #f5c542;
+	--err: #ff5d5d;
 	--radius: 10px;
 	--radius-sm: 7px;
 	--shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
@@ -1683,14 +1683,10 @@ button:disabled {
 	-webkit-user-select: none;
 }
 
-/* 标题栏模式下网格改为 标题栏 40px + 顶栏 54px + 内容 1fr。 */
+/* 标题栏模式下网格改为 标题栏 40px + 内容 1fr。
+   （时间/模型/快照等状态 chips 已并入标题栏，桌面端不再渲染 54px 顶栏。） */
 .app.titlebar-mode {
-	grid-template-rows: 40px 54px 1fr;
-}
-
-/* 标题栏已展示品牌，避免与顶栏品牌重复。 */
-.app.titlebar-mode .header .brand {
-	display: none;
+	grid-template-rows: 40px 1fr;
 }
 
 /* 初始界面（无顶栏）在标题栏模式下从第 2 行开始，跨到最后。 */
@@ -1811,4 +1807,10 @@ button:disabled {
 	display: flex;
 	align-items: center;
 	color: var(--accent);
+}
+
+/* 标题栏内的状态 chips：与 40px 高度匹配的小号样式。 */
+.titlebar-chip {
+	font-size: 11.5px;
+	padding: 2px 8px;
 }
