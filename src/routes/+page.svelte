@@ -27,11 +27,7 @@
 		serializeCharaCard
 	} from '../lib/import-export/chara-card-v3';
 	import { parseConfigPart, serializeConfigPart } from '../lib/import-export/config-transfer';
-	import {
-		parseWorkspace,
-		serializeWorkspace,
-		type WorkspaceData
-	} from '../lib/import-export/workspace';
+	import { parseWorkspace, type WorkspaceData } from '../lib/import-export/workspace';
 	import {
 		ChatService,
 		formatToolArguments,
@@ -84,6 +80,11 @@
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
 	import { downloadBytes, downloadTextFile } from '../lib/utils/download';
+	import { createScopeKv } from '../lib/db/scoped-kv';
+	import { WorkspaceScope } from '../lib/db/workspace-scope';
+	import { WorkspaceRegistry } from '../lib/workspace/workspace-registry';
+	import { WorkspaceService } from '../lib/workspace/workspace-service';
+	import type { WorkspaceMeta } from '../lib/workspace/types';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
@@ -99,25 +100,42 @@
 	import VersionPanel from '../lib/components/VersionPanel.svelte';
 	import WardrobePanel from '../lib/components/WardrobePanel.svelte';
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
+	import WorkspaceHome from '../lib/components/WorkspaceHome.svelte';
+	import WorkspaceModal from '../lib/components/WorkspaceModal.svelte';
 
 	/** 自动记忆提取的固定触发阈值：累计 N 条新对话消息后提取一次（用户/角色各算一条）。 */
 	const AUTO_MEMORY_EXTRACT_EVERY_MSGS = 10;
 
 	const db = getDb();
 	const kv = new KvRepository(db);
-	const snapshotRepo = new SnapshotRepository(db);
+	/** 当前工作区定位器：三表仓储按它过滤，切换工作区 = set + 重载。 */
+	const scope = new WorkspaceScope();
+	const scopedKv = createScopeKv(kv, scope);
+	const snapshotRepo = new SnapshotRepository(db, scope);
 	const manager = new CharacterManager({
 		snapshots: snapshotRepo,
-		kv
+		kv: scopedKv
 	});
-	const contextUsage = createContextUsageStore(kv);
-	const memoryRepo = new MemoryRepository(db);
+	const contextUsage = createContextUsageStore(scopedKv);
+	const memoryRepo = new MemoryRepository(db, scope);
 	const memoryStore = createMemoryStore(memoryRepo);
 	const metrics = createMetricsStore(kv);
 	const session = createCharacterSession(manager);
-	const settings = createSettingsStore(kv);
-	const worldInfo = createWorldInfoStore(new WorldInfoRepository(db));
-	const syncService = new SyncService(kv);
+	const settings = createSettingsStore(kv, scopedKv);
+	const worldInfoRepo = new WorldInfoRepository(db, scope);
+	const worldInfo = createWorldInfoStore(worldInfoRepo);
+	const syncService = new SyncService(scopedKv);
+	const workspaces = new WorkspaceRegistry(kv);
+	const workspaceService = new WorkspaceService({
+		registry: workspaces,
+		scope,
+		snapshots: snapshotRepo,
+		worldInfo: worldInfoRepo,
+		memories: memoryRepo,
+		kv,
+		manager,
+		onSwitched: () => reloadStoresAfterSwitch()
+	});
 	const toasts = createToasts();
 	const demoClient = new DemoLlmClient();
 	const openAiClient = new OpenAiCompatibleClient();
@@ -136,7 +154,20 @@
 	let memoryExtracting = $state(false);
 	/** 最近一次成功提取已覆盖的非系统消息数，避免无新消息时重复调用 LLM。 */
 	let lastAutoExtractCount = 0;
-	let ready = $state(false);
+	/** 注册表与设置已加载：初始界面（工作区选择）可用。 */
+	let booted = $state(false);
+	/** 已进入某个工作区（主界面显示）；false 时显示工作区选择初始界面。 */
+	let entered = $state(false);
+	/** 正在进入/切换/创建/复制/删除工作区（禁用相关操作，防竞态）。 */
+	let switchingWorkspace = $state(false);
+	/** 应用内的工作区管理弹层。 */
+	let workspaceModalOpen = $state(false);
+	/** 工作区列表的响应式镜像（注册表 subscribe 同步）。 */
+	let workspaceList = $state<WorkspaceMeta[]>([]);
+	/** 当前工作区 id 的响应式镜像。 */
+	let currentWorkspaceId = $state<string | null>(null);
+	/** 当前工作区名（导航栏切换器展示）。 */
+	let currentWorkspaceName = $state('');
 	/** 开发者模式下展示的最近一次发送给 AI 的完整提示词。 */
 	let debugPrompt = $state<DebugPromptView | null>(null);
 	/** 最近一次请求的上下文包、用量与压缩状态（供侧栏上下文面板展示）。 */
@@ -239,33 +270,59 @@
 	function startSync(): void {
 		syncService.start({
 			getSettings: () => settings.sync,
-			collect: collectWorkspaceData,
+			getWorkspaceId: () => scope.get(),
+			collect: () => workspaceService.collectWorkspaceData(scope.get()),
 			apply: async (data) => applyWorkspaceData(data),
 			onChange: () => syncService.notifyChanged()
 		});
 	}
 
+	/** 同步工作区列表的响应式镜像（注册表变化时调用）。 */
+	function refreshWorkspaceList(): void {
+		workspaceList = workspaces.getWorkspaces();
+		currentWorkspaceId = workspaces.getCurrentId();
+		const current = workspaces.getById(currentWorkspaceId ?? '');
+		currentWorkspaceName = current?.name ?? '';
+	}
+
+	/** 切换工作区后由 service 触发的宿主重载：stores、瞬态、同步全部复位。 */
+	async function reloadStoresAfterSwitch(): Promise<void> {
+		await worldInfo.init();
+		await memoryStore.load();
+		await contextUsage.load();
+		await settings.reloadWorkspaceScoped();
+		const restored = contextUsage.usage;
+		lastContext =
+			restored !== null
+				? {
+						bundle: null,
+						usage: restored.usage,
+						compaction: restored.compaction,
+						keptRecent: restored.keptRecent
+					}
+				: { bundle: null, usage: null, compaction: null, keptRecent: 0 };
+		compactState = restored?.compaction ?? null;
+		debugPrompt = null;
+		lastJudgeDebug = null;
+		lastAutoExtractCount = 0;
+		streamingSegments = null;
+		streamingPhase = null;
+		recentLog = '';
+		refreshWorkspaceList();
+		syncService.stop();
+		await syncService.reloadForWorkspace();
+		startSync();
+	}
+
 	onMount(async () => {
 		try {
-			await manager.init();
-			await worldInfo.init();
+			await workspaces.migrateLegacy();
+			await workspaces.load();
+			workspaces.subscribe(refreshWorkspaceList);
+			refreshWorkspaceList();
 			await settings.load();
-			await contextUsage.load();
-			await memoryStore.load();
 			await metrics.load();
-			const restored = contextUsage.usage;
-			if (restored !== null) {
-				// 重启后恢复上次请求的用量面板：上下文包不落库（含完整消息数组），
-				// 仅恢复展示所需的 usage / compaction / keptRecent。
-				lastContext = {
-					bundle: null,
-					usage: restored.usage,
-					compaction: restored.compaction,
-					keptRecent: restored.keptRecent
-				};
-			}
 			await syncService.load();
-			startSync();
 			session.subscribe(() => syncService.notifyChanged());
 			worldInfo.subscribe(() => syncService.notifyChanged());
 			settings.subscribe(() => syncService.notifyChanged());
@@ -274,10 +331,7 @@
 				void checkForUpdate()
 					.then((info) => {
 						if (info !== null) {
-							toasts.push(
-								'info',
-								`发现新版本 v${info.version}，可在「设置 → 关于」中更新。`
-							);
+							toasts.push('info', `发现新版本 v${info.version}，可在「设置 → 关于」中更新。`);
 						}
 					})
 					.catch(() => undefined);
@@ -285,7 +339,7 @@
 		} catch (err) {
 			toasts.error(err);
 		} finally {
-			ready = true;
+			booted = true;
 		}
 	});
 
@@ -1228,6 +1282,156 @@
 		}
 	}
 
+	/** 进入/切换工作区：切换成功后进入主界面。 */
+	async function handleEnterWorkspace(id: string): Promise<void> {
+		if (switchingWorkspace) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			await workspaceService.switchTo(id);
+			entered = true;
+			tab = 'chat';
+			workspaceModalOpen = false;
+			mobileNavOpen = false;
+			mobileStateOpen = false;
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 新建工作区并进入。 */
+	async function handleCreateWorkspace(name: string): Promise<void> {
+		try {
+			const meta = await workspaceService.createWorkspace(name);
+			entered = true;
+			tab = 'chat';
+			workspaceModalOpen = false;
+			toasts.success(`工作区「${meta.name}」已创建`);
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 重命名工作区。 */
+	async function handleRenameWorkspace(id: string, name: string): Promise<void> {
+		try {
+			await workspaces.rename(id, name);
+			refreshWorkspaceList();
+			toasts.success('工作区已重命名');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 复制工作区：service 自动生成不重名的「xx 副本」并切换过去。 */
+	async function handleDuplicateWorkspace(id: string): Promise<void> {
+		if (switchingWorkspace) {
+			return;
+		}
+		const source = workspaces.getById(id);
+		if (source === undefined) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			const meta = await workspaceService.duplicateWorkspace(id, `${source.name} 副本`);
+			entered = true;
+			workspaceModalOpen = false;
+			toasts.success(`已复制为「${meta.name}」并切换过去`);
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 删除工作区（确认弹窗展示数据量；删除当前工作区会自动切走）。 */
+	async function handleDeleteWorkspace(id: string): Promise<void> {
+		const meta = workspaces.getById(id);
+		if (meta === undefined) {
+			return;
+		}
+		try {
+			const [snapshotCount, worldInfoCount, memoryCount] = await Promise.all([
+				snapshotRepo.count(id),
+				worldInfoRepo.getAll(id).then((entries) => entries.length),
+				memoryRepo.getAll(id).then((entries) => entries.length)
+			]);
+			if (
+				!window.confirm(
+					`删除工作区「${meta.name}」？将移除 ${snapshotCount} 个快照、${worldInfoCount} 条世界信息、${memoryCount} 条记忆，且不可恢复。`
+				)
+			) {
+				return;
+			}
+		} catch (err) {
+			toasts.error(err);
+			return;
+		}
+		if (switchingWorkspace) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			await workspaceService.removeWorkspace(id);
+			toasts.success(`工作区「${meta.name}」已删除`);
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 导出任意工作区（含非当前工作区）为 .cbox。 */
+	async function handleExportWorkspaceById(id: string): Promise<void> {
+		try {
+			const meta = workspaces.getById(id);
+			const safeName = (meta?.name ?? 'workspace').replace(/[\\/:*?"<>|]/g, '_');
+			const bytes = await workspaceService.exportWorkspace(id);
+			const saved = await downloadBytes(`cosbox-${safeName}-${stamp()}.cbox`, bytes);
+			toasts.success(saved !== null ? `工作区已导出，保存于：${saved}` : '工作区已导出');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 导入 .cbox 为新工作区并切换过去。 */
+	async function handleImportAsNewWorkspace(file: File): Promise<void> {
+		if (switchingWorkspace) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			const bytes = new Uint8Array(await file.arrayBuffer());
+			const data = parseWorkspace(bytes);
+			const meta = await workspaceService.importAsNewWorkspace(data);
+			entered = true;
+			tab = 'chat';
+			workspaceModalOpen = false;
+			toasts.success(`已导入为新工作区「${meta.name}」`);
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 退出到工作区选择初始界面（生成中不可退出）。 */
+	function handleExitToLanding(): void {
+		if (busy) {
+			toasts.push('info', '请先停止当前生成，再退出到工作区选择');
+			return;
+		}
+		syncService.stop();
+		workspaceModalOpen = false;
+		mobileNavOpen = false;
+		mobileStateOpen = false;
+		entered = false;
+	}
+
 	/** 保存主题（即时生效，SettingsPanel 在每次修改时调用）。 */
 	async function handleSaveTheme(next: ThemeConfig): Promise<void> {
 		try {
@@ -1343,24 +1547,10 @@
 		toasts.success(`已导入 ${freshCount} 项到${KIND_LABELS[kind]}`);
 	}
 
-	/** 导出工作区：除模型配置外的全部数据打包为 .cbox。 */
-	/** 收集当前完整工作区数据（不含模型配置与 API Key），供导出与远程同步复用。 */
-	function collectWorkspaceData(): WorkspaceData {
-		return {
-			profile: settings.profile,
-			developerMode: settings.developerMode,
-			worldInfo: worldInfo.entries,
-			config: {
-				places: session.state.places,
-				wardrobe: session.state.outfit.wardrobe,
-				scheduleEntries: session.state.schedule.entries
-			},
-			headId: session.headId,
-			snapshots: session.snapshots
-		};
-	}
-
-	/** 应用工作区数据：校验快照链后整体恢复本地（保留当前模型配置与 Key）。 */
+	/**
+	 * 应用工作区数据到当前工作区：校验快照链后整体恢复本地
+	 * （保留当前模型配置与 Key）。仅用于「导入到当前工作区」。
+	 */
 	async function applyWorkspaceData(data: WorkspaceData): Promise<void> {
 		if (data.headId !== null) {
 			rebuildFromNodes(
@@ -1373,22 +1563,33 @@
 		await snapshotRepo.bulkAdd(data.snapshots);
 		await worldInfo.clear();
 		await worldInfo.importEntries(data.worldInfo);
+		await memoryRepo.clear();
+		await memoryRepo.bulkPut(data.memories ?? []);
+		await memoryStore.load();
 		await settings.saveProfile(data.profile);
 		await settings.saveDeveloperMode(data.developerMode);
 		await manager.restoreWorkspace(data.config, data.headId);
+		// 导入整体替换了剧情数据：压缩边界/调试视图/最近日志一并复位。
+		compactState = null;
+		debugPrompt = null;
+		lastJudgeDebug = null;
+		lastAutoExtractCount = 0;
+		recentLog = '';
+		lastContext = { bundle: null, usage: null, compaction: null, keptRecent: 0 };
 	}
 
+	/** 导出当前工作区：除模型配置外的全部数据打包为 .cbox。 */
 	async function handleExportWorkspace(): Promise<void> {
 		try {
-			const data = collectWorkspaceData();
-			const saved = await downloadBytes(`cosbox-${stamp()}.cbox`, serializeWorkspace(data));
+			const bytes = await workspaceService.exportWorkspace(scope.get());
+			const saved = await downloadBytes(`cosbox-${stamp()}.cbox`, bytes);
 			toasts.success(saved !== null ? `工作区已导出，保存于：${saved}` : '工作区已导出');
 		} catch (err) {
 			toasts.error(err);
 		}
 	}
 
-	/** 导入工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
+	/** 导入工作区到当前工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
 	async function handleImportWorkspace(file: File): Promise<void> {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		const data = parseWorkspace(bytes);
@@ -1453,33 +1654,33 @@
 	<!-- 主题背景图图层：图片与透明度由 JS 直接设置，不走 CSS 变量
 	     （超长 data URL 存 CSS 变量在部分浏览器会解析失败）。 -->
 	<div class="theme-backdrop" aria-hidden="true"></div>
-	<header class="header">
-		{#if isMobile}
-			<button
-				class="mobile-nav-toggle"
-				aria-label="打开菜单"
-				title="菜单"
-				onclick={() => (mobileNavOpen = !mobileNavOpen)}
-			>
-				☰
-			</button>
-		{/if}
-		<div class="brand">
-			<span class="brand-mark">C</span>
-			<span>CosBox</span>
-		</div>
-		<div class="header-spacer"></div>
-		{#if ready && isMobile}
-			<button
-				class="mobile-state-toggle"
-				aria-label="实时状态"
-				title="实时状态"
-				onclick={() => (mobileStateOpen = !mobileStateOpen)}
-			>
-				{formatWorldTime(session.state.schedule.time)} · {session.state.location.name}
-			</button>
-		{/if}
-		{#if ready}
+	{#if entered}
+		<header class="header">
+			{#if isMobile}
+				<button
+					class="mobile-nav-toggle"
+					aria-label="打开菜单"
+					title="菜单"
+					onclick={() => (mobileNavOpen = !mobileNavOpen)}
+				>
+					☰
+				</button>
+			{/if}
+			<div class="brand">
+				<span class="brand-mark">C</span>
+				<span>CosBox</span>
+			</div>
+			<div class="header-spacer"></div>
+			{#if isMobile}
+				<button
+					class="mobile-state-toggle"
+					aria-label="实时状态"
+					title="实时状态"
+					onclick={() => (mobileStateOpen = !mobileStateOpen)}
+				>
+					{formatWorldTime(session.state.schedule.time)} · {session.state.location.name}
+				</button>
+			{/if}
 			<span class="chip"
 				><span class="dot"></span>{formatWorldTime(session.state.schedule.time)}</span
 			>
@@ -1488,10 +1689,10 @@
 			{#if busy}
 				<span class="chip busy"><span class="dot"></span>思考中…</span>
 			{/if}
-		{/if}
-	</header>
+		</header>
+	{/if}
 
-	{#if isMobile && mobileStateOpen}
+	{#if entered && isMobile && mobileStateOpen}
 		<div class="mobile-state-panel" role="dialog" aria-label="实时状态">
 			<div class="mobile-state-head">
 				<span>实时状态</span>
@@ -1518,8 +1719,8 @@
 		</div>
 	{/if}
 
-	<div class="body">
-		{#if isMobile}
+	<div class="body" class:landing={!entered}>
+		{#if entered && isMobile}
 			<div
 				class="nav-backdrop"
 				class:show={mobileNavOpen}
@@ -1527,18 +1728,36 @@
 				onclick={() => (mobileNavOpen = false)}
 			></div>
 		{/if}
-		<NavRail
-			active={tab}
-			onSelect={(next) => {
-				tab = next;
-				mobileNavOpen = false;
-			}}
-		/>
-		<main class="content">
-			{#if !ready}
+		{#if entered}
+			<NavRail
+				active={tab}
+				workspaceName={currentWorkspaceName}
+				onOpenWorkspace={() => (workspaceModalOpen = true)}
+				onExitToLanding={handleExitToLanding}
+				onSelect={(next) => {
+					tab = next;
+					mobileNavOpen = false;
+				}}
+			/>
+		{/if}
+		<main class="content" class:full={!entered}>
+			{#if !booted}
 				<div class="panel">
 					<p class="empty-hint">正在加载本地数据库…</p>
 				</div>
+			{:else if !entered}
+				<WorkspaceHome
+					workspaces={workspaceList}
+					currentId={currentWorkspaceId}
+					busy={switchingWorkspace}
+					onEnter={handleEnterWorkspace}
+					onCreate={handleCreateWorkspace}
+					onRename={handleRenameWorkspace}
+					onDuplicate={handleDuplicateWorkspace}
+					onDelete={handleDeleteWorkspace}
+					onExport={handleExportWorkspaceById}
+					onImportFile={handleImportAsNewWorkspace}
+				/>
 			{:else if tab === 'chat'}
 				<ChatPanel
 					conversation={session.conversation}
@@ -1668,6 +1887,22 @@
 			{/if}
 		</main>
 	</div>
+
+	{#if entered && workspaceModalOpen}
+		<WorkspaceModal
+			workspaces={workspaceList}
+			currentId={currentWorkspaceId}
+			busy={busy || switchingWorkspace}
+			onClose={() => (workspaceModalOpen = false)}
+			onEnter={handleEnterWorkspace}
+			onCreate={handleCreateWorkspace}
+			onRename={handleRenameWorkspace}
+			onDuplicate={handleDuplicateWorkspace}
+			onDelete={handleDeleteWorkspace}
+			onExport={handleExportWorkspaceById}
+			onImportFile={handleImportAsNewWorkspace}
+		/>
+	{/if}
 
 	<Toasts toasts={toasts.toasts} onDismiss={(id) => toasts.remove(id)} />
 </div>

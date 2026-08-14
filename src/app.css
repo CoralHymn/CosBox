@@ -166,6 +166,19 @@ button:disabled {
 	min-height: 0;
 }
 
+/* 初始界面（未进入工作区）：无导航栏，横跨两行占满全屏 + 内容区可滚动。
+   注意 .app 是 `54px 1fr` 双行网格，header 不渲染时 body 是唯一流内子元素，
+   会被自动放进 54px 顶栏行——必须显式 span 两行，否则界面被压成顶部细条。 */
+.body.landing {
+	grid-row: 1 / -1;
+	display: flex;
+}
+
+.body.landing .content {
+	flex: 1;
+	overflow-y: auto;
+}
+
 .nav-rail {
 	display: flex;
 	flex-direction: column;
@@ -1422,5 +1435,236 @@ button:disabled {
 
 	.btn {
 		min-height: 34px;
+	}
+}
+
+/* ===== 多工作区：初始界面 / 管理列表 / 弹层 / 导航切换器 ===== */
+
+.home {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 48px 20px 32px;
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+}
+
+.home-head {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	text-align: center;
+}
+
+.home-brand {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-size: 26px;
+	font-weight: 700;
+	color: var(--text);
+}
+
+.home-sub {
+	margin: 0;
+	color: var(--text-dim);
+	font-size: 14px;
+}
+
+.ws-manager {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.ws-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.ws-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 14px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.ws-row.current {
+	border-color: var(--accent);
+	background: var(--panel-2);
+}
+
+.ws-enter {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 2px;
+	background: none;
+	border: none;
+	cursor: pointer;
+	text-align: left;
+	padding: 0;
+}
+
+.ws-enter:disabled {
+	cursor: default;
+}
+
+.ws-name {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+
+.ws-meta {
+	font-size: 12px;
+	color: var(--text-faint);
+}
+
+.ws-row.current .ws-meta {
+	color: var(--accent);
+}
+
+.ws-actions {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.ws-edit {
+	flex: 1;
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.ws-edit input {
+	flex: 1;
+	min-width: 0;
+}
+
+.ws-create {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+
+.ws-create input {
+	flex: 1;
+	min-width: 160px;
+}
+
+.ws-file-input {
+	display: none;
+}
+
+.ws-modal-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(6, 8, 12, 0.62);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 120;
+	padding: 20px;
+}
+
+.ws-modal {
+	width: min(680px, 100%);
+	max-height: 84vh;
+	overflow-y: auto;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow);
+	padding: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.ws-modal-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.ws-modal-head h3 {
+	margin: 0;
+	font-size: 16px;
+	color: var(--text);
+}
+
+.nav-workspace {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 10px 10px 8px;
+	border-bottom: 1px solid var(--border);
+	margin-bottom: 8px;
+}
+
+.nav-workspace-switch {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: var(--accent-dim);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+	padding: 8px 10px;
+	cursor: pointer;
+	font-size: 13px;
+}
+
+.nav-workspace-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: left;
+	font-weight: 600;
+}
+
+.nav-workspace-caret {
+	color: var(--text-faint);
+	font-size: 11px;
+}
+
+.nav-workspace-exit {
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-dim);
+	padding: 8px;
+	cursor: pointer;
+	font-size: 14px;
+	line-height: 1;
+}
+
+.nav-workspace-exit:hover {
+	color: var(--text);
+	border-color: var(--border-strong);
+}
+
+@media (max-width: 768px) {
+	.home {
+		padding: calc(24px + env(safe-area-inset-top, 0px)) 16px
+			calc(24px + env(safe-area-inset-bottom, 0px));
 	}
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { KvRepository } from '../db/kv-repo';
+import type { ScopedKv } from '../db/scoped-kv';
 import type { WorkspaceData } from '../import-export/workspace';
 import { SyncService } from './sync-service';
 import type { SyncSettings } from './types';
@@ -10,11 +10,12 @@ const settings: SyncSettings = {
 	serverKey: 'test-key'
 };
 
-function kvMock(): KvRepository {
+function kvMock(): ScopedKv {
 	return {
 		get: vi.fn(async () => undefined),
-		set: vi.fn(async () => {})
-	} as unknown as KvRepository;
+		set: vi.fn(async () => {}),
+		remove: vi.fn(async () => {})
+	};
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -29,10 +30,13 @@ const workspace: WorkspaceData = {
 	profile: { name: '绫音', systemPrompt: null },
 	developerMode: false,
 	worldInfo: [],
+	memories: [],
 	config: {},
 	headId: null,
 	snapshots: []
 };
+
+const WS_URL = 'https://sync.example.com/api/workspace/ws-test';
 
 describe('SyncService', () => {
 	afterEach(() => {
@@ -47,6 +51,7 @@ describe('SyncService', () => {
 		await service.load();
 		service.start({
 			getSettings: () => ({ ...settings, enabled: false }),
+			getWorkspaceId: () => 'ws-test',
 			collect: () => workspace,
 			apply: vi.fn(),
 			onChange: vi.fn()
@@ -69,7 +74,7 @@ describe('SyncService', () => {
 		expect((await service.testConnection(settings)).ok).toBe(false);
 	});
 
-	it('本地变更防抖后推送到服务器并记录时间戳', async () => {
+	it('本地变更防抖后推送到服务器并记录时间戳（URL 带工作区 id）', async () => {
 		vi.useFakeTimers();
 		const fetchSpy = vi
 			.fn()
@@ -81,6 +86,7 @@ describe('SyncService', () => {
 		await service.load();
 		service.start({
 			getSettings: () => settings,
+			getWorkspaceId: () => 'ws-test',
 			collect: () => workspace,
 			apply: vi.fn(),
 			onChange: vi.fn()
@@ -90,7 +96,7 @@ describe('SyncService', () => {
 		await vi.advanceTimersByTimeAsync(1600);
 		expect(fetchSpy).toHaveBeenCalledTimes(2);
 		const [url, init] = fetchSpy.mock.calls[1]!;
-		expect(String(url)).toBe('https://sync.example.com/api/workspace');
+		expect(String(url)).toBe(WS_URL);
 		const headers = init?.headers as Record<string, string>;
 		expect(headers.Authorization).toBe('Bearer test-key');
 		const body = JSON.parse(init!.body as string);
@@ -110,6 +116,7 @@ describe('SyncService', () => {
 		const apply = vi.fn(async () => {});
 		service.start({
 			getSettings: () => settings,
+			getWorkspaceId: () => 'ws-test',
 			collect: () => workspace,
 			apply,
 			onChange: () => service.notifyChanged()
@@ -117,7 +124,34 @@ describe('SyncService', () => {
 		await vi.waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
 		expect(apply).toHaveBeenCalledWith(workspace);
 		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(String(fetchSpy.mock.calls[0]![0])).toBe(WS_URL);
 		expect(kv.set).toHaveBeenCalledWith('sync.lastUpdatedAt', 2000);
+	});
+
+	it('reloadForWorkspace：重置游标并立即拉取新工作区远端', async () => {
+		const get = vi.fn(async () => undefined as number | undefined);
+		get.mockResolvedValueOnce(100).mockResolvedValueOnce(200);
+		const kv: ScopedKv = {
+			get: get as unknown as ScopedKv['get'],
+			set: vi.fn(async () => {}),
+			remove: vi.fn(async () => {})
+		};
+		const fetchSpy = vi.fn().mockResolvedValue(jsonResponse(200, null));
+		vi.stubGlobal('fetch', fetchSpy);
+		const service = new SyncService(kv);
+		await service.load();
+		expect(get).toHaveBeenCalledWith('sync.lastUpdatedAt');
+		service.start({
+			getSettings: () => settings,
+			getWorkspaceId: () => 'ws-test',
+			collect: () => workspace,
+			apply: vi.fn(),
+			onChange: vi.fn()
+		});
+		await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+		await service.reloadForWorkspace();
+		await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+		expect(get).toHaveBeenCalledTimes(2);
 	});
 
 	it('远端鉴权失败时不应用数据', async () => {
@@ -130,6 +164,7 @@ describe('SyncService', () => {
 		const apply = vi.fn(async () => {});
 		service.start({
 			getSettings: () => settings,
+			getWorkspaceId: () => 'ws-test',
 			collect: () => workspace,
 			apply,
 			onChange: vi.fn()
@@ -149,6 +184,7 @@ describe('SyncService', () => {
 		await service.load();
 		service.start({
 			getSettings: () => settings,
+			getWorkspaceId: () => 'ws-test',
 			collect: () => workspace,
 			apply: vi.fn(),
 			onChange: vi.fn()
@@ -156,7 +192,7 @@ describe('SyncService', () => {
 		const result = await service.syncNow();
 		expect(result.ok).toBe(true);
 		expect(fetchSpy).toHaveBeenCalledTimes(3);
-		expect(String(fetchSpy.mock.calls[2]![0])).toBe('https://sync.example.com/api/workspace');
+		expect(String(fetchSpy.mock.calls[2]![0])).toBe(WS_URL);
 		expect(fetchSpy.mock.calls[2]![1]?.method).toBe('PUT');
 	});
 });

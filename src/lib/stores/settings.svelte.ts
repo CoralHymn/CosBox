@@ -6,6 +6,7 @@ import { defaultSystemPrompt } from '../context/pipeline';
 import { DEFAULT_SYNC_SETTINGS, type SyncSettings } from '../sync/types';
 import { DEFAULT_THEME_CONFIG, type ThemeConfig } from '../theme/theme';
 import type { KvRepository } from '../db/kv-repo';
+import type { ScopedKv } from '../db/scoped-kv';
 
 /** 应用级角色档案：名字 + 自定义系统提示。 */
 export interface AppProfile {
@@ -13,20 +14,27 @@ export interface AppProfile {
 	systemPrompt: string | null;
 }
 
+/** 应用级键：模型服务 / 同步设置 / 主题（不随工作区切换）。 */
 const LLM_KEY = 'settings.llm';
-const PROFILE_KEY = 'settings.profile';
-const DEVELOPER_KEY = 'settings.developer';
 const SYNC_KEY = 'settings.sync';
 const THEME_KEY = 'settings.theme';
+/** 工作区级键（经 scopedKv 自动带 `ws:{id}:` 前缀）：角色档案与开发者开关。 */
+const PROFILE_KEY = 'settings.profile';
+const DEVELOPER_KEY = 'settings.developer';
 
 /** 默认角色档案：与内置角色「绫音」及默认系统提示模板一致。 */
-const DEFAULT_PROFILE: AppProfile = {
+export const DEFAULT_PROFILE: AppProfile = {
 	name: '绫音',
 	systemPrompt: defaultSystemPrompt('绫音')
 };
 
-/** 设置 store：LLM 配置与角色档案的持久化封装。 */
-export function createSettingsStore(kv: KvRepository) {
+/**
+ * 设置 store：LLM 配置与角色档案的持久化封装。
+ * LLM / 同步 / 主题是应用级设置（全局 kv）；
+ * 角色档案与开发者开关是工作区级设置（作用域 kv），切换工作区后调用
+ * `reloadWorkspaceScoped()` 重读。
+ */
+export function createSettingsStore(kv: KvRepository, scopedKv: ScopedKv) {
 	let config = $state<LlmConfig>({ ...DEFAULT_LLM_CONFIG });
 	let profile = $state<AppProfile>({ ...DEFAULT_PROFILE });
 	let developerMode = $state(false);
@@ -45,8 +53,8 @@ export function createSettingsStore(kv: KvRepository) {
 	async function load(): Promise<void> {
 		const [savedConfig, savedProfile, savedDeveloper, savedSync, savedTheme] = await Promise.all([
 			kv.get<LlmConfig>(LLM_KEY),
-			kv.get<AppProfile>(PROFILE_KEY),
-			kv.get<boolean>(DEVELOPER_KEY),
+			scopedKv.get<AppProfile>(PROFILE_KEY),
+			scopedKv.get<boolean>(DEVELOPER_KEY),
 			kv.get<SyncSettings>(SYNC_KEY),
 			kv.get<ThemeConfig>(THEME_KEY)
 		]);
@@ -73,6 +81,17 @@ export function createSettingsStore(kv: KvRepository) {
 		loaded = true;
 	}
 
+	/** 切换工作区后重读工作区级设置（档案与开发者开关）。 */
+	async function reloadWorkspaceScoped(): Promise<void> {
+		const [savedProfile, savedDeveloper] = await Promise.all([
+			scopedKv.get<AppProfile>(PROFILE_KEY),
+			scopedKv.get<boolean>(DEVELOPER_KEY)
+		]);
+		profile = savedProfile ?? { ...DEFAULT_PROFILE };
+		developerMode = savedDeveloper === true;
+		emit();
+	}
+
 	/** 保存 LLM 配置并立即生效。 */
 	async function saveConfig(next: LlmConfig): Promise<void> {
 		const normalized = normalizeLlmConfig(next);
@@ -81,24 +100,24 @@ export function createSettingsStore(kv: KvRepository) {
 		emit();
 	}
 
-	/** 保存角色档案。 */
+	/** 保存角色档案（当前工作区）。 */
 	async function saveProfile(next: AppProfile): Promise<void> {
 		profile = next;
-		await kv.set(PROFILE_KEY, next);
+		await scopedKv.set(PROFILE_KEY, next);
 		emit();
 	}
 
 	/** 角色档案恢复默认（仅影响角色档案，不动 LLM 配置）。 */
 	async function resetProfile(): Promise<void> {
 		profile = { ...DEFAULT_PROFILE };
-		await kv.set(PROFILE_KEY, profile);
+		await scopedKv.set(PROFILE_KEY, profile);
 		emit();
 	}
 
-	/** 切换开发者功能开关。 */
+	/** 切换开发者功能开关（当前工作区）。 */
 	async function saveDeveloperMode(enabled: boolean): Promise<void> {
 		developerMode = enabled;
-		await kv.set(DEVELOPER_KEY, enabled);
+		await scopedKv.set(DEVELOPER_KEY, enabled);
 		emit();
 	}
 
@@ -150,6 +169,7 @@ export function createSettingsStore(kv: KvRepository) {
 			return loaded;
 		},
 		load,
+		reloadWorkspaceScoped,
 		saveConfig,
 		saveProfile,
 		resetProfile,

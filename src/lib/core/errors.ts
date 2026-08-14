@@ -59,6 +59,13 @@ export class ImportError extends CosBoxError {
 	}
 }
 
+/** 工作区管理操作失败（名称冲突、删除最后一个等）。 */
+export class WorkspaceError extends CosBoxError {
+	constructor(message: string) {
+		super(message, 'WORKSPACE');
+	}
+}
+
 /**
  * 把任意抛出的值转换为面向用户的简短中文提示。
  * 永远不向用户泄露堆栈。

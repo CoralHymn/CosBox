@@ -45,6 +45,7 @@ OpenCode GO/Zen 的 API 不支持浏览器 CORS（OPTIONS 预检直接 404，直
 | `npm run lint` / `format`   | ESLint / Prettier                             |
 | `npm test`                  | Vitest 单元测试                               |
 | `npm run test:coverage`     | 单元测试 + 覆盖率（核心层 100% 语句/行/函数） |
+| `npm run test:server`       | 同步服务器单测（node --test，多工作区分槽）   |
 | `npm run test:e2e`          | Playwright 端到端测试                         |
 | `npm run tauri dev`         | Tauri 桌面开发壳（Windows）                   |
 | `npm run tauri android dev` | Android 开发（需 adb 连接真机/模拟器）        |
@@ -57,6 +58,8 @@ OpenCode GO/Zen 的 API 不支持浏览器 CORS（OPTIONS 预检直接 404，直
 - P1+ 地点库与衣柜：地点/衣物支持大类并可按分类折叠收纳（如「学校 > 食堂」「常服 > 白色衬衫」）；
   衣物带类型标签，换装槽位只从匹配类型的衣柜中挑选（不会把内裤套头上）；AI 知道全部地点与可选衣物（含穿后描述）
 - P2 地图（地点字段）+ World Info + Context Pipeline 接 LLM
+- P2 多工作区：启动先进入工作区选择初始界面（可选/新建/导入 .cbox），应用内可切换/
+  重命名/复制/删除/导出（.cbox v2 含长期记忆与工作区名，兼容 v1）；远程同步按工作区分槽
 - P3 版本可视化 UI + checkout + 分支
 - P4 课程 / 日程 + 时间推进
 - P5 SillyTavern V3 角色卡导入导出
@@ -66,14 +69,16 @@ OpenCode GO/Zen 的 API 不支持浏览器 CORS（OPTIONS 预检直接 404，直
 ```text
 src/lib/
   core/          状态模型、快照版本图、错误体系（纯函数）
-  db/            Dexie schema 与仓储（snapshots / worldInfo / kv）
+  db/            Dexie schema（多工作区分区）、仓储、WorkspaceScope、作用域 kv
   manager/       CharacterManager：状态变更唯一入口
+  workspace/     工作区注册表与编排服务（切换/创建/复制/删除/导入/收集导出）
   context/       World Info 触发、状态摘要、历史压缩、Context Pipeline
   llm/           OpenAI-compatible 客户端与离线 demo provider
-  import-export/ chara_card_v3 映射
+  import-export/ chara_card_v3 映射、.cbox 工作区序列化
   stores/        Svelte 5 runes 响应式封装
   components/    UI 组件（显式 props，禁止 rest 透传）
 src-tauri/      Tauri 壳（tauri.conf.json、Rust 入口、gen/android Gradle 工程）
+server/         数据同步服务器（多工作区分槽，node --test 可测）
 ```
 
 详见 [ARCHITECTURE.md](./ARCHITECTURE.md)、[DECISIONS.md](./DECISIONS.md) 与

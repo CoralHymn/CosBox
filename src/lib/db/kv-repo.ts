@@ -46,4 +46,22 @@ export class KvRepository {
 			throw new StorageError('读取全部设置失败', { cause: err });
 		}
 	}
+
+	/** 读取指定前缀的全部记录（删除工作区时清理 `ws:{id}:*` 用）。 */
+	async getAllWithPrefix(prefix: string): Promise<KvRecord[]> {
+		try {
+			return await this.database.kv.where('key').startsWith(prefix).toArray();
+		} catch (err) {
+			throw new StorageError('按前缀读取设置失败', { cause: err });
+		}
+	}
+
+	/** 删除指定前缀的全部键（删除工作区时清理 `ws:{id}:*`）。 */
+	async removeByPrefix(prefix: string): Promise<void> {
+		try {
+			await this.database.kv.where('key').startsWith(prefix).delete();
+		} catch (err) {
+			throw new StorageError('按前缀删除设置失败', { cause: err });
+		}
+	}
 }

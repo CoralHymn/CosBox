@@ -1,8 +1,8 @@
-import type { KvRepository } from '../db/kv-repo';
+import type { ScopedKv } from '../db/scoped-kv';
 import type { WorkspaceData } from '../import-export/workspace';
 import type { SyncSettings, SyncWorkspacePayload } from './types';
 
-/** kv 中保存的「上次成功同步的时间戳」。 */
+/** 工作区作用域 kv 中保存的「上次成功同步的时间戳」。 */
 const LAST_SYNC_KEY = 'sync.lastUpdatedAt';
 /** 本地变更后推送的防抖时间。 */
 const PUSH_DEBOUNCE_MS = 1500;
@@ -11,11 +11,13 @@ const POLL_INTERVAL_MS = 5000;
 /** 网络请求超时。 */
 const REQUEST_TIMEOUT_MS = 10000;
 
-/** 同步服务依赖：设置读取、数据收集、远端数据应用、变更通知。 */
+/** 同步服务依赖：设置读取、工作区定位、数据收集、远端数据应用、变更通知。 */
 export interface SyncDeps {
 	getSettings: () => SyncSettings;
-	/** 收集当前完整工作区数据（不含模型配置与 Key）。 */
-	collect: () => WorkspaceData;
+	/** 当前工作区 id（服务端按工作区分槽）。 */
+	getWorkspaceId: () => string;
+	/** 收集当前完整工作区数据（不含模型配置与 Key），允许异步收集。 */
+	collect: () => WorkspaceData | Promise<WorkspaceData>;
 	/** 应用远端工作区数据（整体恢复本地）。 */
 	apply: (data: WorkspaceData) => Promise<void>;
 	/** 本地数据变化通知（触发防抖推送）。 */
@@ -43,11 +45,27 @@ export class SyncService {
 	private pushTimer: ReturnType<typeof setTimeout> | undefined;
 	private deps: SyncDeps | undefined;
 
-	constructor(private readonly kv: KvRepository) {}
+	constructor(private readonly kv: ScopedKv) {}
 
 	/** 从 kv 恢复上次同步时间戳。 */
 	async load(): Promise<void> {
 		this.lastSyncedAt = (await this.kv.get<number>(LAST_SYNC_KEY)) ?? 0;
+	}
+
+	/**
+	 * 切换工作区后重装：读取新工作区的同步游标、丢弃旧脏标记，
+	 * 已启动则立即拉取一次远端（应用期间沿用 suppressPush 防回环）。
+	 */
+	async reloadForWorkspace(): Promise<void> {
+		this.lastSyncedAt = (await this.kv.get<number>(LAST_SYNC_KEY)) ?? 0;
+		this.dirty = false;
+		if (this.pushTimer !== undefined) {
+			clearTimeout(this.pushTimer);
+			this.pushTimer = undefined;
+		}
+		if (this.running) {
+			void this.poll();
+		}
 	}
 
 	/** 开始轮询（启用时才真正运行）。 */
@@ -160,7 +178,7 @@ export class SyncService {
 			return;
 		}
 		const payload: SyncWorkspacePayload = {
-			data: this.deps.collect(),
+			data: await this.deps.collect(),
 			updatedAt: Date.now()
 		};
 		const base = normalizeBase(this.deps.getSettings().serverUrl);
@@ -168,7 +186,7 @@ export class SyncService {
 			return;
 		}
 		try {
-			const res = await fetch(`${base}/api/workspace`, {
+			const res = await fetch(`${this.workspaceUrl(base)}`, {
 				method: 'PUT',
 				headers: {
 					'Content-Type': 'application/json',
@@ -202,7 +220,7 @@ export class SyncService {
 			return null;
 		}
 		try {
-			const res = await fetch(`${base}/api/workspace`, {
+			const res = await fetch(this.workspaceUrl(base), {
 				headers: { Authorization: `Bearer ${deps.getSettings().serverKey}` },
 				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
 			});
@@ -221,6 +239,12 @@ export class SyncService {
 		} catch {
 			return null;
 		}
+	}
+
+	/** 当前工作区的同步端点（服务端按工作区分槽，D108）。 */
+	private workspaceUrl(base: string): string {
+		const workspaceId = this.deps?.getWorkspaceId() ?? 'default';
+		return `${base}/api/workspace/${encodeURIComponent(workspaceId)}`;
 	}
 }
 

@@ -3,6 +3,7 @@ import { SnapshotError, StorageError } from '../core/errors';
 import { createInitialState } from '../core/state';
 import { CosBoxDatabase } from './schema';
 import { SnapshotRepository } from './snapshot-repo';
+import { WorkspaceScope } from './workspace-scope';
 
 describe('SnapshotRepository', () => {
 	let db: CosBoxDatabase;
@@ -15,6 +16,66 @@ describe('SnapshotRepository', () => {
 
 	afterEach(async () => {
 		await db.close();
+	});
+
+	it('不同工作区的仓储互不可见（workspaceId 分区）', async () => {
+		const scopeA = new WorkspaceScope();
+		scopeA.set('ws-a');
+		const repoA = new SnapshotRepository(db, scopeA);
+		const scopeB = new WorkspaceScope();
+		scopeB.set('ws-b');
+		const repoB = new SnapshotRepository(db, scopeB);
+
+		const rootA = await repoA.addSnapshot({
+			parentId: null,
+			metadata: { type: 'root', desc: 'A 的根' },
+			delta: null
+		});
+		await repoA.addSnapshot({
+			parentId: rootA.id,
+			metadata: { type: 'message', desc: 'A 的消息' },
+			delta: { kind: 'message', role: 'user', content: 'hi' }
+		});
+		// B 视角：看不到 A 的任何节点，也不能以 A 的节点为父追加。
+		expect(await repoB.getAll()).toEqual([]);
+		expect(await repoB.getNode(rootA.id)).toBeUndefined();
+		expect(await repoB.count()).toBe(0);
+		await expect(
+			repoB.addSnapshot({
+				parentId: rootA.id,
+				metadata: { type: 'state', desc: 'x' },
+				delta: { kind: 'state', patch: {} }
+			})
+		).rejects.toThrow(SnapshotError);
+		// A 视角数据完整；clearAll 只清 A 分区。
+		expect(await repoA.count()).toBe(2);
+		await repoA.clearAll();
+		expect(await repoA.count()).toBe(0);
+		// 显式指定工作区读写（复制/删除/导出路径）。
+		await repoA.bulkAdd([{ ...rootA, workspaceId: undefined }], 'ws-c');
+		expect(await repoA.getAll('ws-c')).toHaveLength(1);
+		expect(await repoA.count('ws-c')).toBe(1);
+	});
+
+	it('addSnapshot 拒绝跨工作区的父节点', async () => {
+		const scopeA = new WorkspaceScope();
+		scopeA.set('ws-a');
+		const repoA = new SnapshotRepository(db, scopeA);
+		const scopeB = new WorkspaceScope();
+		scopeB.set('ws-b');
+		const repoB = new SnapshotRepository(db, scopeB);
+		const rootA = await repoA.addSnapshot({
+			parentId: null,
+			metadata: { type: 'root', desc: 'A 的根' },
+			delta: null
+		});
+		await expect(
+			repoB.addSnapshot({
+				parentId: rootA.id,
+				metadata: { type: 'message', desc: 'x' },
+				delta: { kind: 'message', role: 'user', content: 'hi' }
+			})
+		).rejects.toThrow(SnapshotError);
 	});
 
 	it('addSnapshot 创建根节点并持久化', async () => {
@@ -63,6 +124,29 @@ describe('SnapshotRepository', () => {
 		});
 		const children = await repo.getChildren(root.id);
 		expect(children.map((n) => n.id)).toEqual([early.id, late.id]);
+	});
+
+	it('getChildren 时间戳相同时按 id 兜底排序且只返回当前工作区', async () => {
+		const root = await repo.addSnapshot({
+			parentId: null,
+			metadata: { type: 'root', desc: 'r' },
+			delta: null
+		});
+		const a = await repo.addSnapshot({
+			parentId: root.id,
+			metadata: { type: 'state', desc: 'a' },
+			delta: { kind: 'state', patch: {} },
+			timestamp: 100
+		});
+		const b = await repo.addSnapshot({
+			parentId: root.id,
+			metadata: { type: 'state', desc: 'b' },
+			delta: { kind: 'state', patch: {} },
+			timestamp: 100
+		});
+		const children = await repo.getChildren(root.id);
+		expect(children.map((n) => n.id).sort()).toEqual([a.id, b.id].sort());
+		expect(children).toHaveLength(2);
 	});
 
 	it('removeMany 批量删除指定节点，不存在的 id 被跳过', async () => {
@@ -122,7 +206,10 @@ describe('SnapshotRepository', () => {
 		];
 		await repo.bulkAdd(imported);
 		expect(await repo.count()).toBe(2);
-		expect(await repo.getNode('imp-msg')).toEqual(imported[1]);
+		expect(await repo.getNode('imp-msg')).toEqual({
+			...imported[1],
+			workspaceId: 'default'
+		});
 	});
 
 	it('clearAll 与 bulkAdd 数据库关闭后抛 StorageError', async () => {
@@ -237,5 +324,18 @@ describe('SnapshotRepository', () => {
 			repo.addSnapshot({ parentId: null, metadata: { type: 'root', desc: 'r' }, delta: null })
 		).rejects.toThrow(StorageError);
 		await expect(repo.getBranches()).rejects.toThrow(StorageError);
+	});
+
+	it('updateNode 数据库关闭后抛 StorageError', async () => {
+		await db.close();
+		await expect(
+			repo.updateNode({
+				id: 'x',
+				timestamp: 1,
+				parentId: null,
+				metadata: { type: 'root', desc: 'r' },
+				delta: null
+			})
+		).rejects.toThrow(StorageError);
 	});
 });
