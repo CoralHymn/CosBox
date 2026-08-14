@@ -33,5 +33,11 @@
             android:name="android.support.FILE_PROVIDER_PATHS"
             android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- 进程启动时注册 Application Context，供 Rust JNI 导出文件使用（CosBoxBridge）。 -->
+        <provider
+          android:name=".CosBoxBridge"
+          android:authorities="${applicationId}.cosboxbridge"
+          android:exported="false" />
     </application>
 </manifest>

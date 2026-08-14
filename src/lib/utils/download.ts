@@ -24,12 +24,14 @@ export async function downloadBytes(
 ): Promise<string | null> {
 	// Android WebView 不支持浏览器式下载，改用原生 MediaStore 写入系统「下载」目录；
 	// 原生保存失败直接抛出（blob 链接在 WebView 中不可用，回退无意义）。
+	// bytes 以 base64 传输：TypedArray 经 Tauri IPC 会序列化成超长 JSON 数字数组，
+	// 大工作区导出在 WebView 中内存暴涨会导致闪退，base64 字符串则保持线性大小。
 	if (isAndroidTauri()) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<string>('save_to_downloads', {
 			filename,
 			mime,
-			bytes: Array.from(bytes)
+			bytes: bytesToBase64(bytes)
 		});
 	}
 	const buffer = (bytes.buffer as ArrayBuffer).slice(
@@ -43,6 +45,16 @@ export async function downloadBytes(
 /** 是否运行在 Tauri Android WebView 内。 */
 function isAndroidTauri(): boolean {
 	return isTauri() && navigator.userAgent.includes('Android');
+}
+
+/** Uint8Array → base64（分块拼接，避免一次展开过大的参数列表）。 */
+function bytesToBase64(bytes: Uint8Array): string {
+	const CHUNK = 0x8000;
+	let binary = '';
+	for (let i = 0; i < bytes.length; i += CHUNK) {
+		binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+	}
+	return btoa(binary);
 }
 
 /** 触发 Blob 下载。 */

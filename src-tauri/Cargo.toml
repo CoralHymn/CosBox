@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
+serde_json = "1.0"
 
 [dependencies]
 serde_json = "1.0"
@@ -30,6 +31,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
 # Android 专用：通过 JNI + MediaStore 把导出文件写入公共「下载」目录（无需存储权限）。
+# 上下文由 JNI_OnLoad + Kotlin 侧 CosBoxBridge 提供（Tauri v2 不初始化 ndk-context）。
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
-ndk-context = "0.1"
+base64 = "0.22"

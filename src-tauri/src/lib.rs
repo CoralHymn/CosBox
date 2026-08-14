@@ -27,8 +27,10 @@ pub fn run() {
 
 /// 把文件写入系统「下载」目录，返回保存位置（content:// URI 或完整路径）。
 /// 仅 Android 实现（MediaStore，无需存储权限）；其他平台返回错误（前端只在 Android 调用）。
+/// `bytes` 为 base64 编码的二进制内容：TypedArray 经 IPC 会序列化成超长 JSON 数字数组，
+/// 大工作区导出会导致 WebView 内存暴涨，因此前端先转成 base64 字符串再传输。
 #[tauri::command]
-fn save_to_downloads(filename: String, mime: String, bytes: Vec<u8>) -> Result<String, String> {
+fn save_to_downloads(filename: String, mime: String, bytes: String) -> Result<String, String> {
   #[cfg(target_os = "android")]
   {
     return android_save::save_to_downloads(&filename, &mime, &bytes);
