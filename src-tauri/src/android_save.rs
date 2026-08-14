@@ -87,7 +87,18 @@ pub fn save_to_downloads(filename: &str, mime: &str, bytes_base64: &str) -> Resu
   let mut env = vm.attach_current_thread().map_err(|err| err.to_string())?;
   let context = app_context(&mut env)?;
   let result = if sdk_int(&mut env)? >= 29 {
-    save_via_mediastore(&mut env, &context, &filename, mime, &bytes)
+    // MediaStore 写公共「下载」目录；部分厂商 ROM 会拒绝 insert/openOutputStream，
+    // 失败时清除 pending 的 Java 异常并回落应用专属目录，保证导出始终可用。
+    match save_via_mediastore(&mut env, &context, &filename, mime, &bytes) {
+      Ok(saved) => Ok(saved),
+      Err(media_err) => {
+        // 必须先把 Java 异常读出并清除，否则后续 JNI 调用都会直接失败。
+        let detail = take_exception(&mut env);
+        save_to_app_external_dir(&mut env, &context, &filename, &bytes).map_err(|fallback_err| {
+          format!("{media_err}（{detail}）；回落保存到应用目录也失败：{fallback_err}")
+        })
+      }
+    }
   } else {
     save_to_app_external_dir(&mut env, &context, &filename, &bytes)
   };
@@ -153,7 +164,7 @@ fn save_via_mediastore(
   for (key, value) in [
     ("_display_name", filename),
     ("mime_type", mime),
-    ("relative_path", "Download/"),
+    ("relative_path", "Download"),
   ] {
     let j_key = env.new_string(key).map_err(|err| err.to_string())?;
     let j_value = env.new_string(value).map_err(|err| err.to_string())?;
