@@ -75,6 +75,9 @@ SemVer（xyz）。当前 `0.0.1`（测试版）。升级时四处保持一致：
 - `src-tauri/tauri.conf.json` → `version`
 - `src/lib/platform/updater.ts` → `APP_VERSION`（前端展示用）
 
+打包前可先运行 `check-version.bat` 核对四处版本号是否一致（只读检查，
+还会顺带显示 package-lock.json 根版本与已构建的安装包产物）。
+
 ### 更新机制
 
 采用官方 `tauri-plugin-updater`（仅桌面端；Android/iOS 走应用商店渠道）。
