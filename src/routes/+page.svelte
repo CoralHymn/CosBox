@@ -293,10 +293,13 @@
 
 	/** 切换工作区后由 service 触发的宿主重载：stores、瞬态、同步全部复位。 */
 	async function reloadStoresAfterSwitch(): Promise<void> {
-		await worldInfo.init();
-		await memoryStore.load();
-		await contextUsage.load();
-		await settings.reloadWorkspaceScoped();
+		// 四个独立的数据源并行加载，避免串行等待放大进入耗时。
+		await Promise.all([
+			worldInfo.init(),
+			memoryStore.load(),
+			contextUsage.load(),
+			settings.reloadWorkspaceScoped()
+		]);
 		const restored = contextUsage.usage;
 		lastContext =
 			restored !== null

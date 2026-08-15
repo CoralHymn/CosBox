@@ -6,7 +6,13 @@ import {
 	applyStateDelta,
 	createInitialState
 } from '../core/state';
-import { collectBranchPath, getBranchTips, getChildrenMap, sortNodes } from '../core/snapshot';
+import {
+	collectBranchPath,
+	getBranchTips,
+	getChildrenMap,
+	rebuildFromNodes,
+	sortNodes
+} from '../core/snapshot';
 import type {
 	BranchSummary,
 	CharacterSessionView,
@@ -135,11 +141,14 @@ export class CharacterManager {
 	}
 
 	private async reload(): Promise<void> {
+		// 只读一次全表：分支与状态重建都是同一份数据的纯函数，
+		// 避免 getBranches / rebuildState 各自再全表读一次（大数据下启动翻倍减速）。
 		const all = await this.deps.snapshots.getAll();
 		this.snapshots = sortNodes(all);
-		this.branches = await this.deps.snapshots.getBranches();
+		this.branches = getBranchTips(all);
 		if (this.headId !== null) {
-			const rebuilt = await this.deps.snapshots.rebuildState(this.headId);
+			const map = new Map(all.map((node) => [node.id, node]));
+			const rebuilt = rebuildFromNodes(map, this.headId, createInitialState());
 			this.state = applyConfigOverrides(rebuilt.state, this.configOverrides);
 			this.conversation = rebuilt.messages;
 		}

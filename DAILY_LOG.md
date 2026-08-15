@@ -2955,3 +2955,79 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
   打开明显更快、内存占用更低。
 - 验证：svelte-check 0 错；lint 通过；单测 804 全绿；e2e 52/52（主题用例
   同步断言 verge 默认值）。
+
+### 同日补充：启动性能优化——O(n²) 分支导航查找 + 三重复读
+
+- 用户反馈：有数据的旧存档打开应用「要等一段时间才能用」。实测复现：
+  空数据 214ms；3000 条快照 2s；10000 条快照进入聊天 **>30s**（超线性）。
+- 根因一（大头）：`ChatPanel.branchNavFor` 在每个消息气泡渲染时被调用，
+  内部 `snapshots.find(...)` 每次 O(n) 全表扫描——5000 条消息 × 10000 快照
+  ≈ 5000 万次查找（O(n²)）。修复：抽出 `nodeById` 派生 Map（O(n) 构建一次），
+  branchAlts 与 branchNavFor 全部 O(1) 查表。
+- 根因二：`CharacterManager.reload()` 对快照表读了 3 次全表
+  （getAll + getBranches 的 getAll + rebuildState 的 getAll）。修复：只读一次，
+  分支与状态重建复用同一份数据（`getBranchTips` / `rebuildFromNodes` 纯函数），
+  顺带让每次 update/addMessage 的刷新也快 3 倍。
+- 根因三：切换工作区后的世界书/记忆/用量/设置重载改为 `Promise.all` 并行。
+- 实测（生产构建）：enter→chat 3000 条 1081ms→286ms（3.8x），10000 条
+  >30s→1260ms（25x+）；空数据不受影响（~200ms）。一次性 v2→v3 迁移
+  （modify 盖章）已在前一轮优化过，10k 行约 2.4s 仅首次升级发生。
+- 验证：单测 808 全绿；e2e 52/52；svelte-check 0 错；lint 通过。
+- 测量脚本：`e2e/measure-startup.mjs`（可复用于后续启动性能回归）。
+
+### 同日补充：dev 启动/首屏优化——堵死「按需发现依赖 → 二次优化 → 整页重载」
+
+- 用户现象：dev 开启后打开两个浏览器（一个有大量数据、一个没有），UI 几乎
+  同一时间才出现——瓶颈不在数据读取，而在 dev 初始化本身。
+- 定位（Vite 日志）：启动扫描只覆盖入口，dexie/nanoid 等静态依赖在首屏模块
+  加载时才被发现 → `dependencies optimized: dexie, nanoid` → `reloading`，
+  首个浏览器被挂起十几秒，后续浏览器共享同一延迟。
+- 处理（vite.config.ts）：
+  - `optimizeDeps.include` 显式列出全部静态依赖（dexie/nanoid/svelte/
+    svelte/reactivity）+ Tauri 动态导入包（@tauri-apps/api/core|window、
+    plugin-updater、plugin-process），启动时一次预打包完成，首屏不再有
+    「新依赖发现」。
+  - 弃用 `server.warmup`：实测它会让 ready 后后台编译再次触发二次优化，
+    反而拖慢首个请求。
+- 实测：暖缓存下页面加载 396ms/391ms（此前首访约 2.5s + 偶发二次优化挂起
+  15-20s）；冷缓存（清 .vite 后）启动一次性 ~22s（主要成本为预打包 svelte），
+  之后启动 ~1s。验证：svelte-check 0 错、lint 通过、e2e 52/52。
+
+### 同日补充：dev 首次加载 36s 根因定位与预热修复
+
+- 用户复测：即使优化后，「ready 打印后依旧要等十几秒才载入网页」。
+- 定位（curl 计时）：**进程内第一个 HTTP 请求（任意路径，404 也一样）会被
+  SvelteKit dev 中间件一次性初始化阻塞 25-47s**（CPU 采样无明显占用、属于
+  等待型），之后所有请求毫秒级；组件编译本身只要 0.17s/个（并行 ~1.9s）。
+  → 用户看到的「两个浏览器同时晚出 UI」就是这个首次初始化的等待。
+- 修复（vite.config.ts 内联插件 `warmupFirstRequest`，apply:'serve'）：
+  - 服务器一 listening 就发起内部请求预热掉这次一次性初始化；
+  - 预热完成前不打印 Local 地址（覆盖 `server.printUrls`），并输出
+    「正在预热…（约 30-60s）」提示——用户看到地址时页面已可秒开。
+  - 配合 `server.warmup` 预热入口组件，首屏组件编译也消化在启动阶段。
+- 实测（暖缓存）：预热完成后首次加载 HTML 23ms、首屏 811ms（二次 296ms）；
+  此前 HTML 36s + 首屏 1.9s。冷缓存启动一次性多 ~30-60s（预热期间打印提示）。
+- 验证：单测 808 全绿；e2e 52/52；svelte-check 0 错；lint 通过。
+- 测量脚本：`e2e/measure-startup.mjs`（可复用于启动性能回归）。
+
+### 同日补充（定案）：dev 首请求 38-47s 的根因是 chokidar 惰性初始化全项目监视器
+
+- 前几轮的「HTML 首次请求 25-47s」最终由子代理 CPU profile 定性：
+  SvelteKit/Vite dev 在进程内第一个 HTTP 请求到达时，才惰性把**整个项目树**
+  递归加入 chokidar 文件监视器（fs.watch）——实测 19,302 文件/3,762 目录
+  耗时 38-47s，vite 进程单核 110-140% 满载、句柄从 736 暴涨到 23,300+；
+  期间无子进程、Defender 零占用。之后 watcher 就位，所有请求毫秒级。
+  与依赖预打包缓存、组件编译、数据量均无关（冷热缓存都复现）。
+- 大头来源：`src-tauri/target`（17,457 个文件，13.2GB Rust 构建产物）+
+  `src-tauri/gen`（1,454 个文件）。
+- 根治：`server.watch.ignored: ['**/src-tauri/target/**', '**/src-tauri/gen/**']`，
+  监视树缩小到 ~2 千文件。实测预热时长 38-47s → **1s**；dev 从启动到打印
+  Local 地址约 2s，打开浏览器首屏 ~0.9s（二次 ~0.4s）。
+- 同时修正 warmup 插件的两个缺陷：
+  - 预热地址从写死 127.0.0.1 改为 `server.resolvedUrls.local[0]`——本机 Vite
+    默认只绑定 IPv6 ::1，写死 IPv4 会打到错误的服务器（曾导致「预热 0s 但
+    打开仍要 18s」的假象）；残留后台 dev 进程双绑 5173 的问题一并清理。
+  - 提示文案按新时长修正（约 1-10s）。
+- 更正此前「零 CPU=等待型」的误判：实际是单核满载（当时采样到了 npm 包装
+  进程而非 vite 子进程）。
+- 验证：check 0 错、lint 通过、单测 808 全绿、e2e 52/52。
