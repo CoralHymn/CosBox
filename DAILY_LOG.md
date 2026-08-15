@@ -3031,3 +3031,21 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 更正此前「零 CPU=等待型」的误判：实际是单核满载（当时采样到了 npm 包装
   进程而非 vite 子进程）。
 - 验证：check 0 错、lint 通过、单测 808 全绿、e2e 52/52。
+
+## 2026-08-15：桌面版打包成功 —— 修复 updater 签名密码坑
+
+- 现象：`npm run tauri build` 报
+  `A public key has been found, but no private key...TAURI_SIGNING_PRIVATE_KEY`。
+- 排查：私钥 `src-tauri/.keys/cosbox.key` 存在（8/12 生成、已 gitignore），
+  公钥与 tauri.conf.json 的 plugins.updater.pubkey 一致；错误是环境变量
+  `TAURI_SIGNING_PRIVATE_KEY` 未设置导致。
+- 进一步发现：设置私钥路径后仍卡在
+  `Decrypting updater signing key, expect a prompt for password`——
+  密钥文件头为 `rsign encrypted secret key`，即"空字符串密码加密"密钥
+  （minisign 0.7.x 对 `-p ""` 的已知行为：生成加密密钥但密码为空）。
+- 解决：构建时补设 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 即可
+  （用 `tauri signer sign -p ""` 实测确认空密码可解密）。
+- 产物：`src-tauri/target/release/bundle/` 下 0.0.2 的 msi/exe + .sig 均生成。
+- 沉淀：新增根目录 `pack.bat`（版本一致性检查 + 自动设置签名环境变量 + 构建，
+  用 PowerShell 包装以支持空字符串密码变量）；PACKAGING.md 补充空密码密钥说明。
+
