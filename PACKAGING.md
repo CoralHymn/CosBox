@@ -68,7 +68,7 @@ adb reverse tcp:1420 tcp:1420
 
 ### 版本号
 
-SemVer（xyz）。当前 `0.0.1`（测试版）。升级时四处保持一致：
+SemVer（xyz）。当前 `0.0.2`（测试版）。升级时四处保持一致：
 
 - `package.json` → `version`
 - `src-tauri/Cargo.toml` → `[package] version`
@@ -93,10 +93,12 @@ https://cosbox.benng.cc/updates/{{target}}/{{arch}}/latest.json
 
    ```powershell
    $env:TAURI_SIGNING_PRIVATE_KEY = "E:\code\github\CosBox\src-tauri\.keys\cosbox.key"
+   $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""   # 空密码密钥（见下）；有密码则填实际密码
    npm run tauri build
    ```
 
-   `createUpdaterArtifacts: true` 会在
+   也可以直接运行仓库根目录的 `pack.bat`（先跑版本一致性检查，再自动
+   设置上述环境变量并构建）。`createUpdaterArtifacts: true` 会在
    `src-tauri/target/release/bundle/nsis/` 下额外生成
    `CosBox_<v>_x64-setup.exe.sig`（更新包签名）。
 
@@ -120,8 +122,15 @@ https://cosbox.benng.cc/updates/{{target}}/{{arch}}/latest.json
 - 私钥：`src-tauri/.keys/cosbox.key`（已 gitignore，**严禁提交**；
   丢失将无法再向已发布版本推送更新，务必备份到安全位置）。
 - 公钥：已内嵌在 `tauri.conf.json` 的 `plugins.updater.pubkey`，随二进制分发。
+- **当前密钥是"空密码加密"的**：minisign 0.7.x 对 `-p ""` 的已知行为是生成
+  "用空字符串密码加密"的密钥（文件头为 `rsign encrypted secret key`），
+  因此构建时必须设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`
+  （或签名时提示密码直接回车），否则报
+  `Decrypting updater signing key, expect a prompt for password`。
 - 重新生成（会作废已发布版本的升级通道，通常不要动）：
-  `npm run tauri signer generate -- -w src-tauri/.keys/cosbox.key -p ""`。
+  `npm run tauri signer generate -- -w src-tauri/.keys/cosbox.key -p ""`
+  生成后把公钥（`cosbox.key.pub` 内容）更新到 `tauri.conf.json` 的
+  `plugins.updater.pubkey`。
 
 ### 已知坑
 
