@@ -187,8 +187,9 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 	{
 		id: 'opencode-go',
 		label: 'OpenCode GO（订阅）',
-		// opencode.ai 不支持浏览器 CORS，经 Vite dev/preview 代理（/llm-proxy）转发；
-		// 静态部署时需自建同路径反向代理，或改回 https://opencode.ai/zen/go/v1。
+		// opencode.ai 不支持浏览器 CORS。/llm-proxy 是「逻辑前缀」：
+		// 浏览器 dev/preview 由 Vite 代理转发（D99）；Tauri 打包版在
+		// platform/http.ts 中重写回 https://opencode.ai 并走 HTTP 插件（D109）。
 		baseUrl: '/llm-proxy/zen/go/v1',
 		defaultModel: 'kimi-k2.6',
 		models: [
@@ -203,7 +204,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		],
 		requiresApiKey: true,
 		notes:
-			'首月 $5、之后 $10/月的开源模型订阅网关，Key 在 opencode.ai/auth 获取；经 /llm-proxy 开发代理转发（opencode.ai 不允许浏览器 CORS 直连）。MiniMax/Qwen 系模型仅走 Anthropic /messages 端点，此处不可用'
+			'首月 $5、之后 $10/月的开源模型订阅网关，Key 在 opencode.ai/auth 获取；opencode.ai 不允许浏览器 CORS 直连，桌面/移动端经内置通道转发。MiniMax/Qwen 系模型仅走 Anthropic /messages 端点，此处不可用'
 	},
 	{
 		id: 'opencode-zen',
@@ -221,7 +222,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		],
 		requiresApiKey: true,
 		notes:
-			'OpenCode 按量计费网关；经 /llm-proxy 开发代理转发（opencode.ai 不允许浏览器 CORS 直连）。Claude/GPT/Gemini 系走原生端点，此处仅可用 Chat Completions 模型'
+			'OpenCode 按量计费网关；opencode.ai 不允许浏览器 CORS 直连，桌面/移动端经内置通道转发。Claude/GPT/Gemini 系走原生端点，此处仅可用 Chat Completions 模型'
 	},
 	{
 		id: 'ollama',

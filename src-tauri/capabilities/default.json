@@ -8,6 +8,11 @@
 		"core:window:allow-minimize",
 		"core:window:allow-toggle-maximize",
 		"core:window:allow-close",
-		"core:window:allow-start-dragging"
+		"core:window:allow-start-dragging",
+		{
+			"identifier": "http:default",
+			"description": "LLM/搜索请求经 Rust 侧发出（绕过 WebView CORS）；放行任意 http(s) 端点以兼容自定义服务商与本地网关（Ollama/LiteLLM）",
+			"allow": [{ "url": "https://**" }, { "url": "http://**" }]
+		}
 	]
 }

@@ -1,4 +1,5 @@
 import { LlmError } from '../core/errors';
+import { platformFetch } from '../platform/http';
 
 /** 从服务端获取的模型条目。 */
 export interface FetchedModel {
@@ -36,7 +37,7 @@ export async function fetchModelList(baseUrl: string, apiKey: string): Promise<F
 
 	let response: Response;
 	try {
-		response = await fetch(`${base}/models`, {
+		response = await platformFetch(`${base}/models`, {
 			method: 'GET',
 			headers: {
 				Accept: 'application/json',

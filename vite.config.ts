@@ -84,7 +84,8 @@ export default defineConfig({
 			'@tauri-apps/api/core',
 			'@tauri-apps/api/window',
 			'@tauri-apps/plugin-updater',
-			'@tauri-apps/plugin-process'
+			'@tauri-apps/plugin-process',
+			'@tauri-apps/plugin-http'
 		]
 	},
 	server: {

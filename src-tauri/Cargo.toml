@@ -24,6 +24,9 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
+# HTTP 插件（桌面 + Android）：LLM/搜索请求经 Rust 侧 reqwest 发出，
+# 绕过 WebView 的 CORS 限制（opencode.ai 等端点不支持浏览器直连，见 D109）。
+tauri-plugin-http = "2"
 
 # 桌面端专用插件：自动更新（Android/iOS 不支持 updater，见 PACKAGING.md）。
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]

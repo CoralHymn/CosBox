@@ -3046,6 +3046,30 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 解决：构建时补设 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 即可
   （用 `tauri signer sign -p ""` 实测确认空密码可解密）。
 - 产物：`src-tauri/target/release/bundle/` 下 0.0.2 的 msi/exe + .sig 均生成。
-- 沉淀：新增根目录 `pack.bat`（版本一致性检查 + 自动设置签名环境变量 + 构建，
-  用 PowerShell 包装以支持空字符串密码变量）；PACKAGING.md 补充空密码密钥说明。
+- 沉淀：新增根目录 `pack.bat`（版本一致性检查 + 自动设置签名环境变量 + 构建，   
+  用 PowerShell 包装以支持空字符串密码变量）；PACKAGING.md 补充空密码密钥说明。 
+
+## 2026-08-15（续）：打包版 OpenCode GO 双报错修复——接入 tauri-plugin-http（D109）
+
+- 现象：打包版（桌面 / Android）OpenCode GO 预设两种地址都失败——默认
+  `/llm-proxy/...` 命中 SPA fallback 返回 HTML，报
+  「Unexpected token '<', "<!doctype "... is not valid JSON」；手填
+  `https://opencode.ai/...` 则被 WebView CORS 拦截报「Failed to fetch」。
+  根因：D99 的 Vite 代理只覆盖 dev/preview，打包产物没有代理后端。
+- 实现：
+  - Rust 侧接入 `tauri-plugin-http`（桌面 + Android 通用）：Cargo.toml 依赖、
+    lib.rs 注册、capabilities/default.json 加 `http:default`，scope 放行
+    `https://**` / `http://**`（兼容自定义服务商与本地网关）。
+  - 新增 `src/lib/platform/http.ts`：`platformFetch` 浏览器走原生 fetch（dev 的
+    Vite 代理行为不变），Tauri 动态导入插件 fetch（Rust 侧发出、无 CORS）并把
+    `/llm-proxy/` 重写回 `https://opencode.ai/`（`resolveProxyUrl`）。
+  - `openai-client` / `model-service` / `search-client` 统一换用
+    `platformFetch`（搜索在打包版同样绕过 CORS）；同步服务不走该通道。
+  - `vite.config.ts` optimizeDeps 预打包插件；providers.ts 注释更新为
+    「逻辑前缀」双态语义。
+- 验证：新增 http.test.ts（4 条：URL 重写、浏览器直通、插件路由）；全量 812
+  单测过、check / lint / prettier / vite build 全绿、`cargo check` 通过
+  （含 capabilities schema 校验）。
+- 用户侧：需重新执行 `npm run tauri build` / `npm run tauri android build`
+  重新打包安装；旧安装包不含 HTTP 插件，无法热修。
 
