@@ -125,13 +125,18 @@
 	let copyStatus = $state('');
 	let copyTimer: number | undefined;
 
-	/** 消息 id -> 可切换的备选分支（与该分支在该消息位置岔开，不含当前 head）。 */
-	const branchAlts = $derived.by(() => {
-		const result: Record<string, { tipId: string; timestamp: number }[]> = {};
+	/** 快照 id -> 节点（O(1) 查找；每个气泡的 branchNavFor 不再 O(n) 扫描全表）。 */
+	const nodeById = $derived.by(() => {
 		const byId: Record<string, SnapshotNode> = {};
 		for (const node of snapshots) {
 			byId[node.id] = node;
 		}
+		return byId;
+	});
+
+	/** 消息 id -> 可切换的备选分支（与该分支在该消息位置岔开，不含当前 head）。 */
+	const branchAlts = $derived.by(() => {
+		const result: Record<string, { tipId: string; timestamp: number }[]> = {};
 		const currentIds = conversation.map((message) => message.id);
 		const currentRoles = conversation.map((message) => message.role);
 		for (const branch of branches) {
@@ -144,7 +149,7 @@
 			let guard = 0;
 			while (cursor !== null && guard <= snapshots.length) {
 				guard += 1;
-				const current: SnapshotNode | undefined = byId[cursor];
+				const current: SnapshotNode | undefined = nodeById[cursor];
 				if (current === undefined) {
 					break;
 				}
@@ -191,8 +196,7 @@
 	} | null {
 		const entries = [...(branchAlts[messageId] ?? [])];
 		if (headId !== null) {
-			const headTimestamp =
-				snapshots.find((node) => node.id === headId)?.timestamp ?? Number.MAX_SAFE_INTEGER;
+			const headTimestamp = nodeById[headId]?.timestamp ?? Number.MAX_SAFE_INTEGER;
 			entries.push({ tipId: headId, timestamp: headTimestamp });
 		}
 		entries.sort((a, b) => a.timestamp - b.timestamp);
