@@ -1796,3 +1796,42 @@ updatedAt } } }`），启动时把旧 `workspace.json` 单槽载荷迁移进 `de
 
 **代价**：旧客户端连新服务端只能同步 default 槽（行为等同旧版单槽）；
 数据文件格式升级后如需回退旧服务端需手动处理；槽位上限 64 为防御性限制。
+
+## D109：打包版 LLM 请求走 tauri-plugin-http——/llm-proxy 双态解析
+
+**问题**：OpenCode GO/Zen 预设在打包版（Windows / Android）上两种地址都失败：
+默认的 `/llm-proxy/...` 相对路径没有 Vite 代理后端，命中 SPA fallback 返回
+`index.html`，报「Unexpected token '<' ... is not valid JSON」；手动改成
+`https://opencode.ai/...` 则在 WebView 里被 CORS 预检拦截（D99 的服务器侧实测
+结论在 WebView 同样成立），报「Failed to fetch」。D99 的 Vite 代理只覆盖
+`npm run dev / preview`，对打包产物无效。
+
+**选择**：
+
+1. 接入 `tauri-plugin-http`（Rust 侧 reqwest，桌面 + Android 通用）：
+   `Cargo.toml` 加依赖、`lib.rs` 注册插件、capabilities 的 `default.json`
+   加 `http:default` 权限，scope 放行 `https://**` 与 `http://**`
+   （兼容自定义服务商与 Ollama / LiteLLM 本地网关）。
+2. 新增 `src/lib/platform/http.ts` 适配层（沿用 D103 的 platform 适配层思路）：
+   `platformFetch(url, init)` 在浏览器环境直接走原生 fetch（dev/preview 的
+   `/llm-proxy` 仍由 Vite 代理处理，行为与 D99 完全一致）；在 Tauri 环境动态
+   `import('@tauri-apps/plugin-http')` 用插件 fetch——请求由 Rust 发出，
+   不经过 WebView 的 CORS 检查——同时把 `/llm-proxy/` 前缀重写回
+   `https://opencode.ai/`（`resolveProxyUrl`）。
+3. 三个网络客户端统一换用 `platformFetch`：`openai-client`（对话 / 流式 /
+   工具循环）、`model-service`（获取模型列表 / 连接测试）、`search-client`
+   （Tavily / Serper / Brave，打包版同样受益）。同步服务（自建 server）不走
+   该通道（用户自管 CORS）。
+4. `vite.config.ts` 的 `optimizeDeps.include` 预打包 `@tauri-apps/plugin-http`，
+   避免 dev 首屏动态发现依赖触发整页重载。
+
+**理由**：预设的 `/llm-proxy` 语义升级为「逻辑前缀」——浏览器态由 Vite 代理
+兑现、打包态由适配层重写兑现，用户在两个形态下用同一个预设都开箱即用；
+插件 fetch 的 Response 兼容 `body.getReader()`（SSE 流式）与 AbortSignal
+（打断生成 / 流式思考看门狗），现有解析层零改动。非 Tauri 环境不加载任何
+插件代码，Web 版体积与行为不变。
+
+**代价**：capabilities 放行任意 http(s) 端点（等价于「应用可请求任意 LLM
+服务商」——这本来就是产品的核心用途，接受）；插件 fetch 的流式在部分平台
+可能退化为一次性返回（SSE 解析层已有降级路径兜底）；Android 明文 http 仍受
+`usesCleartextTraffic` 约束（release 关闭，仅限开发期用局域网网关）。

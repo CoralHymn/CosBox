@@ -4,6 +4,8 @@ mod android_save;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    // HTTP 插件：LLM / 搜索请求从 Rust 侧发出，绕过 WebView CORS（D109）。
+    .plugin(tauri_plugin_http::init())
     .invoke_handler(tauri::generate_handler![save_to_downloads])
     .setup(|app| {
       if cfg!(debug_assertions) {

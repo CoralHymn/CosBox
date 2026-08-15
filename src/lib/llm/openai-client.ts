@@ -1,4 +1,5 @@
 import { LlmError } from '../core/errors';
+import { platformFetch } from '../platform/http';
 import type { MessageSegment } from '../core/types';
 import { annotateWorldTime } from './message-time';
 import { isDeepSeekModel } from './providers';
@@ -68,7 +69,7 @@ export class OpenAiCompatibleClient implements LlmClient {
 
 		let response: Response;
 		try {
-			response = await fetch(`${baseUrl}/chat/completions`, {
+			response = await platformFetch(`${baseUrl}/chat/completions`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',

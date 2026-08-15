@@ -57,11 +57,13 @@ adb reverse tcp:1420 tcp:1420
 
 ## 架构约定（D103）
 
-- Web 层保持唯一代码库；打包专属逻辑进 `src/lib/platform/` 适配层（尚未实现）：
-  - `WorkspaceStore` 端口：Web = Dexie；打包版 = `tauri-plugin-sql`（SQLite）。
-  - `FilePort` 端口：Web = Blob 下载；Windows = 对话框；Android = SAF / share。
-  - `llmFetch` 注入：打包版用 `tauri-plugin-http`，把 `/llm-proxy/` 还原为
-    `https://opencode.ai/`（见 D99：opencode.ai 不允许浏览器 CORS）。
+- Web 层保持唯一代码库；打包专属逻辑进 `src/lib/platform/` 适配层：
+  - `platformFetch`（✅ 已实现，D109）：LLM / 搜索请求打包版走
+    `tauri-plugin-http`（Rust 侧 reqwest 发出，无 WebView CORS），并把
+    `/llm-proxy/` 前缀还原为 `https://opencode.ai/`（见 D99）。
+  - `WorkspaceStore` 端口（未实现）：Web = Dexie；打包版 = `tauri-plugin-sql`（SQLite）。
+  - `FilePort` 端口（部分实现）：Web = Blob 下载；Android = MediaStore
+    （`android_save.rs`）；Windows 对话框待定。
 - Node 同步服务器（`server/`）不进安装包，独立部署。
 
 ## 版本与自动更新（Updater）
@@ -141,8 +143,9 @@ https://cosbox.benng.cc/updates/{{target}}/{{arch}}/latest.json
 
 ## 已知坑
 
-- `/llm-proxy` 只在 `npm run dev` / `preview` 生效；打包版无 Vite 后端，必须
-  经 `llmFetch` 还原为绝对端点（D103）。
+- `/llm-proxy` 只在 `npm run dev` / `preview` 生效；打包版由
+  `src/lib/platform/http.ts` 的 `platformFetch` 经 `tauri-plugin-http` 发出并
+  还原为绝对端点（D109），桌面 / Android 均已生效。
 - Android 9+ 默认禁明文 http；debug 构建已开 `usesCleartextTraffic`，release
   关闭——局域网 Ollama / LiteLLM 仅限开发期。
 - 模拟器里 `localhost` 指向模拟器自身；访问电脑上的服务需用局域网 IP 或
