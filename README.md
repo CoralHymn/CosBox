@@ -1,13 +1,12 @@
 # CosBox
 
-面向 AI 角色扮演的状态驱动叙事客户端。核心是「结构化角色状态」，而不是聊天软件：
+一个真正面向 AI 角色扮演的状态驱动叙事客户端。
 
-- **状态是第一公民**：穿着（含帽子/内衣/内裤/袜子/配饰）/ 衣柜 / 当前地点 / 地点库 / 日程 / 属性都是结构化数据，不是消息附件。
-- **LLM 精确感知状态**：Context Pipeline 把当前状态摘要、世界信息命中、（压缩后的）对话与长期记忆组装进系统提示。
-- **内置类 Git 版本控制**：所有状态变更与对话都以增量快照存入 IndexedDB，支持任意点回溯、分支与 checkout，无需外部 Git。
-- **长期记忆**：LLM 自动从对话提取事实，按关键词召回并注入上下文，可手动置顶管理。
-- **远程同步**：自带零依赖 Node 同步服务器，多工作区分槽，本地变更约 1.5s 内推送到远端。
-- **双端打包**：Tauri 2 薄壳封装 Windows 桌面（NSIS/MSI，支持自动更新）与 Android（APK/AAB）。
+我们讲穿着（帽子/内衣/内裤/袜子/配饰）、衣柜、地点、日程、属性变成结构化数据，作为系统提示词注入 LLM。
+Context Pipeline 把状态摘要、世界信息命中、压缩后的对话和长期记忆装进系统提示，LLM 每次都清楚当前剧情状态。
+所有状态变更和对话以增量快照存入 IndexedDB，构成类 Git 的版本图，任意节点可回溯，也能开分支、做 checkout，不需要外部 Git。
+
+另有 LLM 自动提取的长期记忆（关键词召回、可置顶）、零依赖 Node 的远程同步服务器（按工作区分槽，本地变更约 1.5 秒内推送），以及 Tauri 2 双端打包壳（Windows NSIS/MSI 自动更新、Android APK/AAB）。
 
 ## 技术栈
 
@@ -27,21 +26,20 @@ npm run dev        # http://localhost:5173（首次加载已预热，秒开）
 npm run tauri dev  # Tauri 桌面壳（首次编译约 1–3 分钟）
 ```
 
-默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。在「设置」页可管理**模型服务**：
-内置 20+ 主流服务商预设——OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、
-智谱 GLM、GLM Coding Plan、百度千帆、腾讯混元、零一万物、MiniMax、SiliconFlow、Mistral、
-xAI Grok、Groq、Cerebras、OpenRouter、OpenCode GO、OpenCode Zen、Together AI、Ollama、
-LiteLLM Proxy、vLLM、Azure OpenAI——自动填充兼容端点与常用模型候选；每个服务可挂多个模型，
-Key 只填一次，按「对话 / 状态判断 / 生成」三个角色分别绑定模型；也可以选「自定义」填任意
-OpenAI-compatible 端点。
+默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。「设置」页的模型服务支持 20 多家主流服务商：
+OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、智谱 GLM、GLM Coding Plan、
+百度千帆、腾讯混元、零一万物、MiniMax、SiliconFlow、Mistral、xAI Grok、Groq、Cerebras、
+OpenRouter、OpenCode GO、OpenCode Zen、Together AI、Ollama、LiteLLM Proxy、vLLM、Azure OpenAI。
+选一个预设就自动填好兼容端点和常用模型候选；每个服务能挂多个模型，Key 只填一次，
+按「对话 / 状态判断 / 生成」三个角色分别绑定；也可以选「自定义」填任意 OpenAI-compatible 端点。
 
 OpenCode GO/Zen 的 API 不支持浏览器 CORS（OPTIONS 预检直接 404，直连会 `Failed to fetch`），
 预设默认走 `/llm-proxy` 相对路径，由 `vite.config.ts` 的开发/预览代理转发到 opencode.ai；
-`npm run dev` / `npm run preview` 下开箱即用，静态部署需自建同路径反向代理，
-Tauri 打包版则走 `tauri-plugin-http`（Rust 侧发出请求，无 CORS 问题）。
-此外支持 Tavily / Serper / Brave 网络搜索，发送消息时可把实时结果注入 LLM 上下文。
+`npm run dev` / `npm run preview` 下直接可用，静态部署需自建同路径反向代理，
+Tauri 打包版则走 `tauri-plugin-http`（Rust 侧发出请求，没有 CORS 问题）。
+网络搜索支持 Tavily / Serper / Brave，发送消息时可以把实时结果注入 LLM 上下文。
 
-数据同步：按 [server/README.md](./server/README.md) 部署同步服务器（一键安装脚本 / 手动 / 面板），
+数据同步：按 [server/README.md](./server/README.md) 部署同步服务器（有一键安装脚本，也支持手动和面板），
 在「设置 → 数据同步」填入服务器地址与密钥即可。打包与签名流程见
 [PACKAGING.md](./PACKAGING.md) 与 [ANDROID_SIGNING.md](./ANDROID_SIGNING.md)。
 
@@ -87,7 +85,7 @@ Tauri 打包版则走 `tauri-plugin-http`（Rust 侧发出请求，无 CORS 问�
 - Agent 工具循环：`goto_location` / `advance_time` / `set_outfit` / `set_attribute` 结构化调用，
   每轮工具执行生成快照 + 持久化【工具调用】反馈消息；AI 一轮回复合并为单气泡分段展示。
 - 工具双通道兜底：模型只把调用写进正文/思考而未发出结构化 `tool_calls` 时，从文本/JSON 形态解析并执行。
-- LLM 状态确认：开启后由独立模型二次判断是否需要更新状态（剧情需要优先，拒绝安全理由吞状态）。
+- LLM 状态确认：开启后由独立模型二次判断是否需要更新状态（剧情需要优先，不会因为安全顾虑跳过状态更新）。
 - 上下文用量与费用估算（按对话角色模型展示，持久化）；开发者模式可查看完整提示词、预览输入框内容、
   导出最近会话日志；监控面板记录工具调用/补调重试/文本兜底等运行指标（图表 + 事件流）。
 
@@ -95,7 +93,7 @@ Tauri 打包版则走 `tauri-plugin-http`（Rust 侧发出请求，无 CORS 问�
 
 - 长期记忆功能区：LLM 自动提取（对话模型、固定消息数触发、防抖批处理）+ 关键词召回评分 + 置顶 +
   重要度，随上下文有界注入；手动增删改查。
-- AI 生成：地点/衣柜/日程面板一键按世界观预设（现代/古代/奇幻，含禁词）生成候选列表，
+- AI 生成：地点/衣柜/日程面板都能直接按世界观预设（现代/古代/奇幻，含禁词）生成候选列表，
   经 `review_generation` 审查循环修正后勾选导入。
 - 分类折叠、拖拽排序（地点库/衣柜）、日程自动排序；地点库/衣柜/日程各支持导出 JSON 模板与导入合并。
 - World Info 世界书（关键词触发、优先级）；SillyTavern V3 角色卡导入导出（往返映射稳定）。
