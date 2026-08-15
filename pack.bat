@@ -5,10 +5,14 @@ title CosBox Desktop Pack
 rem ============================================================
 rem  CosBox desktop packaging (Windows).
 rem  1. Checks version consistency (see check-version.bat).
-rem 2. Sets the updater signing key (TAURI_SIGNING_PRIVATE_KEY,
+rem  2. Sets the updater signing key (TAURI_SIGNING_PRIVATE_KEY,
 rem     see PACKAGING.md) and runs `npm run tauri build`.
 rem  Output lands in src-tauri\target\release\bundle\ (NSIS/MSI
 rem     plus the .sig update signature).
+rem
+rem  NOTE: keep this file ASCII-only with CRLF line endings.
+rem  UTF-8 Chinese text breaks cmd.exe parsing on GBK codepages
+rem  (the batch file would exit immediately / "flash close").
 rem ============================================================
 
 set "ROOT=%~dp0"
@@ -19,8 +23,8 @@ if not exist "%KEY%" (
     echo  [!!] Signing key not found: %KEY%
     echo       Generate one first:
     echo         npm run tauri signer generate -w %KEY%
-    echo       then put the printed public key into tauri.conf.json
-    echo       (plugins.updater.pubkey).
+    echo       then paste the printed public key into the
+    echo       plugins.updater.pubkey config field.
     echo.
     pause
     exit /b 1
@@ -42,9 +46,11 @@ echo.
 echo  ============================================================
 echo   Step 2/2: npm run tauri build  (signed with %KEY%)
 echo  ============================================================
-rem 当前密钥是"空密码加密"的（minisign 对 -p "" 的已知行为，见 PACKAGING.md），
-rem 构建时密码环境变量必须设置为空字符串（cmd 无法设置空字符串变量，用 PowerShell 包装）；
-rem 若你的密钥有实际密码，把下面第二行改为实际密码。
+rem The key is encrypted with an EMPTY password (minisign 0.7.x
+rem behavior for `-p ""`, see PACKAGING.md), so the password env
+rem var MUST be set to an empty string. cmd.exe cannot create an
+rem empty-string env var, hence the PowerShell wrapper. If your
+rem key has a real password, put it in the second assignment.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:TAURI_SIGNING_PRIVATE_KEY='%KEY%'; $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=''; Set-Location '%ROOT%'; npm run tauri build; exit $LASTEXITCODE"
 set "EXITCODE=%ERRORLEVEL%"
 
@@ -52,7 +58,7 @@ echo.
 if "%EXITCODE%"=="0" (
     echo  [OK] Build finished. Artifacts in src-tauri\target\release\bundle\
 ) else (
-    echo  [!!] Build failed (exit code %EXITCODE%). See output above.
+    echo  [!!] Build failed with exit code %EXITCODE%. See output above.
 )
 pause
 exit /b %EXITCODE%

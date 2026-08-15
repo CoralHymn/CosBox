@@ -3073,3 +3073,17 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 - 用户侧：需重新执行 `npm run tauri build` / `npm run tauri android build`
   重新打包安装；旧安装包不含 HTTP 插件，无法热修。
 
+
+### 同日补充：pack.bat 双击闪退修复（cmd 解析两处坑）
+
+- 现象：双击 pack.bat 窗口瞬间关闭。
+- 排查（cmd 实测二分定位）：
+  1. 编码坑：UTF-8 无 BOM + LF 行尾的 bat 在中文系统 GBK 代码页下解析错乱。
+     已改为纯 ASCII + CRLF（check-version.bat 同步统一为 CRLF）。
+  2. 语法坑：cmd 的括号块 if (...) 内若出现 ( ... ) 且后面还有内容
+     （如 echo (plugins.updater.pubkey).），子块闭合后行尾 token 会触发
+     `. was unexpected at this time.`。已把块内 echo 行中的括号去掉。
+- 验证：cmd /c "pack.bat < nul" 全流程跑通（版本检查 + 空密码解密 +
+  npm run tauri build + 签名），退出码 0，产出 0.0.3 安装包与 .sig。
+- 教训：bat 一律纯 ASCII + CRLF；块内 echo 不要出现括号对。
+
