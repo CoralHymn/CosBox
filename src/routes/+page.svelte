@@ -9,10 +9,12 @@
 	} from '../lib/core/types';
 	import { formatWorldTime } from '../lib/core/state';
 	import {
+		buildBaseSystemPrompt,
 		buildContext,
 		DEFAULT_MEMORY_INJECT_LIMIT,
 		type ContextBundle,
-		type ContextPipelineInput
+		type ContextPipelineInput,
+		type PromptSections
 	} from '../lib/context/pipeline';
 	import { summarizeState } from '../lib/context/state-summary';
 	import { KvRepository } from '../lib/db/kv-repo';
@@ -92,6 +94,7 @@
 	import MemoryPanel from '../lib/components/MemoryPanel.svelte';
 	import MonitorPanel from '../lib/components/MonitorPanel.svelte';
 	import NavRail from '../lib/components/NavRail.svelte';
+	import PromptPanel from '../lib/components/PromptPanel.svelte';
 	import SchedulePanel from '../lib/components/SchedulePanel.svelte';
 	import SettingsPanel from '../lib/components/SettingsPanel.svelte';
 	import StatePreview from '../lib/components/StatePreview.svelte';
@@ -160,6 +163,34 @@
 	let memoryExtracting = $state(false);
 	/** 最近一次成功提取已覆盖的非系统消息数，避免无新消息时重复调用 LLM。 */
 	let lastAutoExtractCount = 0;
+
+	/** 从当前角色档案提取五段提示词，供上下文组装与输入预览复用。 */
+	function promptOptionsFromProfile(): PromptSections {
+		return {
+			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			characterPrompt: settings.profile.characterPrompt ?? undefined,
+			userPrompt: settings.profile.userPrompt ?? undefined,
+			worldPrompt: settings.profile.worldPrompt ?? undefined,
+			stylePrompt: settings.profile.stylePrompt ?? undefined
+		};
+	}
+
+	/**
+	 * 导出角色卡时的 system_prompt：仅旧系统提示时保持原值； 一旦填写了人物/用户/世界观/风格等扩展段，则导出五段组装后的完整提示词。
+	 */
+	function charaCardSystemPrompt(name: string): string | null {
+		const profile = settings.profile;
+		const hasExtendedPrompt =
+			(profile.characterPrompt ?? '').trim() !== '' ||
+			(profile.userPrompt ?? '').trim() !== '' ||
+			(profile.worldPrompt ?? '').trim() !== '' ||
+			(profile.stylePrompt ?? '').trim() !== '';
+		if (!hasExtendedPrompt) {
+			return profile.systemPrompt?.trim() || null;
+		}
+		return buildBaseSystemPrompt(name, profile);
+	}
+
 	/** 注册表与设置已加载：初始界面（工作区选择）可用。 */
 	let booted = $state(false);
 	/** 已进入某个工作区（主界面显示）；false 时显示工作区选择初始界面。 */
@@ -491,7 +522,7 @@
 				(typeof session.state.attributes.name === 'string'
 					? session.state.attributes.name
 					: undefined),
-			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			...promptOptionsFromProfile(),
 			...(searchResults !== undefined ? { searchResults } : {})
 		};
 		const chatConfig = roleConfig('chat');
@@ -1080,7 +1111,7 @@
 				(typeof session.state.attributes.name === 'string'
 					? session.state.attributes.name
 					: undefined),
-			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			...promptOptionsFromProfile(),
 			historyOptions: { maxMessages: Math.max(1, conversation.length) }
 		};
 		const bundle = buildContext(input);
@@ -1258,10 +1289,11 @@
 		}
 	}
 
-	async function handleResetProfile(): Promise<void> {
+	/** 「提示词」标签页保存：同一份档案，仅成功文案不同。 */
+	async function handleSavePrompts(profile: AppProfile): Promise<void> {
 		try {
-			await settings.resetProfile();
-			toasts.success('角色档案已恢复默认');
+			await settings.saveProfile(profile);
+			toasts.success('提示词已保存');
 		} catch (err) {
 			toasts.error(err);
 		}
@@ -1488,9 +1520,11 @@
 			const mapped = mapCardToCosBox(card);
 			await session.update(mapped.statePatch, { desc: `导入角色卡「${card.data.name}」` });
 			await worldInfo.importEntries(mapped.worldInfo);
+			const importedProfile: AppProfile = { ...settings.profile, name: card.data.name };
 			if (mapped.systemPrompt !== null) {
-				await settings.saveProfile({ name: card.data.name, systemPrompt: mapped.systemPrompt });
+				importedProfile.systemPrompt = mapped.systemPrompt;
 			}
+			await settings.saveProfile(importedProfile);
 			if (mapped.greeting !== null) {
 				await session.addMessage('assistant', mapped.greeting);
 			}
@@ -1627,7 +1661,7 @@
 					: undefined;
 			const card = buildCharaCardV3({
 				name,
-				systemPrompt: settings.profile.systemPrompt,
+				systemPrompt: charaCardSystemPrompt(name),
 				worldInfo: worldInfo.entries,
 				conversation: session.conversation,
 				creator: typeof attributes.creator === 'string' ? attributes.creator : undefined,
@@ -1863,6 +1897,8 @@
 					onUpsert={handleWorldUpsert}
 					onRemove={handleWorldRemove}
 				/>
+			{:else if tab === 'prompts'}
+				<PromptPanel profile={settings.profile} onSaveProfile={handleSavePrompts} />
 			{:else if tab === 'memory'}
 				<MemoryPanel
 					entries={memoryStore.sorted}
@@ -1892,7 +1928,6 @@
 					syncSettings={settings.sync}
 					onSaveConfig={handleSaveConfig}
 					onSaveProfile={handleSaveProfile}
-					onResetProfile={handleResetProfile}
 					onSaveDeveloperMode={handleSaveDeveloperMode}
 					onSaveSync={handleSaveSync}
 					onTestSync={handleTestSync}
