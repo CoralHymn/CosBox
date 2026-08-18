@@ -10,6 +10,7 @@ export type TabId =
 	| 'schedule'
 	| 'versions'
 	| 'world'
+	| 'prompts'
 	| 'memory'
 	| 'monitor'
 	| 'transfer'

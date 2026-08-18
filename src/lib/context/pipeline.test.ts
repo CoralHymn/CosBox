@@ -3,6 +3,7 @@ import { createInitialState } from '../core/state';
 import type { ChatMessageView, WorldInfoEntry } from '../core/types';
 import type { MemoryEntry } from '../memory/types';
 import {
+	buildBaseSystemPrompt,
 	buildContext,
 	buildPerTurnToolReminder,
 	buildToolGuidance,
@@ -152,6 +153,49 @@ describe('buildContext', () => {
 			worldInfo: []
 		});
 		expect(bundle.systemMessage).toContain('「绫音」');
+	});
+
+	it('扩展提示词按系统/人物/用户/世界观/风格顺序注入', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: [],
+			systemPrompt: '回复规则',
+			characterPrompt: '你叫绫音',
+			userPrompt: '用户是同学',
+			worldPrompt: '现代虚拟学园',
+			stylePrompt: '余华式白描'
+		});
+		const system = bundle.systemMessage;
+		expect(system.indexOf('回复规则')).toBe(0);
+		expect(system.indexOf('【人物提示词】')).toBeGreaterThan(system.indexOf('回复规则'));
+		expect(system.indexOf('【用户提示词】')).toBeGreaterThan(system.indexOf('【人物提示词】'));
+		expect(system.indexOf('【世界观提示词】')).toBeGreaterThan(system.indexOf('【用户提示词】'));
+		expect(system.indexOf('【风格提示词】')).toBeGreaterThan(system.indexOf('【世界观提示词】'));
+		expect(system).toContain('你叫绫音');
+		expect(system).toContain('用户是同学');
+		expect(system).toContain('现代虚拟学园');
+		expect(system).toContain('余华式白描');
+		expect(system).toContain('【当前状态】');
+	});
+
+	it('留空的扩展提示词不注入对应段落', () => {
+		const bundle = buildContext({
+			state: createInitialState(),
+			conversation: history(),
+			worldInfo: [],
+			systemPrompt: '回复规则',
+			characterPrompt: '   ',
+			stylePrompt: undefined
+		});
+		expect(bundle.systemMessage).not.toContain('【人物提示词】');
+		expect(bundle.systemMessage).not.toContain('【用户提示词】');
+		expect(bundle.systemMessage).not.toContain('【世界观提示词】');
+		expect(bundle.systemMessage).not.toContain('【风格提示词】');
+	});
+
+	it('buildBaseSystemPrompt 留空系统提示时回退默认模板', () => {
+		expect(buildBaseSystemPrompt('绫音', { systemPrompt: '  ' })).toContain('「绫音」');
 	});
 
 	it('自定义 systemPrompt 覆盖默认模板', () => {

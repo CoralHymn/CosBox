@@ -16,7 +16,7 @@
 		type ModelService
 	} from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
-	import type { AppProfile } from '../stores/settings.svelte';
+	import { DEFAULT_PROFILE, type AppProfile } from '../stores/settings.svelte';
 	import type { SyncResult } from '../sync/sync-service';
 	import type { SyncSettings } from '../sync/types';
 	import {
@@ -46,7 +46,6 @@
 		theme: ThemeConfig;
 		onSaveConfig: (config: LlmConfig) => Promise<void>;
 		onSaveProfile: (profile: AppProfile) => Promise<void>;
-		onResetProfile: () => Promise<void>;
 		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
 		onSaveSync: (settings: SyncSettings) => Promise<void>;
 		onSaveTheme: (theme: ThemeConfig) => Promise<void>;
@@ -68,7 +67,6 @@
 		theme,
 		onSaveConfig,
 		onSaveProfile,
-		onResetProfile,
 		onSaveDeveloperMode,
 		onSaveSync,
 		onSaveTheme,
@@ -115,7 +113,6 @@
 	/** 「开源协议声明」弹窗是否打开。 */
 	let showCredits = $state(false);
 	let profileName = $state('');
-	let systemPrompt = $state('');
 	let saving = $state(false);
 	let fetchingModels = $state(false);
 	let testingConnection = $state(false);
@@ -222,7 +219,6 @@
 		searchApiKey = config.webSearch.apiKey;
 		searchMaxResults = config.webSearch.maxResults;
 		profileName = profile.name;
-		systemPrompt = profile.systemPrompt ?? '';
 		devMode = developerMode;
 		syncEnabled = syncSettings.enabled;
 		syncServerUrl = syncSettings.serverUrl;
@@ -378,8 +374,8 @@
 		saving = true;
 		try {
 			// 先捕获输入值：await 期间 $effect 会用旧 profile 覆盖本地字段，避免保存空值。
-			const name = profileName.trim();
-			const prompt = systemPrompt.trim() || null;
+			// 提示词已经移到「提示词」标签页：这里只更新角色名，保留其余提示词字段。
+			const name = profileName.trim() || DEFAULT_PROFILE.name;
 			const dev = devMode;
 			const sync = {
 				enabled: syncEnabled,
@@ -387,7 +383,7 @@
 				serverKey: syncServerKey.trim()
 			};
 			await onSaveConfig(buildConfig());
-			await onSaveProfile({ name, systemPrompt: prompt });
+			await onSaveProfile({ ...profile, name });
 			await onSaveDeveloperMode(dev);
 			await onSaveSync(sync);
 		} finally {
@@ -425,9 +421,11 @@
 		}
 	}
 
-	/** 「回到默认」仅重置角色档案，不动其他设置。 */
-	async function resetProfile(): Promise<void> {
-		await onResetProfile();
+	/** 「恢复默认角色名」只重置名字，不动提示词与 LLM 配置。 */
+	async function resetProfileName(): Promise<void> {
+		const next: AppProfile = { ...profile, name: DEFAULT_PROFILE.name };
+		profileName = next.name;
+		await onSaveProfile(next);
 	}
 
 	/** 拉取模型列表并填充 datalist；自动补全当前模型的上下文窗口。 */
@@ -791,10 +789,7 @@
 		try {
 			await downloadAndInstall((progress) => {
 				if (progress.total !== null && progress.total > 0) {
-					const percent = Math.min(
-						100,
-						Math.round((progress.downloaded / progress.total) * 100)
-					);
+					const percent = Math.min(100, Math.round((progress.downloaded / progress.total) * 100));
 					installProgress = `正在下载并安装… ${percent}%`;
 				} else {
 					installProgress = '正在下载并安装…';
@@ -1309,9 +1304,7 @@
 
 		<fieldset class="field official-bg-fieldset">
 			<legend>官方背景</legend>
-			<p class="muted" style="margin: 0 0 8px;">
-				内置预设背景，点选即时生效；与自定义上传互斥。
-			</p>
+			<p class="muted" style="margin: 0 0 8px;">内置预设背景，点选即时生效；与自定义上传互斥。</p>
 			<div class="official-bg-grid">
 				{#each OFFICIAL_BACKGROUNDS as bg (bg.id)}
 					<button
@@ -1355,7 +1348,8 @@
 			{#if themeBackground !== '' || officialBackgroundId !== ''}
 				<p class="muted" style="margin: 4px 0 0;">
 					{#if officialBackgroundId !== ''}
-						已启用官方背景「{findOfficialBackground(officialBackgroundId)?.label ?? officialBackgroundId}」，透明度与磨砂可继续调整。
+						已启用官方背景「{findOfficialBackground(officialBackgroundId)?.label ??
+							officialBackgroundId}」，透明度与磨砂可继续调整。
 					{:else}
 						已启用自定义背景图（建议使用压缩后的图片，base64 会随设置持久化）。
 					{/if}
@@ -1425,16 +1419,14 @@
 
 	<div class="card">
 		<h3 class="card-title">角色档案</h3>
-		<p class="muted" style="margin: 0 0 10px;">默认与内置角色「绫音」一致；可自由修改。</p>
+		<p class="muted" style="margin: 0 0 10px;">
+			角色名用于状态摘要与默认提示词；系统提示词等已移到「提示词」标签页。
+		</p>
 		<div class="field">
 			<label for="profile-name">角色名</label>
 			<input id="profile-name" class="input" bind:value={profileName} />
 		</div>
-		<div class="field">
-			<label for="profile-prompt">系统提示（可选，覆盖默认模板）</label>
-			<textarea id="profile-prompt" class="textarea" bind:value={systemPrompt}></textarea>
-		</div>
-		<button class="btn" onclick={resetProfile}>回到默认</button>
+		<button class="btn" onclick={resetProfileName}>恢复默认角色名</button>
 	</div>
 
 	<div class="card">

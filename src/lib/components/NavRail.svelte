@@ -33,6 +33,7 @@
 		{ id: 'schedule', label: '日程', icon: 'calendar-days' },
 		{ id: 'versions', label: '版本', icon: 'git-branch' },
 		{ id: 'world', label: '世界书', icon: 'book-open' },
+		{ id: 'prompts', label: '提示词', icon: 'file-text' },
 		{ id: 'memory', label: '记忆', icon: 'brain' },
 		{ id: 'monitor', label: '监控', icon: 'activity' },
 		{ id: 'transfer', label: '导入导出', icon: 'package' },

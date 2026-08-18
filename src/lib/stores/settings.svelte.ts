@@ -8,10 +8,22 @@ import { DEFAULT_THEME_CONFIG, type ThemeConfig } from '../theme/theme';
 import type { KvRepository } from '../db/kv-repo';
 import type { ScopedKv } from '../db/scoped-kv';
 
-/** 应用级角色档案：名字 + 自定义系统提示。 */
+/** 应用级角色档案：名字 + 五段提示词配置。 */
 export interface AppProfile {
 	name: string;
+	/**
+	 * 系统提示词：回复规则 / 破甲词；空值表示使用内置默认模板。
+	 * 原「角色档案 → 系统提示」字段迁移到这里，沿用同一持久化键。
+	 */
 	systemPrompt: string | null;
+	/** 人物提示词：AI 扮演的角色身份与性格。 */
+	characterPrompt?: string | null;
+	/** 用户提示词：AI 对用户的认知。 */
+	userPrompt?: string | null;
+	/** 世界观提示词：故事发生的世界设定。 */
+	worldPrompt?: string | null;
+	/** 风格提示词：期望的文风（如鲁迅、余华的风格）。 */
+	stylePrompt?: string | null;
 }
 
 /** 应用级键：模型服务 / 同步设置 / 主题（不随工作区切换）。 */
@@ -25,8 +37,24 @@ const DEVELOPER_KEY = 'settings.developer';
 /** 默认角色档案：与内置角色「绫音」及默认系统提示模板一致。 */
 export const DEFAULT_PROFILE: AppProfile = {
 	name: '绫音',
-	systemPrompt: defaultSystemPrompt('绫音')
+	systemPrompt: defaultSystemPrompt('绫音'),
+	characterPrompt: null,
+	userPrompt: null,
+	worldPrompt: null,
+	stylePrompt: null
 };
+
+/** 把任意存档档案规整为完整 AppProfile（老存档自动补齐新字段）。 */
+export function normalizeProfile(profile: AppProfile): AppProfile {
+	return {
+		name: profile.name?.trim() || DEFAULT_PROFILE.name,
+		systemPrompt: profile.systemPrompt ?? null,
+		characterPrompt: profile.characterPrompt ?? null,
+		userPrompt: profile.userPrompt ?? null,
+		worldPrompt: profile.worldPrompt ?? null,
+		stylePrompt: profile.stylePrompt ?? null
+	};
+}
 
 /**
  * 设置 store：LLM 配置与角色档案的持久化封装。
@@ -69,7 +97,7 @@ export function createSettingsStore(kv: KvRepository, scopedKv: ScopedKv) {
 			}
 		}
 		if (savedProfile) {
-			profile = savedProfile;
+			profile = normalizeProfile(savedProfile);
 		}
 		developerMode = savedDeveloper === true;
 		if (savedSync) {
@@ -87,7 +115,7 @@ export function createSettingsStore(kv: KvRepository, scopedKv: ScopedKv) {
 			scopedKv.get<AppProfile>(PROFILE_KEY),
 			scopedKv.get<boolean>(DEVELOPER_KEY)
 		]);
-		profile = savedProfile ?? { ...DEFAULT_PROFILE };
+		profile = savedProfile ? normalizeProfile(savedProfile) : { ...DEFAULT_PROFILE };
 		developerMode = savedDeveloper === true;
 		emit();
 	}
@@ -102,8 +130,9 @@ export function createSettingsStore(kv: KvRepository, scopedKv: ScopedKv) {
 
 	/** 保存角色档案（当前工作区）。 */
 	async function saveProfile(next: AppProfile): Promise<void> {
-		profile = next;
-		await scopedKv.set(PROFILE_KEY, next);
+		const normalized = normalizeProfile(next);
+		profile = normalized;
+		await scopedKv.set(PROFILE_KEY, normalized);
 		emit();
 	}
 

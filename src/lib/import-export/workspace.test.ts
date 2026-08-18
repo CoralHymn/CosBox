@@ -12,7 +12,14 @@ function makeWorkspace(): WorkspaceData {
 		delta: null
 	};
 	return {
-		profile: { name: '绫音', systemPrompt: '你是绫音' },
+		profile: {
+			name: '绫音',
+			systemPrompt: '你是绫音',
+			characterPrompt: '16 岁高中生',
+			userPrompt: '用户是同学',
+			worldPrompt: '现代虚拟学园',
+			stylePrompt: '余华式白描'
+		},
 		developerMode: true,
 		worldInfo: [{ id: 'w1', keys: ['图书馆'], content: '校园传说', enabled: true, priority: 10 }],
 		memories: [

@@ -430,7 +430,7 @@ test('设置页选择主流服务商预设自动填充地址与模型', async ({
 	await expect(page.getByText('模型设置已保存')).toBeVisible();
 });
 
-test('设置：角色档案默认显示、保存不回清、回到默认、开发者模式', async ({ page }) => {
+test('提示词与设置：五段提示词独立编辑，角色名保存不回清', async ({ page }) => {
 	await page.goto('/');
 	await enterDefaultWorkspace(page);
 
@@ -438,19 +438,45 @@ test('设置：角色档案默认显示、保存不回清、回到默认、开�
 	await expect(page.getByRole('button', { name: '网络搜索' })).toHaveCount(0);
 
 	await page.getByRole('button', { name: /设置/ }).click();
-	// 角色档案默认显示内置角色与提示词模板
+	// 设置页只剩角色名，默认角色与提示词字段已经迁走
 	await expect(page.locator('#profile-name')).toHaveValue('绫音');
-	await expect(page.locator('#profile-prompt')).not.toHaveValue('');
+	await expect(page.locator('#profile-prompt')).toHaveCount(0);
+
+	// 提示词标签页：默认系统提示存在，四段扩展提示留空
+	await page.getByRole('button', { name: '提示词' }).click();
+	await expect(page.locator('#prompt-system')).not.toHaveValue('');
+	await expect(page.locator('#prompt-character')).toHaveValue('');
+	await expect(page.locator('#prompt-user')).toHaveValue('');
+	await expect(page.locator('#prompt-world')).toHaveValue('');
+	await expect(page.locator('#prompt-style')).toHaveValue('');
 
 	// 输入并保存后文本框不回清
+	await page.locator('#prompt-system').fill('回复规则：不得承认自己是 AI');
+	await page.locator('#prompt-character').fill('你叫测试角色');
+	await page.locator('#prompt-user').fill('用户是你的同学');
+	await page.locator('#prompt-world').fill('现代虚拟学园');
+	await page.locator('#prompt-style').fill('余华式白描');
+	await page.getByRole('button', { name: '保存提示词' }).click();
+	await expect(page.getByText('提示词已保存')).toBeVisible();
+	await expect(page.locator('#prompt-system')).toHaveValue('回复规则：不得承认自己是 AI');
+	await expect(page.locator('#prompt-character')).toHaveValue('你叫测试角色');
+
+	// 设置页修改角色名不会覆盖提示词
+	await page.getByRole('button', { name: /设置/ }).click();
 	await page.locator('#profile-name').fill('测试角色');
-	await page.locator('#profile-prompt').fill('你是测试角色');
 	await page.getByRole('button', { name: '保存设置' }).click();
 	await expect(page.locator('#profile-name')).toHaveValue('测试角色');
-	await expect(page.locator('#profile-prompt')).toHaveValue('你是测试角色');
+	await page.getByRole('button', { name: '提示词' }).click();
+	await expect(page.locator('#prompt-character')).toHaveValue('你叫测试角色');
 
-	// 回到默认仅重置角色档案
-	await page.getByRole('button', { name: '回到默认' }).click();
+	// 恢复默认提示词：系统提示回退模板，扩展提示清空；角色名保持「测试角色」
+	await page.getByRole('button', { name: '恢复默认提示词' }).click();
+	await expect(page.locator('#prompt-system')).not.toHaveValue('');
+	await expect(page.locator('#prompt-character')).toHaveValue('');
+
+	// 设置页单独恢复默认角色名
+	await page.getByRole('button', { name: /设置/ }).click();
+	await page.getByRole('button', { name: '恢复默认角色名' }).click();
 	await expect(page.locator('#profile-name')).toHaveValue('绫音');
 
 	// 开发者模式：开启后对话页可展开查看完整提示词
