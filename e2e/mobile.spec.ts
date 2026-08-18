@@ -1,51 +1,67 @@
 import { expect, test } from '@playwright/test';
-import { enterDefaultWorkspace } from './utils';
 
-// 移动端视口：验证左侧抽屉导航、右上角状态浮层、聊天可用、无横向溢出
+// 移动端视口：微信式会话列表首屏、底部「对话/设置」栏、聊天沉浸页 + 「⋯」功能抽屉、无横向溢出
 test.use({ viewport: { width: 390, height: 844 } });
 
-test('移动端：左侧抽屉导航 + 右上角状态浮层 + 聊天可用 + 无横向溢出', async ({ page }) => {
+test('移动端：会话列表首屏 + 底部标签栏 + 聊天沉浸页 + 功能抽屉 + 无横向溢出', async ({ page }) => {
 	await page.goto('/');
-	await expect(page.getByText('CosBox')).toBeVisible();
-	await enterDefaultWorkspace(page);
+	await expect(page.getByText('CosBox').first()).toBeVisible();
 
-	// 汉堡按钮打开左侧抽屉
-	const menuToggle = page.getByRole('button', { name: '打开菜单' });
-	await expect(menuToggle).toBeVisible();
-	await menuToggle.click();
-	const navRail = page.locator('.nav-rail');
-	await expect(navRail).toBeVisible();
-	await expect(page.locator('.nav-backdrop.show')).toBeVisible();
-	// 等待抽屉滑入动画完成
-	await expect.poll(() => navRail.evaluate((el) => el.getBoundingClientRect().left)).toBe(0);
-	await expect(page.locator('.nav-item')).toHaveCount(12);
+	// 首屏 = 工作区会话列表（微信式）：列表项与底部「对话/设置」标签栏。
+	const listItem = page.locator('.ws-home-item').filter({ hasText: '默认工作区' });
+	await expect(listItem).toBeVisible();
+	await expect(page.getByRole('button', { name: '管理工作区' })).toBeVisible();
+	const chatTab = page.locator('.mobile-home-tab', { hasText: '对话' });
+	const settingsTab = page.locator('.mobile-home-tab', { hasText: '设置' });
+	await expect(chatTab).toBeVisible();
+	await expect(settingsTab).toBeVisible();
 
-	// 点击抽屉里的「状态」：抽屉关闭并切换页面
-	await navRail.getByRole('button', { name: /状态/ }).click();
-	await expect(page.locator('.nav-backdrop.show')).toHaveCount(0);
+	// 底部「设置」tab：分区菜单 → 全屏设置详情 → 返回。
+	await settingsTab.click();
+	await expect(page.locator('.mobile-settings-title')).toHaveText('设置');
+	await page.locator('.mobile-settings-item').first().click();
+	await expect(page.getByText('模型服务管理')).toBeVisible();
+	await page.getByRole('button', { name: '返回设置菜单' }).click();
+	await expect(page.locator('.mobile-settings-title')).toBeVisible();
+	await chatTab.click();
+	await expect(listItem).toBeVisible();
+
+	// 点头像打开头像编辑器（全屏形态），可直接关闭。
+	await listItem.getByRole('button', { name: /编辑「默认工作区」的头像/ }).click();
+	await expect(page.getByRole('dialog', { name: '编辑角色头像' })).toBeVisible();
+	await page.getByRole('dialog', { name: '编辑角色头像' }).getByText('恢复默认').click();
+	// 保存后回到列表（toast 提示头像已保存）。
+	await expect(page.getByText('头像已保存')).toBeVisible();
+
+	// 点会话进入聊天沉浸页：顶栏 = 返回 + 工作区名 + 「⋯」。
+	await listItem.locator('.ws-home-main').click();
+	await expect(page.getByPlaceholder(/输入消息/)).toBeVisible();
+	const chatHead = page.locator('.mobile-chat-head');
+	await expect(chatHead).toBeVisible();
+	await expect(chatHead).toContainText('默认工作区');
+	await expect(chatHead).toContainText('周一 08:00');
+
+	// 「⋯」打开功能抽屉：选「状态」进入对应面板。
+	await page.getByRole('button', { name: '功能菜单' }).click();
+	const drawer = page.getByRole('dialog', { name: '功能菜单' });
+	await expect(drawer).toBeVisible();
+	await expect(drawer.getByText('角色与世界')).toBeVisible();
+	await drawer.getByRole('button', { name: '状态' }).click();
 	await expect(page.getByRole('heading', { name: '角色状态编辑器' })).toBeVisible();
 
-	// 回到对话
-	await menuToggle.click();
-	await page.locator('.nav-rail').getByRole('button', { name: /对话/ }).click();
+	// 顶栏返回箭头：功能页回到对话。
+	await page.getByRole('button', { name: '返回对话' }).click();
 	await expect(page.getByPlaceholder(/输入消息/)).toBeVisible();
 
-	// 顶栏状态开关显示时间 + 地点，点击展开浮层
-	const stateToggle = page.getByRole('button', { name: '实时状态' });
-	await expect(stateToggle).toBeVisible();
-	await expect(stateToggle).toContainText('周一 08:00');
-	await expect(stateToggle).toContainText('学院正门');
-	await stateToggle.click();
-	const stateDialog = page.getByRole('dialog', { name: '实时状态' });
-	await expect(stateDialog).toBeVisible();
-	await expect(stateDialog.getByText('实时状态预览')).toBeVisible();
-	await stateDialog.getByRole('button', { name: '关闭状态面板' }).click();
-	await expect(page.getByRole('dialog', { name: '实时状态' })).toHaveCount(0);
-
-	// 聊天可用：发送消息并收到演示回复
+	// 聊天可用：发送消息并收到演示回复。
 	await page.getByPlaceholder(/输入消息/).fill('你好');
 	await page.getByRole('button', { name: '发送' }).click();
 	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+
+	// 返回箭头回到会话列表，且列表预览更新为最近消息。
+	await page.getByRole('button', { name: '返回会话列表' }).click();
+	await expect(listItem).toBeVisible();
+	await expect(listItem).toContainText('演示模式回应');
 
 	// 无横向溢出
 	const overflow = await page.evaluate(

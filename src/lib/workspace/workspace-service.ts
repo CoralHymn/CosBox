@@ -83,6 +83,10 @@ export class WorkspaceService {
 		const meta = await this.deps.registry.create(
 			uniqueWorkspaceName(this.deps.registry, newName.trim() || `${source.name} 副本`)
 		);
+		// 副本沿用源工作区的自定义头像（元信息层面的轻量搬迁）。
+		if (source.avatar !== undefined) {
+			await this.deps.registry.patch(meta.id, { avatar: source.avatar });
+		}
 		try {
 			const sourceNodes = await this.deps.snapshots.getAll(sourceId);
 			const idMap = buildIdMap(sourceNodes);

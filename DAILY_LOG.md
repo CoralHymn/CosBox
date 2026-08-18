@@ -3087,3 +3087,27 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
   npm run tauri build + 签名），退出码 0，产出 0.0.3 安装包与 .sig。
 - 教训：bat 一律纯 ASCII + CRLF；块内 echo 不要出现括号对。
 
+## 2026-08-19：移动端微信式改造（会话列表首屏 + 头像自定义 + 桌面切换器下拉，D111）
+
+- 需求：移动端 UI 不好用（抽屉 12 标签、切工作区繁琐）+ 设置页窄屏挤压；
+  用户要求做成微信式「会话列表 → 聊天」体验，并新增角色头像自定义（三端）；
+  桌面端工作区选择器保持原有小尺寸、增强下拉面板。先做了两个 HTML 交互演示
+  （tmp/mobile-demo.html、tmp/desktop-demo.html）给用户确认后再实施。
+- 数据层：`WorkspaceMeta` 新增 `avatar`（glyph 色板/图片 data URL）与
+  `lastMessagePreview/lastMessageAt`；`WorkspaceRegistry.patch` 局部更新元信息
+  （不动 updatedAt 排序）；复制工作区时头像随元信息搬迁。
+- 移动端（≤768px）：首屏 `WorkspaceListHome` 会话列表 + 底部「对话/设置」
+  标签栏；设置分区菜单→全屏 SettingsPanel；聊天沉浸页顶栏（返回/工作区名/
+  状态副标题/「⋯」），`MobileFeatureDrawer` 右侧抽屉按三组收纳其余功能标签；
+  汉堡抽屉与旧顶栏退役；状态浮层改为点聊天页标题唤起。
+- 头像：`WorkspaceAvatar`（名称首字+哈希派生色兜底）与 `AvatarEditor`
+  （色板/首字表情/上传≤4MB，移动端全屏、桌面模态框）；入口：会话列表点头像、
+  桌面切换器头像悬停✎、下拉行内✎。
+- 桌面端：`Titlebar` 工作区按钮保持单行小尺寸（layers 图标→头像），
+  新增 `WorkspaceDropdown`（搜索/预览/当前高亮/行内复制删除/管理全部/内联新建）。
+- 附带修复：设置页 `.model-row` 窄屏换行（模型名独占一行）；移动端 `.body`
+  补 `min-width:0`——曾被网格项自动最小尺寸把 1fr 轨道撑到 449px 出横向滚动。
+- 验证：新增 registry.patch 单测；重写 mobile.spec.ts（会话列表/底部标签/
+  头像编辑/沉浸页/抽屉/溢出）与 titlebar.spec.ts 切换器断言；819 单测 +
+  52 e2e 全过；check/lint 全绿。
+

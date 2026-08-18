@@ -36,7 +36,12 @@ test('Tauri 桌面：自定义标题栏承载窗口控制/工作区切换/状态
 	expect(bodyBox!.height).toBeGreaterThan(500);
 	await expect(page.getByText('开始一段新的故事吧')).toBeVisible();
 
-	// 标题栏里的切换器能打开管理弹层。
+	// 标题栏里的切换器打开下拉面板（搜索/预览/快捷操作），「管理全部…」再打开全量管理弹层。
 	await page.locator('.titlebar-ws').click();
+	const dropdown = page.getByRole('dialog', { name: '切换工作区' });
+	await expect(dropdown).toBeVisible();
+	await expect(dropdown.getByText('默认工作区')).toBeVisible();
+	await expect(dropdown.getByText('当前')).toBeVisible();
+	await dropdown.getByRole('button', { name: '管理全部…' }).click();
 	await expect(page.getByRole('dialog', { name: '管理工作区' })).toBeVisible();
 });

@@ -109,6 +109,33 @@ describe('WorkspaceRegistry', () => {
 		expect(registry.getWorkspaces()[0]!.id).toBe('default');
 	});
 
+	it('patch 局部更新头像与会话摘要，不刷新最近使用排序；不存在时报错', async () => {
+		await registry.migrateLegacy();
+		const second = await registry.create('第二');
+		const beforeUpdatedAt = registry.getById(second.id)!.updatedAt;
+		await registry.patch(second.id, {
+			avatar: { kind: 'glyph', color: '#6d8dff', glyph: '澪' },
+			lastMessagePreview: '你好',
+			lastMessageAt: 123
+		});
+		const patched = registry.getById(second.id)!;
+		expect(patched.avatar).toEqual({ kind: 'glyph', color: '#6d8dff', glyph: '澪' });
+		expect(patched.lastMessagePreview).toBe('你好');
+		expect(patched.lastMessageAt).toBe(123);
+		expect(patched.updatedAt).toBe(beforeUpdatedAt);
+		// 持久化：重载后仍在。
+		const reloaded = new WorkspaceRegistry(kv);
+		await reloaded.load();
+		expect(reloaded.getById(second.id)?.avatar).toEqual({
+			kind: 'glyph',
+			color: '#6d8dff',
+			glyph: '澪'
+		});
+		await expect(registry.patch('missing', { lastMessagePreview: 'x' })).rejects.toThrow(
+			WorkspaceError
+		);
+	});
+
 	it('subscribe 在注册表变化时通知', async () => {
 		await registry.migrateLegacy();
 		let notified = 0;
