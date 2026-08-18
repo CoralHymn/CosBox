@@ -169,6 +169,20 @@ export class WorkspaceRegistry {
 		this.emit();
 	}
 
+	/**
+	 * 局部更新元信息（头像/会话摘要等；id 与 createdAt 不可改）。
+	 * 不刷新 updatedAt，避免摘要更新干扰最近使用排序。
+	 */
+	async patch(id: string, patch: Partial<Omit<WorkspaceMeta, 'id' | 'createdAt'>>): Promise<void> {
+		const target = this.metas.find((meta) => meta.id === id);
+		if (target === undefined) {
+			throw new WorkspaceError('工作区不存在');
+		}
+		this.metas = this.metas.map((meta) => (meta.id === id ? { ...meta, ...patch } : meta));
+		await this.persist();
+		this.emit();
+	}
+
 	/** 订阅注册表变化，返回取消订阅函数。 */
 	subscribe(listener: () => void): () => void {
 		this.listeners.add(listener);

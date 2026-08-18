@@ -1,26 +1,49 @@
 <script lang="ts">
+	import type { WorkspaceMeta } from '../workspace/types';
 	import Icon from './Icon.svelte';
+	import WorkspaceAvatar from './WorkspaceAvatar.svelte';
+	import WorkspaceDropdown from './WorkspaceDropdown.svelte';
 
 	interface Props {
-		workspaceName: string;
+		/** 全部工作区（下拉面板列表）。 */
+		workspaces: WorkspaceMeta[];
+		/** 当前工作区 id（下拉面板高亮与头像展示）。 */
+		currentWorkspaceId: string | null;
 		/** 顶栏状态信息（时间 / 模型 / 快照 / 思考中）——桌面端合并进标题栏。 */
 		timeText: string;
 		providerLabel: string;
 		snapshotCount: number;
 		busy?: boolean;
+		onSwitchWorkspace: (id: string) => void;
+		onCreateWorkspace: (name: string) => Promise<void>;
+		onDuplicateWorkspace: (id: string) => void;
+		onDeleteWorkspace: (id: string) => void;
+		onEditAvatar: (meta: WorkspaceMeta) => void;
 		onOpenWorkspace: () => void;
 		onExitToLanding: () => void;
 	}
 
 	let {
-		workspaceName,
+		workspaces,
+		currentWorkspaceId,
 		timeText,
 		providerLabel,
 		snapshotCount,
 		busy = false,
+		onSwitchWorkspace,
+		onCreateWorkspace,
+		onDuplicateWorkspace,
+		onDeleteWorkspace,
+		onEditAvatar,
 		onOpenWorkspace,
 		onExitToLanding
 	}: Props = $props();
+
+	/** 工作区切换下拉面板是否展开。 */
+	let dropdownOpen = $state(false);
+
+	const currentMeta = $derived(workspaces.find((meta) => meta.id === currentWorkspaceId) ?? null);
+	const workspaceName = $derived(currentMeta?.name ?? '未选择工作区');
 
 	/** 窗口控制经 Tauri 动态引入；非 Tauri 环境下本组件不会被渲染，兜底静默失败。 */
 	async function withWindow(
@@ -54,9 +77,18 @@
 		<span class="brand-mark">C</span>
 		<span>CosBox</span>
 	</div>
-	<button class="titlebar-ws" title="管理工作区" onclick={onOpenWorkspace}>
-		<span class="titlebar-ws-icon"><Icon name="layers" size={15} /></span>
-		<span class="titlebar-ws-name">{workspaceName || '未选择工作区'}</span>
+	<button
+		class="titlebar-ws"
+		title="切换工作区"
+		aria-label="切换工作区"
+		onclick={() => (dropdownOpen = !dropdownOpen)}
+	>
+		{#if currentMeta !== null}
+			<WorkspaceAvatar meta={currentMeta} size={16} />
+		{:else}
+			<span class="titlebar-ws-icon"><Icon name="layers" size={15} /></span>
+		{/if}
+		<span class="titlebar-ws-name">{workspaceName}</span>
 		<span class="titlebar-caret"><Icon name="chevron-down" size={11} /></span>
 	</button>
 	<button
@@ -90,4 +122,44 @@
 			<Icon name="x" size={15} />
 		</button>
 	</div>
+
+	{#if dropdownOpen}
+		<WorkspaceDropdown
+			{workspaces}
+			currentId={currentWorkspaceId}
+			{busy}
+			onSwitch={(id) => {
+				dropdownOpen = false;
+				onSwitchWorkspace(id);
+			}}
+			onCreate={async (name) => {
+				await onCreateWorkspace(name);
+				dropdownOpen = false;
+			}}
+			onDuplicate={async (id) => {
+				onDuplicateWorkspace(id);
+				dropdownOpen = false;
+			}}
+			onDelete={(id) => {
+				dropdownOpen = false;
+				onDeleteWorkspace(id);
+			}}
+			onEditAvatar={(meta) => {
+				dropdownOpen = false;
+				onEditAvatar(meta);
+			}}
+			onOpenManager={() => {
+				dropdownOpen = false;
+				onOpenWorkspace();
+			}}
+			onClose={() => (dropdownOpen = false)}
+		/>
+	{/if}
 </div>
+
+<style>
+	/* 下拉面板以标题栏为定位基准。 */
+	.titlebar {
+		position: relative;
+	}
+</style>

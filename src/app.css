@@ -379,7 +379,9 @@ button:disabled {
 	border-radius: var(--radius-sm);
 	background: var(--panel-2);
 	cursor: pointer;
-	transition: border-color 120ms, box-shadow 120ms;
+	transition:
+		border-color 120ms,
+		box-shadow 120ms;
 }
 
 .official-bg-card:hover {
@@ -1208,9 +1210,6 @@ button:disabled {
 }
 
 /* 移动端专用元素：桌面端隐藏 */
-.mobile-nav-toggle,
-.nav-backdrop,
-.mobile-state-toggle,
 .mobile-state-panel {
 	display: none;
 }
@@ -1245,81 +1244,15 @@ button:disabled {
 		display: inline-flex;
 	}
 
-	/* 导航栏改为左侧抽屉：默认滑出屏幕，打开时滑入 */
+	/* 移动端无左侧导航：内容独占一列（功能标签收进聊天页「⋯」抽屉）；
+	   min-width:0 防止网格项自动最小尺寸把 1fr 轨道撑出横向滚动。 */
 	.body {
 		grid-template-columns: 1fr;
+		min-width: 0;
 	}
 
 	.content {
 		order: 1;
-	}
-
-	.nav-rail {
-		position: fixed;
-		top: 0;
-		bottom: 0;
-		left: 0;
-		width: 224px;
-		z-index: 70;
-		transform: translateX(-100%);
-		transition: transform 200ms ease;
-		flex-direction: column;
-		overflow-y: auto;
-		border-right: 1px solid var(--border);
-		padding: 14px 10px;
-		/* 抽屉贴边全高：上下都避开安全区（横屏时底部有手势条） */
-		padding-top: calc(14px + env(safe-area-inset-top, 0px));
-		padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-		gap: 4px;
-		-webkit-overflow-scrolling: touch;
-	}
-
-	.nav-open .nav-rail {
-		transform: translateX(0);
-		box-shadow: var(--shadow);
-	}
-
-	.nav-item {
-		flex-direction: row;
-		gap: 10px;
-		padding: 11px 12px;
-		font-size: 13.5px;
-	}
-
-	.nav-icon {
-		font-size: 15px;
-		width: 18px;
-	}
-
-	/* 抽屉遮罩与汉堡按钮 */
-	.nav-backdrop {
-		display: block;
-		position: fixed;
-		inset: 0;
-		z-index: 65;
-		background: rgba(0, 0, 0, 0.5);
-		opacity: 0;
-		pointer-events: none;
-		transition: opacity 180ms ease;
-	}
-
-	.nav-backdrop.show {
-		opacity: 1;
-		pointer-events: auto;
-	}
-
-	.mobile-nav-toggle {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 32px;
-		height: 32px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border);
-		background: var(--panel-2);
-		color: var(--text);
-		font-size: 15px;
-		flex: none;
 	}
 
 	/* 面板与卡片收紧 */
@@ -1367,24 +1300,6 @@ button:disabled {
 
 	.side-preview {
 		display: none;
-	}
-
-	.mobile-state-toggle {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		flex: 1;
-		min-width: 0;
-		padding: 5px 10px;
-		border-radius: 999px;
-		border: 1px solid var(--border);
-		background: var(--panel-2);
-		color: var(--text);
-		font-size: 12px;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
 
 	.mobile-state-panel {
@@ -1500,6 +1415,222 @@ button:disabled {
 	.btn {
 		min-height: 34px;
 	}
+
+	/* 设置页：模型编辑行换行收纳，模型名独占一行（避免被固定宽度输入框挤压） */
+	.model-row {
+		flex-wrap: wrap;
+	}
+
+	.model-row > :first-child {
+		flex: 1 1 100%;
+	}
+}
+
+/* ===== 移动端微信式布局（会话列表首屏 / 聊天沉浸页顶栏 / 设置分区） ===== */
+
+.mobile-chat-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	padding-top: calc(8px + env(safe-area-inset-top, 0px));
+	background: var(--bg-app-header, var(--bg-elevated));
+	border-bottom: 1px solid var(--border);
+	z-index: 5;
+}
+
+.mobile-back {
+	width: 34px;
+	height: 34px;
+	flex: none;
+	border-radius: 10px;
+	border: none;
+	background: none;
+	color: var(--text);
+	font-size: 22px;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.mobile-back:active {
+	background: var(--accent-dim);
+}
+
+.mobile-chat-title {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 1px;
+	border: none;
+	background: none;
+	padding: 0;
+	cursor: pointer;
+	text-align: left;
+}
+
+.mobile-chat-name {
+	font-size: 15.5px;
+	font-weight: 700;
+	color: var(--text);
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mobile-chat-sub {
+	font-size: 11px;
+	color: var(--text-faint);
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mobile-feature-toggle {
+	width: 34px;
+	height: 34px;
+	flex: none;
+	border-radius: 10px;
+	border: none;
+	background: none;
+	color: var(--text);
+	font-size: 20px;
+	letter-spacing: 1px;
+	cursor: pointer;
+}
+
+.mobile-feature-toggle:active {
+	background: var(--accent-dim);
+}
+
+/* 首屏容器：内容 + 底部「对话/设置」标签栏 */
+.mobile-home {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+	width: 100%;
+}
+
+.mobile-home-tabs {
+	flex: none;
+	display: flex;
+	border-top: 1px solid var(--border);
+	background: var(--bg-app-header, var(--bg-elevated));
+	padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-home-tab {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+	padding: 8px 0 9px;
+	border: none;
+	background: none;
+	color: var(--text-faint);
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.mobile-home-tab.active {
+	color: var(--accent);
+}
+
+.mobile-home-tab-ico {
+	font-size: 19px;
+	line-height: 1.2;
+}
+
+/* 首屏「设置」tab：分区菜单 */
+.mobile-settings-menu {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 8px 12px 14px;
+}
+
+.mobile-settings-title {
+	font-size: 19px;
+	font-weight: 700;
+	color: var(--text);
+	padding: 10px 4px 14px;
+	padding-top: calc(10px + env(safe-area-inset-top, 0px));
+}
+
+.mobile-settings-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 12px 10px;
+	border-radius: 10px;
+	border: none;
+	background: none;
+	color: var(--text);
+	cursor: pointer;
+	text-align: left;
+}
+
+.mobile-settings-item:active {
+	background: var(--accent-dim);
+}
+
+.mobile-settings-label {
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.mobile-settings-desc {
+	flex: 1;
+	min-width: 0;
+	font-size: 11.5px;
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mobile-settings-caret {
+	color: var(--text-faint);
+	flex: none;
+}
+
+/* 全屏子页（设置详情等）：头部返回 + 面板占满剩余高度 */
+.mobile-screen {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+
+.mobile-screen-head {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	padding-top: calc(8px + env(safe-area-inset-top, 0px));
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-app-header, var(--bg-elevated));
+}
+
+.mobile-screen-title {
+	font-size: 15px;
+	font-weight: 700;
+}
+
+.mobile-screen .panel {
+	height: auto;
+	flex: 1;
+	min-height: 0;
 }
 
 /* ===== 多工作区：初始界面 / 管理列表 / 弹层 / 导航切换器 ===== */

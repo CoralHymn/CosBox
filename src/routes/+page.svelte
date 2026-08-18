@@ -86,7 +86,8 @@
 	import { WorkspaceScope } from '../lib/db/workspace-scope';
 	import { WorkspaceRegistry } from '../lib/workspace/workspace-registry';
 	import { WorkspaceService } from '../lib/workspace/workspace-service';
-	import type { WorkspaceMeta } from '../lib/workspace/types';
+	import type { WorkspaceMeta, WorkspaceAvatar } from '../lib/workspace/types';
+	import AvatarEditor from '../lib/components/AvatarEditor.svelte';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
@@ -104,7 +105,9 @@
 	import WardrobePanel from '../lib/components/WardrobePanel.svelte';
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
 	import WorkspaceHome from '../lib/components/WorkspaceHome.svelte';
+	import WorkspaceListHome from '../lib/components/WorkspaceListHome.svelte';
 	import WorkspaceModal from '../lib/components/WorkspaceModal.svelte';
+	import MobileFeatureDrawer from '../lib/components/MobileFeatureDrawer.svelte';
 	import Titlebar from '../lib/components/Titlebar.svelte';
 
 	/** 自动记忆提取的固定触发阈值：累计 N 条新对话消息后提取一次（用户/角色各算一条）。 */
@@ -151,10 +154,14 @@
 	 * 隐藏导航栏底部的工作区切换区；Web / 移动端在导航栏（工具区）最下方切换。
 	 */
 	const tauriDesktop = isTauri() && !navigator.userAgent.includes('Android');
-	/** 是否处于移动端视口（≤768px）：决定是否渲染抽屉/状态浮层等移动端元素。 */
+	/** 是否处于移动端视口（≤768px）：决定是否渲染会话列表/聊天沉浸页等移动端元素。 */
 	let isMobile = $state(false);
-	/** 移动端左侧抽屉导航是否打开。 */
-	let mobileNavOpen = $state(false);
+	/** 移动端首屏底部标签：会话列表 / 设置菜单 / 全屏设置详情。 */
+	let mobileHomeTab = $state<'chat' | 'settings' | 'settings-detail'>('chat');
+	/** 移动端聊天页右上角「⋯」功能抽屉是否打开。 */
+	let mobileFeatureOpen = $state(false);
+	/** 正在编辑头像的工作区（null = 未打开编辑器）。 */
+	let avatarEditing = $state<WorkspaceMeta | null>(null);
 	/** 移动端顶栏「实时状态」下拉是否打开。 */
 	let mobileStateOpen = $state(false);
 	let busy = $state(false);
@@ -273,7 +280,19 @@
 			: null
 	);
 
-	/** 监听视口宽度，移动端才渲染汉堡菜单与状态浮层（桌面端 DOM 不受影响）。 */
+	const currentWorkspaceMeta = $derived(
+		workspaceList.find((meta) => meta.id === currentWorkspaceId) ?? null
+	);
+
+	/** 移动端首屏「设置」tab 的分区入口（点击均全屏打开设置面板）。 */
+	const MOBILE_SETTINGS_SECTIONS = [
+		{ label: '模型服务与 AI 行为', desc: '服务商 / 温度 / 记忆 / 压缩' },
+		{ label: '主题', desc: '配色预设与背景图' },
+		{ label: '数据同步', desc: '远程同步设置与手动同步' },
+		{ label: '关于', desc: '版本与更新检查' }
+	];
+
+	/** 监听视口宽度，移动端才渲染会话列表与功能抽屉（桌面端 DOM 不受影响）。 */
 	$effect(() => {
 		const query = window.matchMedia('(max-width: 768px)');
 		const update = (): void => {
@@ -287,20 +306,6 @@
 	/** 主题（颜色变量 + 背景图）即时应用到文档根节点。 */
 	$effect(() => {
 		applyThemeToDocument(settings.theme);
-	});
-
-	/** 移动端抽屉打开时支持 Esc 关闭。 */
-	$effect(() => {
-		if (!mobileNavOpen) {
-			return;
-		}
-		const onKeydown = (event: KeyboardEvent): void => {
-			if (event.key === 'Escape') {
-				mobileNavOpen = false;
-			}
-		};
-		window.addEventListener('keydown', onKeydown);
-		return () => window.removeEventListener('keydown', onKeydown);
 	});
 
 	/** 启动远程同步：读取设置、开始轮询并订阅本地变化。 */
@@ -352,6 +357,50 @@
 		syncService.stop();
 		await syncService.reloadForWorkspace();
 		startSync();
+		// 切换后按新工作区的会话刷新列表摘要（预览/时间）。
+		updateWorkspaceSummary();
+	}
+
+	/**
+	 * 会话摘要写入工作区元信息：最近一条非系统消息的预览与时间，
+	 * 供移动端会话列表与桌面端切换器下拉展示（无变化时不写库）。
+	 */
+	function updateWorkspaceSummary(): void {
+		if (!entered) {
+			return;
+		}
+		const id = scope.get();
+		const meta = workspaces.getById(id);
+		if (meta === undefined) {
+			return;
+		}
+		const last = [...session.conversation].reverse().find((message) => message.role !== 'system');
+		const preview = last === undefined ? undefined : last.content.trim().slice(0, 60);
+		const at = last?.timestamp;
+		if (meta.lastMessagePreview === preview && meta.lastMessageAt === at) {
+			return;
+		}
+		void workspaces
+			.patch(id, {
+				lastMessagePreview: preview,
+				lastMessageAt: at
+			})
+			.catch(() => undefined);
+	}
+
+	/** 保存工作区头像（编辑器确认回调；undefined = 恢复默认）。 */
+	async function handleSaveAvatar(avatar: WorkspaceAvatar | undefined): Promise<void> {
+		const target = avatarEditing;
+		avatarEditing = null;
+		if (target === null) {
+			return;
+		}
+		try {
+			await workspaces.patch(target.id, { avatar });
+			toasts.success('头像已保存');
+		} catch (err) {
+			toasts.error(err);
+		}
 	}
 
 	onMount(async () => {
@@ -363,7 +412,10 @@
 			await settings.load();
 			await metrics.load();
 			await syncService.load();
-			session.subscribe(() => syncService.notifyChanged());
+			session.subscribe(() => {
+				syncService.notifyChanged();
+				updateWorkspaceSummary();
+			});
 			worldInfo.subscribe(() => syncService.notifyChanged());
 			settings.subscribe(() => syncService.notifyChanged());
 			// 桌面版启动时静默检查更新：仅在新版本可用时提示，去「设置 → 关于」更新。
@@ -1334,7 +1386,6 @@
 			entered = true;
 			tab = 'chat';
 			workspaceModalOpen = false;
-			mobileNavOpen = false;
 			mobileStateOpen = false;
 		} catch (err) {
 			toasts.error(err);
@@ -1468,9 +1519,11 @@
 		}
 		syncService.stop();
 		workspaceModalOpen = false;
-		mobileNavOpen = false;
+		mobileFeatureOpen = false;
 		mobileStateOpen = false;
 		entered = false;
+		// 回到会话列表首屏：底部标签复位到「对话」。
+		mobileHomeTab = 'chat';
 	}
 
 	/** 保存主题（即时生效，SettingsPanel 在每次修改时调用）。 */
@@ -1693,48 +1746,34 @@
 	}
 </script>
 
-<div class="app" class:nav-open={mobileNavOpen} class:titlebar-mode={tauriDesktop}>
+<div class="app" class:titlebar-mode={tauriDesktop}>
 	<!-- 主题背景图图层：图片与透明度由 JS 直接设置，不走 CSS 变量
 	     （超长 data URL 存 CSS 变量在部分浏览器会解析失败）。 -->
 	<div class="theme-backdrop" aria-hidden="true"></div>
 	{#if tauriDesktop}
 		<Titlebar
-			workspaceName={currentWorkspaceName}
+			workspaces={workspaceList}
+			{currentWorkspaceId}
 			timeText={formatWorldTime(session.state.schedule.time)}
 			{providerLabel}
 			snapshotCount={session.snapshots.length}
 			{busy}
+			onSwitchWorkspace={(id) => void handleEnterWorkspace(id)}
+			onCreateWorkspace={handleCreateWorkspace}
+			onDuplicateWorkspace={(id) => void handleDuplicateWorkspace(id)}
+			onDeleteWorkspace={(id) => void handleDeleteWorkspace(id)}
+			onEditAvatar={(meta) => (avatarEditing = meta)}
 			onOpenWorkspace={() => (workspaceModalOpen = true)}
 			onExitToLanding={handleExitToLanding}
 		/>
 	{/if}
-	{#if entered && !tauriDesktop}
+	{#if entered && !tauriDesktop && !isMobile}
 		<header class="header">
-			{#if isMobile}
-				<button
-					class="mobile-nav-toggle"
-					aria-label="打开菜单"
-					title="菜单"
-					onclick={() => (mobileNavOpen = !mobileNavOpen)}
-				>
-					☰
-				</button>
-			{/if}
 			<div class="brand">
 				<span class="brand-mark">C</span>
 				<span>CosBox</span>
 			</div>
 			<div class="header-spacer"></div>
-			{#if isMobile}
-				<button
-					class="mobile-state-toggle"
-					aria-label="实时状态"
-					title="实时状态"
-					onclick={() => (mobileStateOpen = !mobileStateOpen)}
-				>
-					{formatWorldTime(session.state.schedule.time)} · {session.state.location.name}
-				</button>
-			{/if}
 			<span class="chip"
 				><span class="dot"></span>{formatWorldTime(session.state.schedule.time)}</span
 			>
@@ -1743,6 +1782,42 @@
 			{#if busy}
 				<span class="chip busy"><span class="dot"></span>思考中…</span>
 			{/if}
+		</header>
+	{/if}
+	{#if entered && isMobile}
+		<!-- 移动端聊天沉浸页顶栏：返回（回会话列表/回对话）+ 工作区名 + 状态副标题 + 「⋯」 -->
+		<header class="mobile-chat-head">
+			<button
+				class="mobile-back"
+				aria-label={tab === 'chat' ? '返回会话列表' : '返回对话'}
+				onclick={() => {
+					if (tab === 'chat') {
+						handleExitToLanding();
+					} else {
+						tab = 'chat';
+					}
+				}}>‹</button
+			>
+			<button
+				class="mobile-chat-title"
+				aria-label="实时状态"
+				onclick={() => (mobileStateOpen = !mobileStateOpen)}
+			>
+				<span class="mobile-chat-name">{currentWorkspaceName}</span>
+				<span class="mobile-chat-sub"
+					>{formatWorldTime(session.state.schedule.time)} ·
+					{session.state.location.name}</span
+				>
+			</button>
+			{#if busy}
+				<span class="chip busy"><span class="dot"></span>思考中…</span>
+			{/if}
+			<button
+				class="mobile-feature-toggle"
+				aria-label="功能菜单"
+				title="功能菜单"
+				onclick={() => (mobileFeatureOpen = true)}>⋯</button
+			>
 		</header>
 	{/if}
 
@@ -1774,15 +1849,7 @@
 	{/if}
 
 	<div class="body" class:landing={!entered}>
-		{#if entered && isMobile}
-			<div
-				class="nav-backdrop"
-				class:show={mobileNavOpen}
-				role="presentation"
-				onclick={() => (mobileNavOpen = false)}
-			></div>
-		{/if}
-		{#if entered}
+		{#if entered && !isMobile}
 			<NavRail
 				active={tab}
 				workspaceName={currentWorkspaceName}
@@ -1791,7 +1858,6 @@
 				onExitToLanding={handleExitToLanding}
 				onSelect={(next) => {
 					tab = next;
-					mobileNavOpen = false;
 				}}
 			/>
 		{/if}
@@ -1801,18 +1867,95 @@
 					<p class="empty-hint">正在加载本地数据库…</p>
 				</div>
 			{:else if !entered}
-				<WorkspaceHome
-					workspaces={workspaceList}
-					currentId={currentWorkspaceId}
-					busy={switchingWorkspace}
-					onEnter={handleEnterWorkspace}
-					onCreate={handleCreateWorkspace}
-					onRename={handleRenameWorkspace}
-					onDuplicate={handleDuplicateWorkspace}
-					onDelete={handleDeleteWorkspace}
-					onExport={handleExportWorkspaceById}
-					onImportFile={handleImportAsNewWorkspace}
-				/>
+				{#if isMobile}
+					<!-- 移动端首屏：会话列表 / 设置（底部标签栏切换，微信式） -->
+					<div class="mobile-home">
+						{#if mobileHomeTab === 'settings-detail'}
+							<div class="mobile-screen">
+								<div class="mobile-screen-head">
+									<button
+										class="mobile-back"
+										aria-label="返回设置菜单"
+										onclick={() => (mobileHomeTab = 'settings')}>‹</button
+									>
+									<span class="mobile-screen-title">设置</span>
+								</div>
+								<SettingsPanel
+									config={settings.config}
+									profile={settings.profile}
+									developerMode={settings.developerMode}
+									syncSettings={settings.sync}
+									onSaveConfig={handleSaveConfig}
+									onSaveProfile={handleSaveProfile}
+									onSaveDeveloperMode={handleSaveDeveloperMode}
+									onSaveSync={handleSaveSync}
+									onTestSync={handleTestSync}
+									onSyncNow={handleSyncNow}
+									theme={settings.theme}
+									onSaveTheme={handleSaveTheme}
+									onAutoSaveConfig={handleAutoSaveConfig}
+									onFetchModels={handleFetchModels}
+									onTestConnection={handleTestConnection}
+									onExportWorkspace={handleExportWorkspace}
+									onImportWorkspace={handleImportWorkspace}
+								/>
+							</div>
+						{:else if mobileHomeTab === 'settings'}
+							<div class="mobile-settings-menu">
+								<div class="mobile-settings-title">设置</div>
+								{#each MOBILE_SETTINGS_SECTIONS as section (section.label)}
+									<button
+										class="mobile-settings-item"
+										onclick={() => (mobileHomeTab = 'settings-detail')}
+									>
+										<span class="mobile-settings-label">{section.label}</span>
+										<span class="mobile-settings-desc">{section.desc}</span>
+										<span class="mobile-settings-caret">›</span>
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<WorkspaceListHome
+								workspaces={workspaceList}
+								busy={switchingWorkspace}
+								onEnter={handleEnterWorkspace}
+								onOpenManager={() => (workspaceModalOpen = true)}
+								onEditAvatar={(meta) => (avatarEditing = meta)}
+							/>
+						{/if}
+						{#if mobileHomeTab !== 'settings-detail'}
+							<nav class="mobile-home-tabs" aria-label="首屏导航">
+								<button
+									class="mobile-home-tab"
+									class:active={mobileHomeTab === 'chat'}
+									onclick={() => (mobileHomeTab = 'chat')}
+								>
+									<span class="mobile-home-tab-ico">💬</span>对话
+								</button>
+								<button
+									class="mobile-home-tab"
+									class:active={mobileHomeTab === 'settings'}
+									onclick={() => (mobileHomeTab = 'settings')}
+								>
+									<span class="mobile-home-tab-ico">⚙️</span>设置
+								</button>
+							</nav>
+						{/if}
+					</div>
+				{:else}
+					<WorkspaceHome
+						workspaces={workspaceList}
+						currentId={currentWorkspaceId}
+						busy={switchingWorkspace}
+						onEnter={handleEnterWorkspace}
+						onCreate={handleCreateWorkspace}
+						onRename={handleRenameWorkspace}
+						onDuplicate={handleDuplicateWorkspace}
+						onDelete={handleDeleteWorkspace}
+						onExport={handleExportWorkspaceById}
+						onImportFile={handleImportAsNewWorkspace}
+					/>
+				{/if}
 			{:else if tab === 'chat'}
 				<ChatPanel
 					conversation={session.conversation}
@@ -1943,6 +2086,28 @@
 			{/if}
 		</main>
 	</div>
+
+	{#if entered && isMobile && mobileFeatureOpen}
+		<MobileFeatureDrawer
+			active={tab}
+			workspace={currentWorkspaceMeta ?? { name: currentWorkspaceName }}
+			onSelect={(next) => {
+				tab = next;
+				mobileFeatureOpen = false;
+			}}
+			onClose={() => (mobileFeatureOpen = false)}
+		/>
+	{/if}
+
+	{#if avatarEditing !== null}
+		<AvatarEditor
+			name={avatarEditing.name}
+			avatar={avatarEditing.avatar}
+			fullscreen={isMobile}
+			onSave={(avatar) => void handleSaveAvatar(avatar)}
+			onClose={() => (avatarEditing = null)}
+		/>
+	{/if}
 
 	{#if workspaceModalOpen}
 		<WorkspaceModal
