@@ -2,6 +2,8 @@
 
 CosBox 以 SvelteKit 纯静态 SPA 为唯一代码库，Windows 与 Android 双端用
 Tauri 2 薄壳封装（系统 WebView）。本文件记录环境要求、常用命令与已知坑。
+macOS / iOS 两个包无法在 Windows 本机构建（Apple 工具链只存在于 macOS），
+走 GitHub Actions 云端 macOS 的方案见 [APPLE_BUILD.md](./APPLE_BUILD.md)。
 
 ## 环境要求
 

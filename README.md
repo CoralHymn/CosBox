@@ -44,7 +44,8 @@ OpenRouter、OpenCode GO、OpenCode Zen、Command Code GOAT、Together AI、Olla
 
 数据同步：按 [server/README.md](./server/README.md) 部署同步服务器（有一键安装脚本，也支持手动和面板），
 在「设置 → 数据同步」填入服务器地址与密钥即可。打包与签名流程见
-[PACKAGING.md](./PACKAGING.md) 与 [ANDROID_SIGNING.md](./ANDROID_SIGNING.md)。
+[PACKAGING.md](./PACKAGING.md) 与 [ANDROID_SIGNING.md](./ANDROID_SIGNING.md)；
+macOS / iOS 包无法在 Windows 构建，GitHub Actions 方案见 [APPLE_BUILD.md](./APPLE_BUILD.md)（待落地）。
 
 ## 脚本
 
@@ -145,5 +146,5 @@ src-tauri/       Tauri 壳（tauri.conf.json、Rust 入口、gen/android Gradle 
 ```
 
 详见 [ARCHITECTURE.md](./ARCHITECTURE.md)、[DECISIONS.md](./DECISIONS.md)、
-[PACKAGING.md](./PACKAGING.md)、[ANDROID_SIGNING.md](./ANDROID_SIGNING.md) 与
-[server/README.md](./server/README.md)。
+[PACKAGING.md](./PACKAGING.md)、[ANDROID_SIGNING.md](./ANDROID_SIGNING.md)、
+[APPLE_BUILD.md](./APPLE_BUILD.md) 与 [server/README.md](./server/README.md)。
