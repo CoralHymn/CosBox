@@ -1548,7 +1548,7 @@
 	/** 获取模型列表（使用设置面板当前草稿配置）。失败返回空列表并由面板显示 toast。 */
 	async function handleFetchModels(draft: LlmConfig): Promise<FetchedModel[]> {
 		try {
-			const models = await fetchModelList(draft.baseUrl, draft.apiKey);
+			const models = await fetchModelList(draft.baseUrl, draft.apiKey, draft.useProxy);
 			toasts.success(`获取到 ${models.length} 个模型`);
 			return models;
 		} catch (err) {
@@ -1560,7 +1560,7 @@
 	/** 连接测试：验证当前草稿配置的端点与 API Key 是否可用。 */
 	async function handleTestConnection(draft: LlmConfig): Promise<void> {
 		try {
-			await testConnection(draft.baseUrl, draft.apiKey);
+			await testConnection(draft.baseUrl, draft.apiKey, draft.useProxy);
 			toasts.success('连接成功，API 可用');
 		} catch (err) {
 			toasts.error(err);

@@ -60,7 +60,7 @@ adb reverse tcp:1420 tcp:1420
 - Web 层保持唯一代码库；打包专属逻辑进 `src/lib/platform/` 适配层：
   - `platformFetch`（✅ 已实现，D109）：LLM / 搜索请求打包版走
     `tauri-plugin-http`（Rust 侧 reqwest 发出，无 WebView CORS），并把
-    `/llm-proxy/` 前缀还原为 `https://opencode.ai/`（见 D99）。
+    `/llm-proxy/<host>/` 前缀还原为对应绝对端点（见 D99 / D112）。
   - `WorkspaceStore` 端口（未实现）：Web = Dexie；打包版 = `tauri-plugin-sql`（SQLite）。
   - `FilePort` 端口（部分实现）：Web = Blob 下载；Android = MediaStore
     （`android_save.rs`）；Windows 对话框待定。

@@ -95,6 +95,22 @@ describe('OpenAiCompatibleClient', () => {
 		expect(body.max_tokens).toBe(512);
 	});
 
+	it('useProxy 开启时对话请求走内置通道前缀', async () => {
+		const fetchSpy = fetchMock();
+		fetchSpy.mockResolvedValue(okResponse('你好呀'));
+		vi.stubGlobal('fetch', fetchSpy);
+		const client = new OpenAiCompatibleClient();
+		await client.chat([{ role: 'user', content: 'hi' }], {
+			...config,
+			baseUrl: 'https://opencode.ai/zen/go/v1',
+			useProxy: true
+		});
+		expect(fetchSpy.mock.calls[0]![0]).toBe('/llm-proxy/opencode.ai/zen/go/v1/chat/completions');
+		// 未标记的端点直连，不会被误转发。
+		await client.chat([{ role: 'user', content: 'hi' }], config);
+		expect(fetchSpy.mock.calls[1]![0]).toBe('http://localhost:4000/v1/chat/completions');
+	});
+
 	it('content 为多段数组时拼接 text 片段', async () => {
 		const fetchSpy = fetchMock();
 		fetchSpy.mockResolvedValue(
@@ -212,10 +228,7 @@ describe('OpenAiCompatibleClient', () => {
 		vi.stubGlobal('fetch', fetchSpy);
 		const client = new OpenAiCompatibleClient();
 		const deepSeekConfig = { ...config, providerId: 'deepseek', model: 'deepseek-v4-flash' };
-		await client.chat(
-			[{ role: 'assistant', content: '这条来自非思考模型的回复' }],
-			deepSeekConfig
-		);
+		await client.chat([{ role: 'assistant', content: '这条来自非思考模型的回复' }], deepSeekConfig);
 		const init = fetchSpy.mock.calls[0]![1] as RequestInit;
 		const body = JSON.parse(init!.body as string);
 		expect(body.messages[0]).toHaveProperty('reasoning_content');
@@ -924,13 +937,9 @@ describe('OpenAiCompatibleClient', () => {
 		vi.stubGlobal('fetch', fetchSpy);
 		const client = new OpenAiCompatibleClient();
 		const thinkingDeltas: string[] = [];
-		const result = await client.chat(
-			[],
-			{ ...config, stream: true },
-			undefined,
-			undefined,
-			{ onThinkingDelta: (delta) => thinkingDeltas.push(delta) }
-		);
+		const result = await client.chat([], { ...config, stream: true }, undefined, undefined, {
+			onThinkingDelta: (delta) => thinkingDeltas.push(delta)
+		});
 		expect(thinkingDeltas).toEqual(['让我', '想想']);
 		expect(result.thinking).toBe('让我想想');
 		expect(result.content).toBe('回答');

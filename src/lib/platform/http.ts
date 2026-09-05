@@ -1,28 +1,43 @@
 /**
- * 跨平台 fetch 适配层（D104）。
+ * 跨平台 fetch 适配层（D104 / D112）。
  *
- * 浏览器（npm run dev / preview / 静态部署）：直接用原生 fetch——
- * OpenCode GO/Zen 等 opencode.ai 端点不支持浏览器 CORS，dev/preview 由
- * vite.config.ts 的 /llm-proxy 代理转发（见 D99）。
+ * 有些服务商端点不允许浏览器 CORS 直连（如 opencode.ai 的 OPTIONS 预检直接
+ * 404，浏览器侧表现为 TypeError: Failed to fetch，与 Key 无关）。这类端点经
+ * 「内置软件通道」转发：baseUrl 仍存真实绝对地址，另用 useProxy 标记需要转发，
+ * 请求前由 applyProxyPrefix 换成逻辑前缀 /llm-proxy/<host>/<path>。
  *
- * Tauri 打包版（桌面 / Android）：原生 fetch 仍受 WebView CORS 限制，且
- * 打包产物没有 Vite 代理——/llm-proxy 会命中 SPA fallback 返回 HTML，
- * 报「Unexpected token '<'」。这里改用 tauri-plugin-http 的 fetch：请求
- * 由 Rust 侧 reqwest 发出，不经过 WebView 的 CORS 检查；同时把
- * /llm-proxy 前缀重写回真实端点 https://opencode.ai。
+ * 前缀按平台各自落地（哪个服务商需要转发完全由配置决定，不再是某家专属）：
+ * - 浏览器（dev / preview）：vite.config.ts 的 llmRelay 中间件按前缀里的 host
+ *   动态转发（见 D99）。静态网页部署没有这层中间件，勾选通道的服务不可用。
+ * - Tauri 打包版（桌面 / Android）：打包产物没有 Vite 中间件，前缀会命中 SPA
+ *   fallback 返回 HTML（报「Unexpected token '<'」）。这里改用
+ *   tauri-plugin-http 的 fetch：请求由 Rust 侧 reqwest 发出，不经过 WebView 的
+ *   CORS 检查；同时把前缀重写回真实端点。
  */
 
 import { isTauri } from './updater';
+import { parseRelayTarget } from './relay-host';
 
-const LLM_PROXY_PREFIX = '/llm-proxy/';
-const LLM_PROXY_TARGET = 'https://opencode.ai';
-
-/** Tauri 打包环境没有 Vite 代理：把 /llm-proxy 前缀重写回真实端点。 */
-export function resolveProxyUrl(url: string): string {
-	if (url.startsWith(LLM_PROXY_PREFIX)) {
-		return LLM_PROXY_TARGET + '/' + url.slice(LLM_PROXY_PREFIX.length);
+/**
+ * 真实端点 → 通道前缀：仅当该服务开启内置通道时生效。
+ * 第二个参数刻意不设默认值，新增调用点必须显式表态要不要转发。
+ * 已是相对路径、或目标是 http（本地服务，本就无 CORS 问题）时原样返回。
+ */
+export function applyProxyPrefix(url: string, useProxy: boolean | undefined): string {
+	if (useProxy !== true || !/^https:\/\//i.test(url)) {
+		return url;
 	}
-	return url;
+	try {
+		const target = new URL(url);
+		return `/llm-proxy/${target.host}${target.pathname}${target.search}`;
+	} catch {
+		return url;
+	}
+}
+
+/** 通道前缀 → 真实端点；非前缀地址与畸形 host 原样返回。 */
+export function resolveProxyUrl(url: string): string {
+	return parseRelayTarget(url) ?? url;
 }
 
 /** 插件 fetch 的加载缓存：Tauri 环境下只动态导入一次。 */

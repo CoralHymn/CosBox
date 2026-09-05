@@ -73,7 +73,7 @@ export const OPEN_SOURCE_CREDITS: readonly OpenSourceCredit[] = [
 		name: 'Vite',
 		license: 'MIT',
 		url: 'https://vitejs.dev',
-		usage: '开发服务器与构建工具（含 /llm-proxy 代理）',
+		usage: '开发服务器与构建工具（含内置软件通道的 /llm-proxy 动态转发中间件）',
 		category: 'dependency'
 	},
 	{

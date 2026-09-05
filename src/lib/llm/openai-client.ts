@@ -1,5 +1,5 @@
 import { LlmError } from '../core/errors';
-import { platformFetch } from '../platform/http';
+import { applyProxyPrefix, platformFetch } from '../platform/http';
 import type { MessageSegment } from '../core/types';
 import { annotateWorldTime } from './message-time';
 import { isDeepSeekModel } from './providers';
@@ -69,23 +69,26 @@ export class OpenAiCompatibleClient implements LlmClient {
 
 		let response: Response;
 		try {
-			response = await platformFetch(`${baseUrl}/chat/completions`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
-				},
-				body: JSON.stringify(
-					buildRequestBody(
-						messages,
-						tools,
-						config,
-						options?.forceToolCall === true,
-						options?.jsonMode === true
-					)
-				),
-				signal
-			});
+			response = await platformFetch(
+				applyProxyPrefix(`${baseUrl}/chat/completions`, config.useProxy),
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
+					},
+					body: JSON.stringify(
+						buildRequestBody(
+							messages,
+							tools,
+							config,
+							options?.forceToolCall === true,
+							options?.jsonMode === true
+						)
+					),
+					signal
+				}
+			);
 		} catch (err) {
 			if (err instanceof Error && err.name === 'AbortError') {
 				throw new LlmError('请求已取消');

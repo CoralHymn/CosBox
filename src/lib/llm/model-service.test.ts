@@ -80,6 +80,19 @@ describe('fetchModelList', () => {
 		expect(headers.Authorization).toBe('Bearer secret');
 	});
 
+	it('开启内置通道时把 /models 换成 /llm-proxy/<host>/ 前缀', async () => {
+		const fetchSpy = vi.fn<typeof fetch>();
+		fetchSpy.mockResolvedValue(response({ data: [] }));
+		vi.stubGlobal('fetch', fetchSpy);
+		await fetchModelList('https://opencode.ai/zen/go/v1', 'k', true);
+		expect(fetchSpy.mock.calls[0]![0]).toBe('/llm-proxy/opencode.ai/zen/go/v1/models');
+		await testConnection('https://opencode.ai/zen/v1', 'k', true);
+		expect(fetchSpy.mock.calls[1]![0]).toBe('/llm-proxy/opencode.ai/zen/v1/models');
+		// 不开通道就是直连。
+		await fetchModelList('https://opencode.ai/zen/v1', 'k');
+		expect(fetchSpy.mock.calls[2]![0]).toBe('https://opencode.ai/zen/v1/models');
+	});
+
 	it('无 apiKey 时不带 Authorization 头', async () => {
 		const fetchSpy = vi.fn<typeof fetch>();
 		fetchSpy.mockResolvedValue(response({ data: [] }));
