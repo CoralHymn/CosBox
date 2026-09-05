@@ -1540,6 +1540,9 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 
 ## D99：无浏览器 CORS 的服务商——Vite 开发代理 /llm-proxy
 
+> 部分被 D112 取代：`/llm-proxy` 前缀的思路保留，但「静态 proxy 只指向 opencode.ai」
+> 与「预设 baseUrl 写成相对路径」已由 `useProxy` 字段 + 按 host 动态转发的中间件替代。
+
 **问题**：新增的 OpenCode GO/Zen 预设用户填入正确 Key 仍报「Failed to fetch」。
 实测确认 opencode.ai 的 API 不支持浏览器 CORS：对 `/chat/completions` 的
 `OPTIONS` 预检直接返回 404 且无 CORS 头（服务器端直连一切正常、假 Key 返回 401，
@@ -1799,6 +1802,9 @@ updatedAt } } }`），启动时把旧 `workspace.json` 单槽载荷迁移进 `de
 
 ## D109：打包版 LLM 请求走 tauri-plugin-http——/llm-proxy 双态解析
 
+> 部分被 D112 取代：HTTP 插件这条路不变，但「还原时固定拼 `https://opencode.ai`」
+> 改成从前缀里的 `<host>` 段还原，任意标记了 `useProxy` 的服务商都可用。
+
 **问题**：OpenCode GO/Zen 预设在打包版（Windows / Android）上两种地址都失败：
 默认的 `/llm-proxy/...` 相对路径没有 Vite 代理后端，命中 SPA fallback 返回
 `index.html`，报「Unexpected token '<' ... is not valid JSON」；手动改成
@@ -1892,3 +1898,44 @@ updatedAt } } }`），启动时把旧 `workspace.json` 单槽载荷迁移进 `de
 **代价**：移动端汉堡抽屉与旧顶栏状态胶囊入口退役（状态浮层改为点聊天页
 标题唤起）；未读角标暂不做（无多工作区后台消息概念）；头像图片以 data URL
 存 kv，超大图在 4MB 处拦截。
+
+## D112：内置软件通道去专属化——绝对 baseUrl + useProxy + 按 host 动态转发
+
+**问题**：D99/D109 的通道把「要不要转发」编码进了 baseUrl 本身（`/llm-proxy/zen/go/v1`），
+且 `vite.config.ts` 的静态 proxy 与 `platform/http.ts` 的 `LLM_PROXY_TARGET` 都只能指向
+opencode.ai 一个目标。后果有三：设置页里服务商地址显示成一个看不懂的相对路径；
+再出现第二家禁浏览器 CORS 的服务商就要改配置并重新构建；用户无法对自定义端点
+自行决定走不走通道。同时新增 Command Code GOAT 预设时实测确认
+`api.commandcode.ai` 预检返回 204 + `Access-Control-Allow-Origin: *`（与 opencode.ai
+恰好相反），说明「是否转发」本就是每家服务商的独立属性，不该由 URL 形态代表。
+
+**选择**：
+
+1. `ModelService` / `LlmConfig` / `LlmProviderPreset` 新增 `useProxy?: boolean`；
+   baseUrl 一律恢复为真实绝对地址（OpenCode 两预设为 `https://opencode.ai/zen/...`）。
+   预设自带该值（设置页只给「自定义」端点显示勾选框，预设不显示开关）。
+2. 传输层拆成两个方向的纯函数：`applyProxyPrefix(url, useProxy)` 在请求前把绝对地址
+   换成 `/llm-proxy/<host>/<path>`（仅 https 生效），`resolveProxyUrl` 从前缀里解析出
+   host 还原成真实端点。三个 `platformFetch` 调用点各自显式传 `useProxy`。
+3. 前缀规则收进零依赖的 `platform/relay-host.ts`，由 `http.ts` 与 `vite.config.ts` 共用
+   （不能从 `http.ts` 导入配置：会顺带拖进 `@tauri-apps`）。为此在 tsconfig 打开
+   `allowImportingTsExtensions`，让 Vite 未来的原生配置加载器也能解析该导入。
+4. `vite.config.ts` 删除静态 proxy 表，改为 `llmRelay()` 插件在 dev 与 preview 上同步
+   注册转发中间件（`enforce: 'pre'` 且必须在钩子里同步 `middlewares.use`；注册成后置
+   钩子会落到 SPA fallback 之后，重新踩回 D109 的 `Unexpected token '<'`）。请求头用
+   黑名单而非白名单（白名单会漏掉 `anthropic-version` 这类厂商头），丢弃上游的
+   `content-encoding/content-length/transfer-encoding` 以保留分块流式；整个处理体包在
+   try/catch 里——点「停止生成」会让 `pipeline` reject，不吞掉就是 unhandled rejection
+   直接打死开发服务器。
+5. 旧存档在归一化时升级：`upgradeLegacyProxyBaseUrl` 把 `/llm-proxy/zen/...` 还原成
+   `https://opencode.ai/zen/...` 并置 `useProxy`，由 `normalizeLlmConfig`（主配置）、
+   `normalizeModelService`（编辑保存）与 `ensureModelServiceBindings`（已存服务）三处调用。
+   传输层不再猜测未迁移的前缀（第一段不含点/冒号即判为非法），避免把「漏迁移」
+   伪装成「还能用的 opencode.ai 兜底」。
+
+**理由**：转发与否是服务商的属性，不是地址的属性。改成布尔字段后设置页显示的就是
+服务商文档里那个地址，可直接复制比对；通道也从「改代码才能扩展」变成「勾一下」。
+
+**代价**：静态网页部署依旧没有通道（勾选的服务只在桌面/移动端与 dev/preview 可用），
+需自建同路径反向代理；通道固定按 `https:` 还原，`http` 本地端点不参与转发（本就无
+CORS 问题）；多了一个必须同步维护的持久化字段（`LlmConfigPatch` 白名单漏写会静默丢值）。

@@ -29,14 +29,17 @@ npm run tauri dev  # Tauri 桌面壳（首次编译约 1–3 分钟）
 默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。「设置」页的模型服务支持 20 多家主流服务商：
 OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、智谱 GLM、GLM Coding Plan、
 百度千帆、腾讯混元、零一万物、MiniMax、SiliconFlow、Mistral、xAI Grok、Groq、Cerebras、
-OpenRouter、OpenCode GO、OpenCode Zen、Together AI、Ollama、LiteLLM Proxy、vLLM、Azure OpenAI。
+OpenRouter、OpenCode GO、OpenCode Zen、Command Code GOAT、Together AI、Ollama、LiteLLM Proxy、vLLM、Azure OpenAI。
 选一个预设就自动填好兼容端点和常用模型候选；每个服务能挂多个模型，Key 只填一次，
 按「对话 / 状态判断 / 生成」三个角色分别绑定；也可以选「自定义」填任意 OpenAI-compatible 端点。
+内置演示（离线）同样能增删模型，误删后在「添加模型服务」里选回它即可直接保存。
 
-OpenCode GO/Zen 的 API 不支持浏览器 CORS（OPTIONS 预检直接 404，直连会 `Failed to fetch`），
-预设默认走 `/llm-proxy` 相对路径，由 `vite.config.ts` 的开发/预览代理转发到 opencode.ai；
-`npm run dev` / `npm run preview` 下直接可用，静态部署需自建同路径反向代理，
-Tauri 打包版则走 `tauri-plugin-http`（Rust 侧发出请求，没有 CORS 问题）。
+有些端点不允许浏览器 CORS 直连（如 opencode.ai：OPTIONS 预检直接 404，直连会 `Failed to fetch`）。
+这类端点由 `useProxy` 标记（OpenCode GO/Zen 预设已自带，Command Code 这类允许 CORS 的
+保持直连）——baseUrl 仍存真实地址，请求前换成 `/llm-proxy/<host>/<path>`，
+`npm run dev` / `npm run preview` 由 `vite.config.ts` 的中间件按 host 动态转发，
+静态部署需自建同路径反向代理；Tauri 打包版走 `tauri-plugin-http`（Rust 侧发出请求，
+没有 CORS 问题）。只有「自定义」端点会在设置页给出勾选框，预设不显示。
 网络搜索支持 Tavily / Serper / Brave，发送消息时可以把实时结果注入 LLM 上下文。
 
 数据同步：按 [server/README.md](./server/README.md) 部署同步服务器（有一键安装脚本，也支持手动和面板），

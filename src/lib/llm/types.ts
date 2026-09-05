@@ -27,6 +27,8 @@ export interface ModelService {
 	/** 服务商预设 id（见 providers.ts）；'custom' 表示自定义端点。 */
 	providerId: string;
 	baseUrl: string;
+	/** 端点不允许浏览器 CORS 直连时经内置软件通道转发（缺省视为不转发）。 */
+	useProxy?: boolean;
 	apiKey: string;
 	/** 该服务商连接下已保存的模型条目（多选）。 */
 	models: ModelEntry[];
@@ -41,6 +43,8 @@ export interface LlmConfig {
 	providerId: string;
 	/** OpenAI-compatible 基址，如 http://localhost:4000/v1。 */
 	baseUrl: string;
+	/** 端点不允许浏览器 CORS 直连时经内置软件通道转发（缺省视为不转发）。 */
+	useProxy?: boolean;
 	apiKey: string;
 	model: string;
 	temperature: number;
@@ -195,6 +199,7 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	provider: 'demo',
 	providerId: 'custom',
 	baseUrl: 'http://localhost:4000/v1',
+	useProxy: false,
 	apiKey: '',
 	model: 'gpt-4o-mini',
 	temperature: 0.8,

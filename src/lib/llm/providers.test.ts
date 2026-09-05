@@ -6,7 +6,8 @@ import {
 	findProviderPreset,
 	isDeepSeekModel,
 	LLM_PROVIDER_PRESETS,
-	normalizeLlmConfig
+	normalizeLlmConfig,
+	upgradeLegacyProxyBaseUrl
 } from './providers';
 import { DEFAULT_LLM_CONFIG } from './types';
 
@@ -16,8 +17,12 @@ describe('LLM_PROVIDER_PRESETS', () => {
 		for (const preset of LLM_PROVIDER_PRESETS) {
 			expect(preset.id.trim()).not.toBe('');
 			expect(preset.label.trim()).not.toBe('');
-			// 允许绝对端点，或 /llm-proxy/ 相对路径（无浏览器 CORS 的服务走开发代理）。
-			expect(preset.baseUrl).toMatch(/^(https?:\/\/|\/llm-proxy\/)/);
+			// baseUrl 一律是真实绝对端点；是否经内置通道转发由 useProxy 表达（D112）。
+			expect(preset.baseUrl).toMatch(/^https?:\/\//);
+			// 通道只改写 https 端点：标了 useProxy 却是 http 的预设会被静默直连。
+			if (preset.useProxy === true) {
+				expect(preset.baseUrl.startsWith('https://')).toBe(true);
+			}
 			expect(preset.defaultModel.trim()).not.toBe('');
 			expect(preset.models.length).toBeGreaterThan(0);
 			expect(ids.has(preset.id)).toBe(false);
@@ -38,16 +43,34 @@ describe('LLM_PROVIDER_PRESETS', () => {
 	});
 
 	it('包含订阅/网关类预设（OpenCode GO、GLM Coding Plan 等）', () => {
-		// OpenCode 系走 /llm-proxy 相对路径：opencode.ai 不支持浏览器 CORS，
-		// 由 vite.config.ts 的开发/预览代理转发（见 providers.ts 注释）。
-		expect(findProviderPreset('opencode-go')?.baseUrl).toBe('/llm-proxy/zen/go/v1');
+		// opencode.ai 禁浏览器 CORS 直连：地址存真实的 https 端点，
+		// 由 useProxy 决定是否经内置通道转发（见 providers.ts 注释与 D112）。
+		expect(findProviderPreset('opencode-go')?.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+		expect(findProviderPreset('opencode-go')?.useProxy).toBe(true);
 		expect(findProviderPreset('opencode-go')?.models).toContain('kimi-k2.6');
-		expect(findProviderPreset('opencode-zen')?.baseUrl).toBe('/llm-proxy/zen/v1');
+		expect(findProviderPreset('opencode-zen')?.baseUrl).toBe('https://opencode.ai/zen/v1');
+		expect(findProviderPreset('opencode-zen')?.useProxy).toBe(true);
 		expect(findProviderPreset('glm-coding')?.baseUrl).toBe(
 			'https://open.bigmodel.cn/api/coding/paas/v4'
 		);
 		expect(findProviderPreset('minimax')?.baseUrl).toBe('https://api.minimax.io/v1');
 		expect(findProviderPreset('cerebras')?.baseUrl).toBe('https://api.cerebras.ai/v1');
+	});
+
+	it('Command Code GOAT 直连，不走内置通道', () => {
+		// 实测 api.commandcode.ai 预检返回 204 + Access-Control-Allow-Origin: *，
+		// 与 opencode.ai 相反，因此这个预设必须保持不标 useProxy。
+		const preset = findProviderPreset('command-code');
+		expect(preset?.label).toBe('Command Code GOAT（订阅）');
+		expect(preset?.baseUrl).toBe('https://api.commandcode.ai/provider/v1');
+		expect(preset?.useProxy).toBeUndefined();
+		expect(preset?.requiresApiKey).toBe(true);
+		// 默认模型按用户要求选便宜的 mimo，不要退回按 token 计费的 GPT 系。
+		expect(preset?.defaultModel).toBe('xiaomi/mimo-v2.5');
+		expect(preset?.models).toContain(preset?.defaultModel);
+		// 模型 id 必须是 /models 返回的带 org 前缀形式。
+		expect(preset?.models).toContain('deepseek/deepseek-v4-pro');
+		expect(preset?.models).toContain('zai-org/GLM-5.2');
 	});
 });
 
@@ -71,7 +94,39 @@ describe('applyProviderPreset', () => {
 		expect(result.baseUrl).toBe(preset.baseUrl);
 		expect(result.model).toBe(preset.defaultModel);
 		expect(result.apiKey).toBe('keep-me');
+		expect(result.useProxy).toBe(false);
 		expect(result.webSearch).toEqual(DEFAULT_LLM_CONFIG.webSearch);
+	});
+
+	it('需要转发时把预设的 useProxy 带进配置', () => {
+		const preset = findProviderPreset('opencode-go')!;
+		const result = applyProviderPreset({ ...DEFAULT_LLM_CONFIG }, preset);
+		expect(result.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+		expect(result.useProxy).toBe(true);
+	});
+});
+
+describe('upgradeLegacyProxyBaseUrl', () => {
+	it('把通道藏在 baseUrl 里的旧存档升级成绝对端点 + useProxy', () => {
+		expect(upgradeLegacyProxyBaseUrl('/llm-proxy/zen/go/v1')).toEqual({
+			baseUrl: 'https://opencode.ai/zen/go/v1',
+			useProxy: true
+		});
+		expect(upgradeLegacyProxyBaseUrl('/llm-proxy/zen/v1', false)).toEqual({
+			baseUrl: 'https://opencode.ai/zen/v1',
+			useProxy: true
+		});
+	});
+
+	it('已是绝对端点时保持不变，useProxy 缺省视为关闭', () => {
+		expect(upgradeLegacyProxyBaseUrl('https://api.deepseek.com/v1')).toEqual({
+			baseUrl: 'https://api.deepseek.com/v1',
+			useProxy: false
+		});
+		expect(upgradeLegacyProxyBaseUrl('https://opencode.ai/zen/go/v1', true)).toEqual({
+			baseUrl: 'https://opencode.ai/zen/go/v1',
+			useProxy: true
+		});
 	});
 });
 
@@ -185,5 +240,15 @@ describe('normalizeLlmConfig', () => {
 		expect(empty.modelServices).toEqual([]);
 		expect(empty.chatModelId).toBe('');
 		expect(empty.chatModelEntryId).toBe('');
+	});
+
+	it('useProxy 缺省为关闭，旧式 /llm-proxy 相对地址自动升级', () => {
+		expect(normalizeLlmConfig({ baseUrl: 'https://api.deepseek.com/v1' }).useProxy).toBe(false);
+		expect(
+			normalizeLlmConfig({ baseUrl: 'https://opencode.ai/zen/v1', useProxy: true }).useProxy
+		).toBe(true);
+		const legacy = normalizeLlmConfig({ baseUrl: '/llm-proxy/zen/go/v1' });
+		expect(legacy.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+		expect(legacy.useProxy).toBe(true);
 	});
 });

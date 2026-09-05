@@ -1,5 +1,5 @@
 import { LlmError } from '../core/errors';
-import { platformFetch } from '../platform/http';
+import { applyProxyPrefix, platformFetch } from '../platform/http';
 
 /** 从服务端获取的模型条目。 */
 export interface FetchedModel {
@@ -29,7 +29,11 @@ export function parseModelListResponse(data: unknown): FetchedModel[] {
 }
 
 /** 拉取模型列表（带 Authorization）。失败抛 LlmError。 */
-export async function fetchModelList(baseUrl: string, apiKey: string): Promise<FetchedModel[]> {
+export async function fetchModelList(
+	baseUrl: string,
+	apiKey: string,
+	useProxy?: boolean
+): Promise<FetchedModel[]> {
 	const base = baseUrl.trim().replace(/\/+$/, '');
 	if (base === '') {
 		throw new LlmError('未配置模型服务地址');
@@ -37,7 +41,7 @@ export async function fetchModelList(baseUrl: string, apiKey: string): Promise<F
 
 	let response: Response;
 	try {
-		response = await platformFetch(`${base}/models`, {
+		response = await platformFetch(applyProxyPrefix(`${base}/models`, useProxy), {
 			method: 'GET',
 			headers: {
 				Accept: 'application/json',
@@ -68,8 +72,12 @@ export async function fetchModelList(baseUrl: string, apiKey: string): Promise<F
 }
 
 /** 连接测试：GET /models 成功即通过；失败抛 LlmError。 */
-export async function testConnection(baseUrl: string, apiKey: string): Promise<void> {
-	await fetchModelList(baseUrl, apiKey);
+export async function testConnection(
+	baseUrl: string,
+	apiKey: string,
+	useProxy?: boolean
+): Promise<void> {
+	await fetchModelList(baseUrl, apiKey, useProxy);
 }
 
 /** 从模型条目中读取上下文窗口字段；缺失或非法返回 undefined。 */

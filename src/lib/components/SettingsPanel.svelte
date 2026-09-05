@@ -82,6 +82,8 @@
 	/** 服务商选择：'demo' | 预设 id | CUSTOM_PROVIDER_ID。 */
 	let presetSelection = $state<string>('demo');
 	let baseUrl = $state('');
+	/** 端点禁浏览器 CORS 直连时改走内置软件通道转发。 */
+	let useProxy = $state(false);
 	let apiKey = $state('');
 	let model = $state('');
 	let temperature = $state(0.8);
@@ -316,20 +318,27 @@
 		void persistTheme();
 	}
 
-	/** 切换服务商：选中预设时自动填充地址与默认模型。 */
+	/** 切换服务商：选中预设时自动填充地址、通道与默认模型。 */
 	function selectProvider(id: string): void {
 		presetSelection = id;
 		if (id === 'demo' || id === CUSTOM_PROVIDER_ID) {
 			modelContextWindow = undefined;
+			useProxy = false;
+			// 演示服务不需要端点，预置一行模型即可直接保存（误删后能一键建回来）。
+			if (id === 'demo' && editingServiceId === null && editorModels.length === 0) {
+				editorModels = [{ model: 'demo' }];
+			}
 			return;
 		}
 		const preset = findProviderPreset(id);
 		if (!preset) {
 			presetSelection = CUSTOM_PROVIDER_ID;
 			modelContextWindow = undefined;
+			useProxy = false;
 			return;
 		}
 		baseUrl = preset.baseUrl;
+		useProxy = preset.useProxy === true;
 		model = preset.defaultModel;
 		modelContextWindow = findModelInfo(preset.defaultModel)?.contextWindow;
 	}
@@ -340,6 +349,7 @@
 			provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
 			providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
 			baseUrl: baseUrl.trim(),
+			useProxy,
 			apiKey: apiKey.trim(),
 			model: model.trim() || DEFAULT_LLM_CONFIG.model,
 			temperature: Math.min(2, Math.max(0, temperature)),
@@ -473,6 +483,7 @@
 			provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
 			providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
 			baseUrl: baseUrl.trim(),
+			useProxy,
 			apiKey: apiKey.trim(),
 			model: model.trim() || DEFAULT_LLM_CONFIG.model,
 			modelContextWindow,
@@ -490,6 +501,7 @@
 		if (service === null) {
 			presetSelection = CUSTOM_PROVIDER_ID;
 			baseUrl = '';
+			useProxy = false;
 			apiKey = '';
 			model = '';
 			modelContextWindow = undefined;
@@ -502,6 +514,7 @@
 						? service.providerId
 						: CUSTOM_PROVIDER_ID;
 			baseUrl = service.baseUrl;
+			useProxy = service.useProxy ?? false;
 			apiKey = service.apiKey;
 			model = '';
 			modelContextWindow = undefined;
@@ -570,6 +583,7 @@
 					: 'openai-compatible') as ModelService['provider'],
 				providerId: presetSelection,
 				baseUrl,
+				useProxy,
 				apiKey,
 				models: editorModels,
 				notes: serviceNote
@@ -917,6 +931,14 @@
 							placeholder="https://api.example.com/v1"
 						/>
 					</div>
+					{#if presetSelection === CUSTOM_PROVIDER_ID}
+						<div class="row-actions" style="margin-bottom: 10px;">
+							<input id="svc-use-proxy" class="checkbox" type="checkbox" bind:checked={useProxy} />
+							<label for="svc-use-proxy" class="muted"
+								>通过内置软件通道转发（端点不允许浏览器 CORS 直连时勾选）</label
+							>
+						</div>
+					{/if}
 					<div class="field">
 						<label for="svc-api-key">API Key</label>
 						<input
@@ -932,98 +954,100 @@
 					{#if currentPreset?.notes}
 						<p class="muted" style="margin-top: 2px;">{currentPreset.notes}</p>
 					{/if}
-					<div class="field">
-						<span class="muted" style="display: block; margin-bottom: 4px;">
-							模型列表（一个服务商下可多选多个模型）
-						</span>
-						{#each editorModels as entry, index (index)}
-							<div class="model-row">
-								<input
-									class="input"
-									value={entry.model}
-									placeholder="模型 id"
-									onchange={(event) =>
-										updateEditorModel(index, {
-											model: (event.currentTarget as HTMLInputElement).value
-										})}
-									aria-label="模型 id"
-								/>
-								<input
-									class="input"
-									style="width: 110px;"
-									type="number"
-									value={entry.contextWindow ?? ''}
-									placeholder="窗口"
-									onchange={(event) =>
-										updateEditorModel(index, {
-											contextWindow:
-												Number((event.currentTarget as HTMLInputElement).value) > 0
-													? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-													: undefined
-										})}
-									aria-label="上下文窗口"
-								/>
-								<input
-									class="input"
-									style="width: 90px;"
-									type="number"
-									value={entry.maxTokens ?? ''}
-									placeholder="Max"
-									onchange={(event) =>
-										updateEditorModel(index, {
-											maxTokens:
-												Number((event.currentTarget as HTMLInputElement).value) > 0
-													? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-													: undefined
-										})}
-									aria-label="Max Tokens"
-								/>
-								<button
-									class="btn btn-danger btn-small"
-									onclick={() => removeEditorModel(index)}
-									aria-label="移除该模型">✕</button
-								>
-							</div>
-						{/each}
-						<div class="model-row" style="margin-top: 6px;">
-							<ModelCombobox
-								value={model}
-								candidates={modelCandidates}
-								inputId="svc-model"
-								placeholder="输入/选择模型后加入"
-								onChange={onModelChange}
+				{/if}
+				<div class="field">
+					<span class="muted" style="display: block; margin-bottom: 4px;">
+						模型列表（一个服务商下可多选多个模型）
+					</span>
+					{#each editorModels as entry, index (index)}
+						<div class="model-row">
+							<input
+								class="input"
+								value={entry.model}
+								placeholder="模型 id"
+								onchange={(event) =>
+									updateEditorModel(index, {
+										model: (event.currentTarget as HTMLInputElement).value
+									})}
+								aria-label="模型 id"
 							/>
 							<input
 								class="input"
 								style="width: 110px;"
 								type="number"
-								value={modelContextWindow ?? ''}
+								value={entry.contextWindow ?? ''}
 								placeholder="窗口"
 								onchange={(event) =>
-									(modelContextWindow =
-										Number((event.currentTarget as HTMLInputElement).value) > 0
-											? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-											: undefined)}
+									updateEditorModel(index, {
+										contextWindow:
+											Number((event.currentTarget as HTMLInputElement).value) > 0
+												? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+												: undefined
+									})}
 								aria-label="上下文窗口"
 							/>
 							<input
 								class="input"
 								style="width: 90px;"
 								type="number"
-								value={serviceMaxTokens ?? ''}
+								value={entry.maxTokens ?? ''}
 								placeholder="Max"
 								onchange={(event) =>
-									(serviceMaxTokens =
-										Number((event.currentTarget as HTMLInputElement).value) > 0
-											? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-											: undefined)}
+									updateEditorModel(index, {
+										maxTokens:
+											Number((event.currentTarget as HTMLInputElement).value) > 0
+												? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+												: undefined
+									})}
 								aria-label="Max Tokens"
 							/>
-							<button class="btn btn-small" onclick={addEditorModel} disabled={model.trim() === ''}>
-								＋ 加入
-							</button>
+							<button
+								class="btn btn-danger btn-small"
+								onclick={() => removeEditorModel(index)}
+								aria-label="移除该模型">✕</button
+							>
 						</div>
+					{/each}
+					<div class="model-row" style="margin-top: 6px;">
+						<ModelCombobox
+							value={model}
+							candidates={modelCandidates}
+							inputId="svc-model"
+							placeholder="输入/选择模型后加入"
+							onChange={onModelChange}
+						/>
+						<input
+							class="input"
+							style="width: 110px;"
+							type="number"
+							value={modelContextWindow ?? ''}
+							placeholder="窗口"
+							onchange={(event) =>
+								(modelContextWindow =
+									Number((event.currentTarget as HTMLInputElement).value) > 0
+										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+										: undefined)}
+							aria-label="上下文窗口"
+						/>
+						<input
+							class="input"
+							style="width: 90px;"
+							type="number"
+							value={serviceMaxTokens ?? ''}
+							placeholder="Max"
+							onchange={(event) =>
+								(serviceMaxTokens =
+									Number((event.currentTarget as HTMLInputElement).value) > 0
+										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+										: undefined)}
+							aria-label="Max Tokens"
+						/>
+						<button class="btn btn-small" onclick={addEditorModel} disabled={model.trim() === ''}>
+							＋ 加入
+						</button>
 					</div>
+				</div>
+				{#if presetSelection !== 'demo'}
 					<div class="row-actions" style="margin-bottom: 10px;">
 						<button
 							class="btn btn-small"
