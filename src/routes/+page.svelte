@@ -67,6 +67,7 @@
 	import type { SyncSettings } from '../lib/sync/types';
 	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
 	import { checkForUpdate, isTauri } from '../lib/platform/updater';
+	import { createHistoryBackSync } from '../lib/platform/back-nav';
 	import { rebuildFromNodes } from '../lib/core/snapshot';
 	import { createInitialState } from '../lib/core/state';
 	import type { SearchResult } from '../lib/search/types';
@@ -307,6 +308,73 @@
 	$effect(() => {
 		applyThemeToDocument(settings.theme);
 	});
+
+	/**
+	 * 返回键还能退掉的层数：必须与 popMobileBackLevel 的弹出顺序一一对应，
+	 * 数字对不上会让 Android 返回键多退或少退一层。
+	 */
+	const mobileBackDepth = $derived.by(() => {
+		if (!isMobile) {
+			return 0;
+		}
+		let depth = 0;
+		if (entered) {
+			// 工作区聊天沉浸页是一层；「⋯」里打开的功能全屏页再叠一层。
+			depth = tab === 'chat' ? 1 : 2;
+		} else if (mobileHomeTab === 'settings') {
+			depth = 1;
+		} else if (mobileHomeTab === 'settings-detail') {
+			depth = 2;
+		}
+		// 浮层最后叠加，因此也最先被返回键关掉。
+		if (mobileStateOpen) {
+			depth += 1;
+		}
+		if (mobileFeatureOpen) {
+			depth += 1;
+		}
+		if (workspaceModalOpen) {
+			depth += 1;
+		}
+		if (avatarEditing !== null) {
+			depth += 1;
+		}
+		return depth;
+	});
+
+	/** 返回键退一层：从最上面的浮层往下，最后才回「对话」标签 / 退出工作区。 */
+	function popMobileBackLevel(): void {
+		if (avatarEditing !== null) {
+			avatarEditing = null;
+		} else if (workspaceModalOpen) {
+			workspaceModalOpen = false;
+		} else if (mobileFeatureOpen) {
+			mobileFeatureOpen = false;
+		} else if (mobileStateOpen) {
+			mobileStateOpen = false;
+		} else if (entered) {
+			if (tab === 'chat') {
+				handleExitToLanding();
+			} else {
+				tab = 'chat';
+			}
+		} else if (mobileHomeTab === 'settings-detail') {
+			mobileHomeTab = 'settings';
+		} else if (mobileHomeTab === 'settings') {
+			mobileHomeTab = 'chat';
+		}
+	}
+
+	// Android 硬件返回键走 Tauri 的 webView.goBack()，因此把层级镜像到 history；
+	// 退到根界面时 history 见底，恢复默认的「退出到桌面」。
+	const backSync = createHistoryBackSync({
+		depth: () => mobileBackDepth,
+		pop: popMobileBackLevel
+	});
+	$effect(() => {
+		backSync.sync();
+	});
+	onMount(() => backSync.destroy);
 
 	/** 启动远程同步：读取设置、开始轮询并订阅本地变化。 */
 	function startSync(): void {

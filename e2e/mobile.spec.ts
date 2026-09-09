@@ -69,3 +69,40 @@ test('移动端：会话列表首屏 + 底部标签栏 + 聊天沉浸页 + 功�
 	);
 	expect(overflow).toBe(false);
 });
+
+// Android 硬件返回键在 Tauri 里等价于 webView.goBack()，所以浏览器后退能覆盖同一条路径：
+// 逐层退出设置详情 / 功能页 / 工作区，而不是一路退到桌面。
+test('移动端：返回键逐层回退（设置详情 → 设置 → 会话列表，工作区 → 功能页 → 对话）', async ({
+	page
+}) => {
+	await page.goto('/');
+	const listItem = page.locator('.ws-home-item').filter({ hasText: '默认工作区' });
+	await expect(listItem).toBeVisible();
+
+	// 首屏：设置 tab → 全屏设置详情，返回键逐层退回会话列表。
+	await page.locator('.mobile-home-tab', { hasText: '设置' }).click();
+	await expect(page.locator('.mobile-settings-title')).toBeVisible();
+	await page.locator('.mobile-settings-item').first().click();
+	await expect(page.getByText('模型服务管理')).toBeVisible();
+
+	await page.goBack();
+	await expect(page.locator('.mobile-settings-title')).toBeVisible();
+	await page.goBack();
+	await expect(listItem).toBeVisible();
+
+	// 进入工作区 → 「⋯」里的功能全屏页：返回键先回对话，再回会话列表。
+	await listItem.locator('.ws-home-main').click();
+	await expect(page.getByPlaceholder(/输入消息/)).toBeVisible();
+	await page.getByRole('button', { name: '功能菜单' }).click();
+	await page
+		.getByRole('dialog', { name: '功能菜单' })
+		.getByRole('button', { name: '状态' })
+		.click();
+	await expect(page.getByRole('heading', { name: '角色状态编辑器' })).toBeVisible();
+
+	await page.goBack();
+	await expect(page.getByPlaceholder(/输入消息/)).toBeVisible();
+
+	await page.goBack();
+	await expect(listItem).toBeVisible();
+});
