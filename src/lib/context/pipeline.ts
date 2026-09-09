@@ -15,15 +15,27 @@ import { findWorldInfoHits, type WorldInfoHit } from './world-info';
 /** 单次请求默认注入的长期记忆条数上限。 */
 export const DEFAULT_MEMORY_INJECT_LIMIT = 5;
 
+/** 可组合的角色扮演提示词段落。 */
+export interface PromptSections {
+	/** 系统提示词：回复规则 / 破甲词；留空时回退到内置默认模板。 */
+	systemPrompt?: string | null;
+	/** 人物提示词：AI 扮演的角色身份与性格。 */
+	characterPrompt?: string | null;
+	/** 用户提示词：AI 对用户的认知。 */
+	userPrompt?: string | null;
+	/** 世界观提示词：故事发生的世界设定。 */
+	worldPrompt?: string | null;
+	/** 风格提示词：期望的文风（如鲁迅、余华的风格）。 */
+	stylePrompt?: string | null;
+}
+
 /** 上下文管道的输入：当前状态 + 最近对话 + 世界信息。 */
-export interface ContextPipelineInput {
+export interface ContextPipelineInput extends PromptSections {
 	state: CharacterState;
 	conversation: ReadonlyArray<ChatMessageView>;
 	worldInfo: ReadonlyArray<WorldInfoEntry>;
 	/** 角色名（默认取 attributes.name）。 */
 	characterName?: string;
-	/** 自定义系统提示（默认使用内置角色扮演模板）。 */
-	systemPrompt?: string;
 	/** 历史压缩参数。 */
 	historyOptions?: HistoryOptions;
 	/** 允许 AI 调用状态工具时，在系统提示中注入工具使用说明。 */
@@ -62,6 +74,26 @@ export function defaultSystemPrompt(name: string): string {
 		`- 下列【当前状态】是事实约束：穿着、地点、时间、日程与属性不得违背。\n` +
 		`- 使用自然、简短的口语，符合角色年龄与性格。`
 	);
+}
+
+/**
+ * 组装五段提示词为系统提示正文：
+ * 系统提示词（回复规则）打底，依次追加人物 / 用户认知 / 世界观 / 风格。
+ * 系统提示词留空时回退到 defaultSystemPrompt；其余字段留空不注入。
+ */
+export function buildBaseSystemPrompt(name: string, prompts: PromptSections = {}): string {
+	const base = prompts.systemPrompt?.trim() || defaultSystemPrompt(name);
+	const sections: Array<{ title: string; content: string }> = [
+		{ title: '【人物提示词】', content: prompts.characterPrompt ?? '' },
+		{ title: '【用户提示词】', content: prompts.userPrompt ?? '' },
+		{ title: '【世界观提示词】', content: prompts.worldPrompt ?? '' },
+		{ title: '【风格提示词】', content: prompts.stylePrompt ?? '' }
+	];
+	const custom = sections
+		.map((section) => ({ ...section, content: section.content.trim() }))
+		.filter((section) => section.content !== '')
+		.map((section) => section.title + '\n' + section.content);
+	return custom.length > 0 ? [base, ...custom].join('\n\n') : base;
 }
 
 /** 状态工具使用说明：让模型知道它可以主动调用工具更新剧情状态。 */
@@ -183,7 +215,9 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 		input.memoryLimit ?? DEFAULT_MEMORY_INJECT_LIMIT
 	);
 	const searchResults = [...(input.searchResults ?? [])];
-	const lastUserMessage = [...contextConversation].reverse().find((message) => message.role === 'user');
+	const lastUserMessage = [...contextConversation]
+		.reverse()
+		.find((message) => message.role === 'user');
 
 	const worldInfoBlock =
 		worldInfoHits.length > 0
@@ -195,20 +229,24 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 					.map((entry) => `- [${entry.category}] ${entry.content}`)
 					.join('\n')}\n以上是角色过往经历中值得记住的事实，剧情需要时自然引用，不要生硬复述。`
 			: '';
-	const basePrompt = input.systemPrompt?.trim() || defaultSystemPrompt(name);
+	const basePrompt = buildBaseSystemPrompt(name, {
+		systemPrompt: input.systemPrompt,
+		characterPrompt: input.characterPrompt,
+		userPrompt: input.userPrompt,
+		worldPrompt: input.worldPrompt,
+		stylePrompt: input.stylePrompt
+	});
 	const searchBlock =
 		searchResults.length > 0
 			? `\n【网络搜索结果】\n${searchResults
 					.map((result) => `- ${result.title}：${result.snippet}（${result.url}）`)
 					.join('\n')}`
-		: '';
+			: '';
 	const toolBlock = input.enableStateTools === true ? `\n\n${buildToolGuidance()}` : '';
 	// 每轮工具提醒默认附在最后一条用户消息里（对齐 opencode：提醒紧贴本次发言，
 	// 模型读到最新输入时注意力最强）；仅当上下文没有用户消息时回退到系统提示。
 	const reminderText =
-		input.enableStateTools === true
-			? buildPerTurnToolReminder(lastUserMessage?.content)
-			: '';
+		input.enableStateTools === true ? buildPerTurnToolReminder(lastUserMessage?.content) : '';
 	const turnReminderBlock =
 		reminderText !== '' && lastUserMessage === undefined ? `\n\n${reminderText}` : '';
 	const feedbackBlock =
@@ -271,49 +309,55 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 
 /**
  * 把一条分段 assistant 消息展开为发送给 LLM 的消息序列：
- * - 相邻的思考 + 正文合并为一条 assistant（思考挂 reasoning，序列化时回传）；
- * - 工具调用段还原为系统反馈消息（格式与旧落库一致），供模型感知状态已更新。
+ * - 工具调用段还原为系统反馈消息（格式与旧落库一致），供模型感知状态已更新；
+ * - 最后一次工具调用之后的正文段作为最终 assistant 正文（思考段合并挂 reasoning）；
+ * - 工具调用之前的中间叙事（「假正文」）不发送：它与最终正文高度相似，
+ *   以 assistant「自己的话」回传会让模型学到重复表达、引发复述/车轱辘
+ *   （repetition degeneration）；状态变更事实已由工具反馈承载。
  * 世界时间标注与原实现一致：跟随消息注入。
  */
 function expandSegmentedMessage(message: ChatMessageView): ChatMessage[] {
 	const result: ChatMessage[] = [];
-	let text = '';
-	let reasoning: string | undefined;
+	const segments = message.segments ?? [];
 	const worldTime = message.worldTime;
-	/** 把当前累积的「思考 + 正文」作为一条 assistant 消息落盘。 */
-	function flushAssistant(): void {
-		if (text.trim() === '' && reasoning === undefined) {
-			return;
+	let lastToolIndex = -1;
+	segments.forEach((segment, index) => {
+		if (segment.kind === 'tool') {
+			lastToolIndex = index;
 		}
-		result.push({
-			role: 'assistant',
-			content: text,
-			...(worldTime !== undefined ? { worldTime } : {}),
-			...(reasoning !== undefined ? { reasoning } : {})
-		});
-		text = '';
-		reasoning = undefined;
-	}
-	for (const segment of message.segments ?? []) {
+	});
+	const reasoningParts: string[] = [];
+	const finalTexts: string[] = [];
+	segments.forEach((segment, index) => {
 		if (segment.kind === 'thinking') {
-			// 思考段意味着新一轮「思考 + 正文」的开始（interleaved thinking 场景
-			// 会交替出现 思考→正文→思考→正文）：先把上一轮 flush，避免内容被覆盖。
-			// 仅当上一轮已有正文时 flush，连续思考段（无正文）不产生空 assistant。
-			if (text.trim() !== '') {
-				flushAssistant();
-			}
-			reasoning = segment.content;
-		} else if (segment.kind === 'text') {
-			text = segment.content;
+			reasoningParts.push(segment.content);
 		} else if (segment.kind === 'tool') {
-			flushAssistant();
 			result.push({
 				role: 'system',
 				content: `【工具调用】${segment.toolName ?? ''}：${segment.content}`,
 				...(worldTime !== undefined ? { worldTime } : {})
 			});
+		} else if (index > lastToolIndex && segment.content.trim() !== '') {
+			finalTexts.push(segment.content);
 		}
+	});
+	let text = finalTexts.join('\n');
+	// 消息以工具段收尾（如状态确认后追加的工具反馈）时拆不出最终正文：
+	// 回退保留全部正文，任何情况不丢内容。
+	if (text.trim() === '' && lastToolIndex >= 0) {
+		text = segments
+			.filter((segment) => segment.kind === 'text' && segment.content.trim() !== '')
+			.map((segment) => segment.content)
+			.join('\n');
 	}
-	flushAssistant();
+	const reasoning = reasoningParts.map((part) => part.trim()).filter((part) => part !== '');
+	if (text.trim() !== '' || reasoning.length > 0) {
+		result.push({
+			role: 'assistant',
+			content: text,
+			...(worldTime !== undefined ? { worldTime } : {}),
+			...(reasoning.length > 0 ? { reasoning: reasoning.join('\n\n') } : {})
+		});
+	}
 	return result;
 }

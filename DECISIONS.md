@@ -1064,9 +1064,9 @@ conversation 重建会让 `message` prop 变化并重跑 `$effect`，把用户�
 **选择**：
 
 1. 新增 `theme/theme.ts`：`ThemeConfig`（预设 id + 颜色覆盖 + 背景图 data URL
-   + 透明度）与内置预设（默认深色、Claude 暖奶油、Discord 深靛蓝、
-   The Verge 酸薄荷，灵感来自 `tmp/` 下的设计分析）；`resolveThemeCss` 纯函数
-   计算 CSS 变量映射，`applyThemeToDocument` 写入 `:root`。
+   - 透明度）与内置预设（默认深色、Claude 暖奶油、Discord 深靛蓝、
+     The Verge 酸薄荷，灵感来自 `tmp/` 下的设计分析）；`resolveThemeCss` 纯函数
+     计算 CSS 变量映射，`applyThemeToDocument` 写入 `:root`。
 2. 设置页新增「主题」卡片：预设下拉、背景图选择/移除、透明度滑杆、15 个颜色
    变量（取色器 + 文本输入）；**修改即时生效并自动保存**（与其它设置走
    「保存设置」不同，主题需要实时预览）。
@@ -1146,7 +1146,7 @@ Mem0 = LLM 提取 + 检索 + 合并；Letta/MemGPT = 分层记忆（核心常驻
 **选择**：
 
 1. **存储**：IndexedDB 新表 `memories`，条目 = 事实正文 + 分类 + 触发词 + 重要度(1-5)
-   + 置顶 + 来源 + 使用统计。
+   - 置顶 + 来源 + 使用统计。
 2. **写入**：LLM 提取（jsonMode，输出候选数组）→ 面板勾选导入（去重：归一化 + 包含
    判定）；可选「回复后自动提取」，重复自动跳过。
 3. **召回**：纯函数 `recallMemories`——置顶必注入、非置顶仅关键词命中才注入，
@@ -1221,6 +1221,7 @@ tool_calls」：流式输出表现为思考→正文→停顿→思考→正文�
 调用已生效，宿主既不执行也不反馈，AI 便继续输出。
 
 **选择**：
+
 1. `parseStreamedResult` 记录 `segments`（thinking/text 交替顺序），`LlmChatResult`
    与 `generateReply` 携带 `replySegments`，气泡按序分段展示；
 2. 收到 tool_calls delta 但函数名为空/参数残缺时标记 `malformedToolCall`，
@@ -1246,6 +1247,7 @@ DeepSeek 跳过 tool_choice）未被回退，问题出在解析层。
 
 **选择**：参照 opencode / Chatbox 的做法，双层注入，且都不依赖「等模型漏调后再
 兜底」：
+
 1. 常驻「工具使用」导言强化为工具使用策略（Tool usage policy）：明确「先发出
    tool_calls、收到工具反馈后再写正文」「允许一次回复并行多个工具调用」「未调用
    工具 = 状态未同步、正文状态描述将被视为剧情事实错误」；
@@ -1272,6 +1274,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 `{"memories": [...]}`，`parseExtractedMemories` 判定「不是数组」直接抛错。
 
 **选择**：
+
 1. 提示词改为要求输出 `{"memories": [...]}`，与 `json_object` 模式语义一致；
 2. 解析器兼容三种形态：裸数组、对象包装（memories / items / results / data 键）、
    散落在叙述文本中的 JSON 块（新增平衡括号扫描，容忍被 maxTokens 截断的候选块）；
@@ -1294,6 +1297,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 `ChatMessageView.content`（分段消息保存时已合并为纯正文）。
 
 **选择**：
+
 1. 报错信息携带模型原始返回（截断 160 字符），把「猜返回形态」变成「看返回形态」；
 2. 解析器再放宽：对象任意数组值包装（如 `{"result": [...]}`）兼容，空对象 `{}`
    视为无新记忆而不是报错；
@@ -1330,6 +1334,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 请求；且提取提示词每次都注入全部既有记忆，提示词体积随记忆库增长无限膨胀。
 
 **选择**（对齐主流 agent 的做法）：
+
 1. **防抖批处理**：自动提取改为对话静默 45 秒后运行一次，期间新消息会重置计时器
    （LangMem `ReflectionExecutor` 同款延迟处理：等待对话平息、取消冗余任务）；
 2. **无变化跳过**：记录最近一次成功提取时已覆盖的非系统消息数，没有新对话就不再
@@ -1369,6 +1374,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 
 **问题**：流式输出时思考正常实时显示，完成后落库的消息里思考段消失。排查发现
 两条丢失路径：
+
 1. 兜底/重试（只思考无正文、思考提到工具名补调、时间描述补调、残缺 tool_calls）
    会用新请求的结果**替换** `result`，替换结果的 `segments` 通常只剩正文；
    `thinking` 字段（`preferThinking` 保留首轮思考）只在 `replySegments` 为空时
@@ -1376,6 +1382,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 2. 重试结果自带新思考时，首轮思考会被新思考顶掉（流式看过 X、落库只剩 Y）。
 
 **选择**：
+
 1. `chat-service` 返回前新增 `ensureFirstThinkingInSegments`：把本回合首次响应
    的思考并入最终分段（分段已有相同思考则不重复插入），两条 return 路径统一走；
 2. `+page.svelte` 落库时做安全网：`replySegments` 完全不含思考段而最终 `thinking`
@@ -1398,6 +1405,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 中文意图措辞全部漏检；`retryTimeClaim` 也只扫描正文、不扫描思考。
 
 **选择**：
+
 1. 新增 `TOOL_INTENT_PATTERNS`：按工具分组，同时匹配英文工具名与中文意图措辞
    （推进时间/时间流逝/时段变化 → advance_time；去/回/离开+地点 → goto_location；
    换上/脱下/穿好等 → set_outfit；好感/信任/心情变化 → set_attribute），
@@ -1444,6 +1452,7 @@ JSON 数组」。提取请求同时设置了 `response_format: json_object` 并�
 正文，浪费 token 且体验差。
 
 **选择**：
+
 1. 新增 `detectThinkingLoop`：把思考按句末标点切分为句段，两种重复信号命中即
    判定循环——同一句段连续出现 ≥3 次，或长度 1-3 的句段序列完整重复 ≥3 轮
    （覆盖用户给出的循环样例）；
@@ -1464,6 +1473,7 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 
 **选择**：在 ChatService 新增 `callWithLoopIntercept` 看门狗，包住工具路径与
 纯文本路径的主 LLM 调用：
+
 1. 为每次请求创建内部 AbortController（与外部取消信号联动）；
 2. `onThinkingDelta` 包装后累计思考文本，实时跑 `detectThinkingLoop`——命中即
    `abort()` 中断当前请求，把「停止重复、尽快输出正文」的 `REPETITION_NUDGE`
@@ -1487,6 +1497,7 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 对应库内条目。
 
 **选择**：
+
 1. 新增 `resolveLocationPlace` / `normalizeLocationState`（core/state）：优先按
    id 精确匹配；id 对不上时回退按「分类 + 名称」匹配，命中则回填库内条目的
    id/分类/名称/描述；无匹配（真自定义地点）原样保留；
@@ -1510,14 +1521,15 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 调用」而被迫调用 goto_location 确认地点，产生误调用。
 
 **选择**：把三条针对性提醒改为条件措辞：
+
 - 时间：「本次发言**可能**涉及时间流逝或时段变化：如果剧情确实发生了时间流逝，
   请调用 advance_time …」；
 - 地点：「本次发言**可能**涉及地点变化：如果剧情确实发生了地点变化，请调用
   goto_location …」；
 - 穿着：「本次发言**可能**涉及穿着变化：如果剧情确实发生了穿着变化，请调用
   set_outfit …」；
-通用提醒补一句「关键词命中只是提醒你复核，不代表状态一定变化」，让模型在判断
-无需变更时可以放心不调用。
+  通用提醒补一句「关键词命中只是提醒你复核，不代表状态一定变化」，让模型在判断
+  无需变更时可以放心不调用。
 
 **理由**：关键词命中是启发式信号（仅代表「可能」），不该被模型当成硬性指令；
 把「复核职责」交还模型，能同时降低误调用与漏调用——真发生变化时模型仍会调用，
@@ -1527,6 +1539,9 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 但思考意图检测与 LLM 状态确认仍在，整体漏调用风险可控。
 
 ## D99：无浏览器 CORS 的服务商——Vite 开发代理 /llm-proxy
+
+> 部分被 D112 取代：`/llm-proxy` 前缀的思路保留，但「静态 proxy 只指向 opencode.ai」
+> 与「预设 baseUrl 写成相对路径」已由 `useProxy` 字段 + 按 host 动态转发的中间件替代。
 
 **问题**：新增的 OpenCode GO/Zen 预设用户填入正确 Key 仍报「Failed to fetch」。
 实测确认 opencode.ai 的 API 不支持浏览器 CORS：对 `/chat/completions` 的
@@ -1551,3 +1566,376 @@ AI 还在流式输出思考时，一出现重复循环就应中断，而不是�
 `/llm-proxy` 无对应后端，需自建同路径反向代理或改回绝对端点（notes 已注明）；
 代理只针对 opencode.ai 一个域名，若未来接入其它无 CORS 服务商需在 vite 配置里
 扩展目标。
+
+## D100：开源协议声明——静态数据模块 + 弹窗展示
+
+**问题**：设置页需要向用户展示 CosBox 依赖与参考过的全部开源项目及许可证；
+若直接在设置面板内平铺长列表，会与「保存设置」等核心操作争夺空间。
+
+**选择**：
+
+1. 新增 `src/lib/legal/credits.ts` 集中维护声明数据，按「直接依赖 /
+   参考·调研的开源项目 / 非开源设计参考」分组，许可证逐项联网核对上游仓库；
+2. 设置页仅保留「查看开源协议声明」按钮，点击后复用全局
+   `prompt-backdrop / prompt-modal` 弹窗展示完整列表（支持遮罩点击关闭）。
+
+**理由**：数据与 UI 解耦，后续增补项目只改数据文件；弹窗与项目既有的
+调试提示词弹窗交互一致，学习成本为零；声明属于低频查阅内容，不应常驻版面。
+
+**代价**：声明入口多一次点击；opencode-mem 等未标注许可证的调研项目
+只能如实标注「未标注」，无法给出 SPDX 标识。
+
+## D101：AI 气泡双层布局（工作过程区 + 最终答案）与重试流式隔离
+
+**问题**：流式阶段所有思考/正文分别拼进单个字符串，交错输出
+（思考→正文→思考→正文）被压成「一段思考 + 一段正文」，后续内容在原位追加；
+补调/重试的输出也流进同一草稿，被丢弃时造成「流式看到、完成后被吞」；
+工具执行无实时反馈，失败样式缺失。
+
+**选择**：
+
+1. 气泡改为双层：可折叠「工作过程区」（最后一次工具调用及之前的思考/工具/中间叙事）
+   - 下方最终答案（最后一次工具调用之后的正文）；无工具段时思考归过程区、正文归最终答案；
+     拆不出最终正文时回退「全部正文都是最终答案」，不丢内容。
+2. 流式状态从 `streamingDraft + streamingThinking` 两字符串改为
+   `streamingSegments: MessageSegment[]`，按流中实际顺序分段（同类型续接、异类型新开段）。
+3. 新增 `onToolStart/onToolResult` 事件：工具执行实时显示「调用中…」与结果，
+   失败输出以 `status: 'error'` 红色样式展示；`MessageSegment` 增加 `toolArgs/status`。
+4. 所有补调/重试（thinking-only、循环、planned-tool、time-claim、malformed、plain）
+   改为非流式且不接入草稿回调——可能被丢弃的结果绝不流式展示；
+   思考循环中断重启时经 `onRestart` 清空草稿，保持流式与落库一致。
+5. 工具 schema 去矛盾：`set_outfit` 去掉英文 enum（与中文别名冲突）、required 改为
+   `['item']`（与「slot 可省略」一致）；`goto_location` required 改为 `['name']`；
+   描述前置关键约束与示例；流式 tool_calls 兼容代理以对象下发 arguments。
+
+**理由**：对齐主流 agent（Claude / ChatGPT）的「活动流 + 最终答案」交互；
+流式展示的内容与最终落库严格一致，杜绝观感上的吞句；schema 与描述不再自相矛盾，
+降低模型构造非法参数的概率（tau-bench：参数构造错误是工具调用首要失败模式）。
+
+**代价**：完成态消息的工作过程区默认收起，查看工具/叙事需点一下展开；
+重试结果在完成后一次性出现（不再逐字流式）；思考循环中断会丢弃已展示的草稿
+（与落库一致，属有意为之）。
+
+## D102：假正文不进上下文 + 文本形式工具调用双通道（护栏 + 开关）+ 后处理可见 + 监控 tab
+
+**问题**：① 模型在思考里写「让我调用 goto_location」却只输出正文不发出
+tool_calls，补调重试与状态确认全部静默失败后直接结束（DeepSeek 拒绝 tool_choice，
+补调第二档与第一档完全相同等于空转）；② 工具调用前的中间叙事（「假正文」）被当作
+assistant「自己的话」发回上下文，与最终正文高度相似，诱发复述/车轱辘
+（repetition degeneration）；③ 正文输出后的补调/判断/确认全程无反馈，用户看到黑盒停顿；
+④ 没有手段观测兜底通道是否被模型滥用。
+
+**选择**：
+
+1. 重写 `expandSegmentedMessage`：只发送工具段（system 反馈）与最后一个工具段之后的
+   正文段（最终 assistant，思考段合并挂 reasoning）；假正文一律不发送；
+   以工具段收尾拆不出最终正文时回退保留全部正文，不丢内容。
+2. 双通道：结构化 tool_calls 缺失时，补调重试（planned/time-claim/malformed）与状态确认
+   解析文本形式调用（复用 `extractTextToolCalls`，`TEXT_TOOL_FALLBACK_HINT` 引导语法）。
+   护栏一（提示词物理隔离）：兜底提示只出现在补调/确认提示词，主流程系统提示与每轮
+   提醒绝不提及文本形式；护栏二（代码级优先级压制）：结构化调用永远优先，仅当
+   `toolCalls.length === 0` 才降级解析，两者并存只认 JSON；采纳后用
+   `stripTextToolCalls` 剔除正文里的调用语法。
+3. 补调第二档差异化：追加 `FORCE_TOOL_NUDGE` 强提示，DeepSeek 拒绝 tool_choice
+   退化为非流式时不再与第一档重复。
+4. 后处理可见：`onPhase` 阶段回调（补调/重新请求正文/检查状态/同步状态）→
+   流式气泡下方状态条（正文已输出后仍可见）；`onToolStart/onToolResult` 透传到
+   confirmation，确认阶段执行的在流式气泡实时可见。
+5. 监控：`metrics.svelte.ts`（计数器 + 每轮样本 + 事件流水，KV 防抖持久化、滚动窗口）
+   - 侧边「监控」tab（无依赖 SVG spline 折线图：Token 消耗/耗时/工具与兜底，
+     计数卡，最近事件流水，可清空）。
+6. 开关：设置 → AI 行为新增「文本形式工具调用双通道」（默认勾选，随
+   allowAiStateTools 禁用）；关闭后主循环/补调/确认一律只认结构化 tool_calls，
+   供监控指标飙升时强制模型只走 JSON。
+
+**理由**：「是否真的发生了移动」的剧情判断完全留给 LLM（它理解「真想去海滩」
+不等于移动），宿主只做确定性解析与执行——误判面从「正则猜剧情」收窄到「解析一行
+明确调用语法」；否决了宿主按关键词推断 goto_location 的方案（愿望/回忆会被误判为
+实际移动）；兜底通道被滥用时可通过监控观测并一键关闭。
+
+**代价**：上下文丢失假正文里的非状态叙事细节（状态事实由工具反馈承载）；
+侧边导航多一个入口；监控数据只存本地（滚动窗口上限 300 轮/500 事件）。
+
+## D103：Tauri 2 双端打包——共享 Web 层 + 每平台薄壳
+
+**背景**：CosBox 需打包为 Windows 与 Android 应用。Web 层为纯静态 SPA
+（adapter-static，SSR 关闭），所有网络请求均为浏览器侧 fetch（LLM / 搜索 /
+同步服务器），无后端渲染，天然适配 WebView 封装。
+
+**选择**：
+
+1. 双端统一 Tauri 2：Windows 用系统 WebView2，Android 用系统 WebView；
+   不引入 Electron（包体大）、不引入 Capacitor（WebView 层之外无收益）、
+   不原生重写、不引入 SSR / 后端渲染。
+2. 共享 Web 层唯一代码库，`src/lib/platform/` 适配层两个端口：
+   - `WorkspaceStore`：Web 保持 Dexie / IndexedDB；打包版迁移
+     `tauri-plugin-sql`（SQLite）——Android WebView 的 IndexedDB 存在清数据 /
+     更新丢失风险。
+   - `FilePort`：Web 保留 `download.ts`（Blob 下载）；Windows 用
+     `tauri-plugin-dialog`；Android 用 SAF / share（WebView Blob 下载体验差）。
+3. LLM 请求出口 `llmFetch` 注入：Web 端原生 fetch（`/llm-proxy` 相对路径由
+   Vite 代理转发，见 D99）；打包版用 `tauri-plugin-http`（Rust reqwest 发出，
+   绕开浏览器 CORS），把 `/llm-proxy/...` 前缀还原为
+   `https://opencode.ai/...`，其余绝对端点原样透传；流式 / Abort 需真机回归。
+4. 调试设备：MuMu 12 模拟器（adb connect 127.0.0.1:16384），构建 x86_64
+   变体（Tauri CLI 对 armDebug split APK 在 x86_64 设备有已知问题 #14168）；
+   发布以 arm64 真机为主。MuMu 属第三方模拟器，Tauri 设备发现偏向官方 AVD，
+   必要时走 `tauri android build` + `adb install` 手动路径。
+5. Node 同步服务器不进安装包（独立部署；如未来要求内置，走 Rust 重写或
+   sidecar）。
+
+**理由**：Tauri 安装包小（Windows 5–15 MB、Android 10–20 MB，WebView 系统
+自带），与项目零依赖理念一致；单代码库维护，业务逻辑不分裂；plugin-http
+顺带解决 Android 局域网 http 端点（cleartext 仅 debug 放行）与 WebView
+CORS 双重问题。
+
+**代价**：Android WebView IndexedDB 持久性风险需 SQLite 迁移消化；CORS 处理
+多一层注入抽象；`/llm-proxy` 在打包版无 Vite 后端，静态部署与打包版都依赖
+同路径反向代理或 plugin-http 还原；首发仅 Android / Windows，iOS 需另评估
+（Tauri 支持但本机非 macOS）。
+
+## D104：多工作区存储——单库加 workspaceId 分区列，而非每工作区一个数据库
+
+**背景**：多工作区要求每个工作区（快照版本图 / 世界书 / 长期记忆 / 角色档案 /
+开发者开关 / 世界配置覆盖）相互隔离，可创建 / 切换 / 重命名 / 复制 / 删除。
+
+**选择**：
+
+1. 保留唯一 Dexie 库，`snapshots / worldInfo / memories` 三表增加 `workspaceId`
+   列与索引（schema v3，存量行经 upgrade 统一盖章 `default` 工作区）；
+   仓储按构造时注入的 `WorkspaceScope`（可变 id 持有者）过滤读写。
+2. 工作区级 kv 键统一前缀 `ws:{id}:`（`lastHeadId`、`config.overrides`、
+   `settings.profile`、`settings.developer`、`sync.lastUpdatedAt`、
+   `context.usage`），由 `createScopedKv` 包装；应用级键
+   （`settings.llm/sync/theme`、`metrics.v1`、注册表）保持裸键。
+3. 复制 / 导入为新工作区时，三表全部 **remap id**（nanoid 新 id + 重写
+   parentId 引用），因为 id 是全局主键、跨工作区导入同一份数据会冲突。
+
+**理由**：仓储 / manager / stores 在启动时构造一次并被组件持有，换库需要整体
+重建依赖图；单库可原子执行导入 / 复制 / 删除的跨表操作；IndexedDB 配额按源
+（origin）计，多库不增加配额；迁移路径单一。切换工作区 = `scope.set()` +
+重载，仓储对象零重建。
+
+**代价**：所有表查询都必须走 repo 边界过滤，不能再直接 `db.table.toArray()`；
+快照 id 全局唯一（nanoid 冲突概率可忽略），复制 / 导入必须 remap。
+
+## D105：切换语义——runExclusive 串行化「停 → 换 → 重载」，busy 期间禁切
+
+**背景**：切换工作区若与 pending 的 update / addMessage 并发，新快照会盖上新
+工作区的 `workspaceId`（scope 已变），造成跨工作区脏写。
+
+**选择**：
+
+1. `CharacterManager.runExclusive(task)`：把外部编排任务排到变更队列之后，
+   保证切换发生时所有 pending 变更已按旧工作区落地。
+2. `WorkspaceService.switchTo`：在独占任务内依次 `registry.setCurrent` →
+   `scope.set` → `manager.resetInternal()`（清内存态 + 重新 init，空工作区自动
+   建根快照），随后 `registry.touch` + 宿主重载钩子（世界书 / 记忆 / 用量 /
+   工作区级设置重读、瞬态复位、同步重装）。
+3. UI 层：生成回复（busy）或切换进行中时禁用进入 / 切换 / 删除按钮，双保险。
+
+**理由**：与既有「一切变更串行化」原则一致；重置复用 `restoreWorkspace` 已有
+的重初始化路径，无新增快照语义；busy 禁切避免打断用户正在进行的对话。
+
+**代价**：切换期间（毫秒级）UI 不可交互；`runExclusive` 增加一个公共入口，
+调用方必须遵守「scope 在独占任务内切换」的约定。
+
+## D106：.cbox v2——补长期记忆与工作区名，向后兼容 v1
+
+**背景**：多工作区引入后，.cbox 需要携带长期记忆（既有缺口：记忆不随工作区
+导出/同步）与工作区名（导入为新工作区时取名）。
+
+**选择**：
+
+1. `WORKSPACE_VERSION = 2`：新增 `memories.json`，manifest 增加可选
+   `workspaceName`；`parseWorkspace` 同时接受 v1（缺失记忆按空数组、无名称）。
+2. `WorkspaceData` 增加 `memories` 与 `workspaceName?`，同步载荷随之携带记忆。
+3. 导入分两条路径：导入到当前工作区（整体恢复 + 记忆）与导入为新工作区
+   （remap id 落新分区并切换，名称自动去重）。
+
+**理由**：ZIP 容器零依赖读写已就绪，加一个文件即可；v1 文件继续可读保证老
+存档不失效；同步复用同一载荷结构，服务端无需理解内容。
+
+**代价**：老客户端解析 v2 文件会因版本号报错（需升级客户端）；解析需容忍
+`memories.json` 缺失（部分导出工具省略空数组）。
+
+## D107：初始界面——每次启动先进入工作区选择，不直接进对话
+
+**背景**：用户要求首次打开不直接进入 chat，而是先看到工作区选择界面（可选
+工作区、可新增）。
+
+**选择**：
+
+1. 每次启动 / 刷新都先渲染「工作区选择」初始界面（品牌 + 工作区列表 +
+   新建 + 导入 .cbox），点选进入后才初始化会话（manager / 世界书 / 记忆 /
+   用量）并启动同步。
+2. 应用内通过导航栏顶部切换器打开同款管理列表（弹层），并可「退出到工作区
+   选择」；退出时停止同步，重新进入同一工作区走完整切换流程。
+
+**理由**：满足「打开先选择」的预期，且把「首次启动初始化」与「进入工作区」
+解耦；初始界面复用同一套管理组件，无第二套 UI 逻辑。
+
+**代价**：每次启动多一次点击（未做「记住上次自动进入」；如需可在注册表加
+偏好项）；进入前不初始化会话，启动路径的时序由 `booted → entered` 两阶段管理。
+
+## D108：同步协议 v2——服务端按工作区分槽
+
+**背景**：多工作区后，服务端单槽会被不同工作区互相覆盖。
+
+**选择**：
+
+1. 路由 `GET/PUT /api/workspace/{workspaceId}`，`/api/workspace` 保留为
+   `default` 槽别名（旧客户端兼容）；`workspaceId` 白名单
+   `^[A-Za-z0-9_-]{1,64}$`，槽位上限 64。
+2. 存储改为 `data/workspaces.json`（`{ version: 2, slots: { <id>: { data,
+updatedAt } } }`），启动时把旧 `workspace.json` 单槽载荷迁移进 `default` 槽。
+3. 客户端：`SyncDeps` 增加 `getWorkspaceId()`，URL 拼工作区 id，
+   `sync.lastUpdatedAt` 走作用域 kv；切换工作区时 `reloadForWorkspace()`
+   （重读游标 + 立即拉取）；`server/index.mjs` 重构出 `createHandler()` 供
+   `node --test` 测试（`npm run test:server`）。
+
+**理由**：按 id 分槽语义正确且改动集中在路由与文件格式；default 别名 + 启动
+迁移保证升级平滑；沿用 Bearer 鉴权、限流、50MB 上限、原子写入。
+
+**代价**：旧客户端连新服务端只能同步 default 槽（行为等同旧版单槽）；
+数据文件格式升级后如需回退旧服务端需手动处理；槽位上限 64 为防御性限制。
+
+## D109：打包版 LLM 请求走 tauri-plugin-http——/llm-proxy 双态解析
+
+> 部分被 D112 取代：HTTP 插件这条路不变，但「还原时固定拼 `https://opencode.ai`」
+> 改成从前缀里的 `<host>` 段还原，任意标记了 `useProxy` 的服务商都可用。
+
+**问题**：OpenCode GO/Zen 预设在打包版（Windows / Android）上两种地址都失败：
+默认的 `/llm-proxy/...` 相对路径没有 Vite 代理后端，命中 SPA fallback 返回
+`index.html`，报「Unexpected token '<' ... is not valid JSON」；手动改成
+`https://opencode.ai/...` 则在 WebView 里被 CORS 预检拦截（D99 的服务器侧实测
+结论在 WebView 同样成立），报「Failed to fetch」。D99 的 Vite 代理只覆盖
+`npm run dev / preview`，对打包产物无效。
+
+**选择**：
+
+1. 接入 `tauri-plugin-http`（Rust 侧 reqwest，桌面 + Android 通用）：
+   `Cargo.toml` 加依赖、`lib.rs` 注册插件、capabilities 的 `default.json`
+   加 `http:default` 权限，scope 放行 `https://**` 与 `http://**`
+   （兼容自定义服务商与 Ollama / LiteLLM 本地网关）。
+2. 新增 `src/lib/platform/http.ts` 适配层（沿用 D103 的 platform 适配层思路）：
+   `platformFetch(url, init)` 在浏览器环境直接走原生 fetch（dev/preview 的
+   `/llm-proxy` 仍由 Vite 代理处理，行为与 D99 完全一致）；在 Tauri 环境动态
+   `import('@tauri-apps/plugin-http')` 用插件 fetch——请求由 Rust 发出，
+   不经过 WebView 的 CORS 检查——同时把 `/llm-proxy/` 前缀重写回
+   `https://opencode.ai/`（`resolveProxyUrl`）。
+3. 三个网络客户端统一换用 `platformFetch`：`openai-client`（对话 / 流式 /
+   工具循环）、`model-service`（获取模型列表 / 连接测试）、`search-client`
+   （Tavily / Serper / Brave，打包版同样受益）。同步服务（自建 server）不走
+   该通道（用户自管 CORS）。
+4. `vite.config.ts` 的 `optimizeDeps.include` 预打包 `@tauri-apps/plugin-http`，
+   避免 dev 首屏动态发现依赖触发整页重载。
+
+**理由**：预设的 `/llm-proxy` 语义升级为「逻辑前缀」——浏览器态由 Vite 代理
+兑现、打包态由适配层重写兑现，用户在两个形态下用同一个预设都开箱即用；
+插件 fetch 的 Response 兼容 `body.getReader()`（SSE 流式）与 AbortSignal
+（打断生成 / 流式思考看门狗），现有解析层零改动。非 Tauri 环境不加载任何
+插件代码，Web 版体积与行为不变。
+
+**代价**：capabilities 放行任意 http(s) 端点（等价于「应用可请求任意 LLM
+服务商」——这本来就是产品的核心用途，接受）；插件 fetch 的流式在部分平台
+可能退化为一次性返回（SSE 解析层已有降级路径兜底）；Android 明文 http 仍受
+`usesCleartextTraffic` 约束（release 关闭，仅限开发期用局域网网关）。
+
+## D110：提示词独立标签页——五段提示词取代设置页单一系统提示
+
+**背景**：用户要求把提示词从「设置」中拆出，按系统 / 人物 / 用户 / 世界观 /
+风格五段独立编辑；原设置页只有「角色名 + 系统提示」，无法承载角色与文风等
+分层需求。
+
+**选择**：
+
+1. `AppProfile` 沿用 `settings.profile` 持久化键扩展
+   `characterPrompt / userPrompt / worldPrompt / stylePrompt`（老存档加载时
+   经 `normalizeProfile` 补齐为 null），工作区导出 / 远程同步零协议改动。
+2. 新增「提示词」导航标签页（`PromptPanel`），五个 textarea 独立保存；
+   「设置 → 角色档案」只保留角色名，原系统提示输入框移除。
+3. `buildBaseSystemPrompt` 按 系统 → 人物 → 用户认知 → 世界观 → 风格 顺序
+   组装，空段不注入；系统段留空仍回退 `defaultSystemPrompt`（旧行为不变）。
+   真实发送与开发者输入预览共用同一组装入口。
+4. SillyTavern 角色卡导入只覆盖角色名与 `system_prompt` 对应的系统段，
+   保留其余四段；导出角色卡时若存在扩展段，则导出五段组装后的完整
+   `system_prompt`。
+
+**理由**：复用 `settings.profile` 让迁移、复制、导入导出与同步全部自动生效；
+五段顺序固定且可预期，空段不占上下文；系统段回退默认模板保证升级后旧存档
+与全新存档行为一致。
+
+**代价**：系统提示与人物/世界观提示可以并存，若用户同时填写而内容重复，需
+自行裁剪；提示词标签页为显式保存（离开页面不自动落盘），与设置页交互一致。
+
+## D111：移动端微信式会话列表 + 工作区头像自定义 + 桌面端切换器下拉
+
+**背景**：移动端原为汉堡抽屉 + 12 标签平铺，切工作区需先退出再进，且无会话
+概览；工作区只有文字名，多角色并行时难以区分；设置页模型编辑行在窄屏被挤压。
+
+**选择**：
+
+1. 移动端（≤768px）首屏改为微信式工作区会话列表（头像 + 名称 + 最近消息
+   预览 + 时间），底部「对话 / 设置」标签栏；点会话直接进入聊天沉浸页
+   （顶栏 = 返回 + 工作区名 + 状态副标题 + 「⋯」），其余功能标签按分组
+   收进「⋯」右侧抽屉；返回箭头在对话/功能页/会话列表三层间回退。
+2. `WorkspaceMeta` 新增 `avatar`（色板+首字/表情 或 上传图片 data URL）与
+   `lastMessagePreview/lastMessageAt` 摘要字段，经注册表 `patch` 局部更新
+   （不刷新最近使用排序）；会话变化时由宿主订阅写入摘要，列表无需逐个加载
+   工作区全量数据。
+3. 头像编辑器三端共用（`AvatarEditor`：移动端全屏、桌面/Web 模态框）；
+   展示统一走 `WorkspaceAvatar`（未配置时名称首字 + 哈希派生色兜底），复制
+   工作区时头像随元信息搬迁。
+4. 桌面端标题栏工作区按钮保持原有单行小尺寸（仅图标换头像），点开下拉面板：
+   搜索 / 预览 / 当前高亮 / 行内快捷操作（编辑头像/复制/删除）/「管理全部」
+   与内联新建；原 WorkspaceModal 保留为全量管理入口。
+
+**理由**：会话列表把「切工作区」从多步操作变成一级入口，符合移动端心智；
+摘要与头像都在注册表元信息层，不引入新表；桌面端不改布局只增强切换器，
+回归风险最小。
+
+**代价**：移动端汉堡抽屉与旧顶栏状态胶囊入口退役（状态浮层改为点聊天页
+标题唤起）；未读角标暂不做（无多工作区后台消息概念）；头像图片以 data URL
+存 kv，超大图在 4MB 处拦截。
+
+## D112：内置软件通道去专属化——绝对 baseUrl + useProxy + 按 host 动态转发
+
+**问题**：D99/D109 的通道把「要不要转发」编码进了 baseUrl 本身（`/llm-proxy/zen/go/v1`），
+且 `vite.config.ts` 的静态 proxy 与 `platform/http.ts` 的 `LLM_PROXY_TARGET` 都只能指向
+opencode.ai 一个目标。后果有三：设置页里服务商地址显示成一个看不懂的相对路径；
+再出现第二家禁浏览器 CORS 的服务商就要改配置并重新构建；用户无法对自定义端点
+自行决定走不走通道。同时新增 Command Code GOAT 预设时实测确认
+`api.commandcode.ai` 预检返回 204 + `Access-Control-Allow-Origin: *`（与 opencode.ai
+恰好相反），说明「是否转发」本就是每家服务商的独立属性，不该由 URL 形态代表。
+
+**选择**：
+
+1. `ModelService` / `LlmConfig` / `LlmProviderPreset` 新增 `useProxy?: boolean`；
+   baseUrl 一律恢复为真实绝对地址（OpenCode 两预设为 `https://opencode.ai/zen/...`）。
+   预设自带该值（设置页只给「自定义」端点显示勾选框，预设不显示开关）。
+2. 传输层拆成两个方向的纯函数：`applyProxyPrefix(url, useProxy)` 在请求前把绝对地址
+   换成 `/llm-proxy/<host>/<path>`（仅 https 生效），`resolveProxyUrl` 从前缀里解析出
+   host 还原成真实端点。三个 `platformFetch` 调用点各自显式传 `useProxy`。
+3. 前缀规则收进零依赖的 `platform/relay-host.ts`，由 `http.ts` 与 `vite.config.ts` 共用
+   （不能从 `http.ts` 导入配置：会顺带拖进 `@tauri-apps`）。为此在 tsconfig 打开
+   `allowImportingTsExtensions`，让 Vite 未来的原生配置加载器也能解析该导入。
+4. `vite.config.ts` 删除静态 proxy 表，改为 `llmRelay()` 插件在 dev 与 preview 上同步
+   注册转发中间件（`enforce: 'pre'` 且必须在钩子里同步 `middlewares.use`；注册成后置
+   钩子会落到 SPA fallback 之后，重新踩回 D109 的 `Unexpected token '<'`）。请求头用
+   黑名单而非白名单（白名单会漏掉 `anthropic-version` 这类厂商头），丢弃上游的
+   `content-encoding/content-length/transfer-encoding` 以保留分块流式；整个处理体包在
+   try/catch 里——点「停止生成」会让 `pipeline` reject，不吞掉就是 unhandled rejection
+   直接打死开发服务器。
+5. 旧存档在归一化时升级：`upgradeLegacyProxyBaseUrl` 把 `/llm-proxy/zen/...` 还原成
+   `https://opencode.ai/zen/...` 并置 `useProxy`，由 `normalizeLlmConfig`（主配置）、
+   `normalizeModelService`（编辑保存）与 `ensureModelServiceBindings`（已存服务）三处调用。
+   传输层不再猜测未迁移的前缀（第一段不含点/冒号即判为非法），避免把「漏迁移」
+   伪装成「还能用的 opencode.ai 兜底」。
+
+**理由**：转发与否是服务商的属性，不是地址的属性。改成布尔字段后设置页显示的就是
+服务商文档里那个地址，可直接复制比对；通道也从「改代码才能扩展」变成「勾一下」。
+
+**代价**：静态网页部署依旧没有通道（勾选的服务只在桌面/移动端与 dev/preview 可用），
+需自建同路径反向代理；通道固定按 `https:` 还原，`http` 本地端点不参与转发（本就无
+CORS 问题）；多了一个必须同步维护的持久化字段（`LlmConfigPatch` 白名单漏写会静默丢值）。

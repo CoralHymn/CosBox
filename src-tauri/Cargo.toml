@@ -1,0 +1,40 @@
+[package]
+name = "app"
+version = "0.0.4"
+description = "CosBox - offline-first AI workspace"
+authors = ["CosBox"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+serde_json = "1.0"
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.11.3", features = [] }
+tauri-plugin-log = "2"
+# HTTP 插件（桌面 + Android）：LLM/搜索请求经 Rust 侧 reqwest 发出，
+# 绕过 WebView 的 CORS 限制（opencode.ai 等端点不支持浏览器直连，见 D109）。
+tauri-plugin-http = "2"
+
+# 桌面端专用插件：自动更新（Android/iOS 不支持 updater，见 PACKAGING.md）。
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
+# Android 专用：通过 JNI + MediaStore 把导出文件写入公共「下载」目录（无需存储权限）。
+# 上下文由 JNI_OnLoad + Kotlin 侧 CosBoxBridge 提供（Tauri v2 不初始化 ndk-context）。
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+base64 = "0.22"

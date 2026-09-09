@@ -55,7 +55,8 @@ flowchart LR
 - **checkout**：`rebuildState(targetId)` 的纯读别名，不产生任何写入。
 - **展示顺序**：分支列表按最后时间倒序（新的在上）；分支内快照链按「新的在上、旧的在下」排列。
 
-存储：IndexedDB `snapshots` 表，索引 `id, [parentId+timestamp], parentId, timestamp`。
+存储：IndexedDB `snapshots` 表，索引 `id, [workspaceId+parentId+timestamp], workspaceId, parentId, timestamp`
+（`workspaceId` 为多工作区分区列，见「多工作区」章节）。
 
 ### 分支删除
 
@@ -88,6 +89,61 @@ flowchart LR
   `utils/zip`），包含对话快照、世界配置、世界书、角色档案与开发者开关，
   **不含模型配置**（API Key 不泄露）；导入前校验快照链可重建，导入后整体重载。
 
+## 多工作区
+
+### 概念与边界
+
+- **工作区** = 一套独立的角色/剧情存档：快照版本图、世界书、长期记忆、角色档案、
+  开发者开关、世界配置覆盖、上下文用量与压缩状态、同步游标。
+- **应用级共享**（不随工作区切换）：LLM 模型服务配置与 API Key、主题、同步服务器
+  设置、监控指标、工作区注册表。
+- **初始界面**：每次启动/刷新先进入工作区选择页（可选工作区 / 新建 / 导入 .cbox
+  为新工作区 / 重命名 / 复制 / 导出 / 删除），进入后才初始化会话与同步；
+  应用内工作区切换器（Web/移动端固定在导航栏最底部、Tauri 桌面版在自定义标题栏内）
+  打开同款管理弹层，并可「退出到工作区选择」。
+- **Tauri 桌面版**：主窗口 `decorations: false`，自定义标题栏（`Titlebar.svelte`）
+  承载品牌、工作区切换器与最小化/最大化/关闭（`@tauri-apps/api/window`），
+  支持 `data-tauri-drag-region` 拖拽；平台判定 `isTauri() && userAgent 不含 Android`。
+
+### 存储与作用域（D104）
+
+- 单库 + `workspaceId` 分区列：schema v3，`snapshots / worldInfo / memories`
+  三表按 workspaceId 过滤；存量数据经 upgrade 统一盖章 `default` 工作区。
+- `WorkspaceScope`（`db/workspace-scope.ts`）持有当前工作区 id，仓储构造时注入；
+  切换 = `set()` + 各方重载，仓储对象零重建。
+- 工作区级 kv 键前缀 `ws:{id}:`（`createScopedKv` / `createWorkspaceKv`）；
+  应用级键保持裸键。注册表：`workspaces.list`（元信息数组）与
+  `workspaces.current`；首启迁移把旧裸键搬进 `ws:default:` 并建「默认工作区」。
+
+### 切换流程（D105）
+
+```mermaid
+sequenceDiagram
+    UI->>WS: switchTo(id)
+    WS->>Mgr: runExclusive（排在 pending 变更之后）
+    Mgr-->>WS: 队列空闲
+    WS->>Reg: setCurrent(id)
+    WS->>Scope: set(id)
+    WS->>Mgr: resetInternal()（清内存态 + init，空工作区建根）
+    WS->>Reg: touch(id)
+    WS->>UI: onSwitched：世界书/记忆/用量/工作区级设置重载 + 瞬态复位 + 同步 reloadForWorkspace
+```
+
+- 生成回复（busy）或切换进行中时禁用进入/切换/删除按钮（双保险）。
+- 复制 / 导入为新工作区：三表全部 **remap id**（重写 parentId 引用），因为 id 是
+  全局主键；作用域 kv 逐键搬迁，head 经 id 映射改写。
+- 删除：确认弹窗展示快照/世界书/记忆数量；至少保留一个工作区；删除当前工作区
+  自动切到其余工作区。
+
+### 导入导出与同步
+
+- `.cbox` v2（D106）：新增 `memories.json` 与 manifest `workspaceName`，兼容 v1；
+  导入分「导入到当前工作区」与「导入为新工作区」两条路径。
+- 远程同步按工作区分槽（D108）：`GET/PUT /api/workspace/{workspaceId}`，
+  `/api/workspace` 为 `default` 槽别名；服务端存储
+  `data/workspaces.json`（`{ version: 2, slots }`），启动时迁移旧单槽文件；
+  客户端切换工作区时重读作用域游标并立即拉取。
+
 ## 状态模型
 
 - `outfit`：当前穿着（headwear / top / underwear / underpants / bottom / socks / shoes / accessories）
@@ -104,28 +160,33 @@ flowchart LR
 ### 远程数据同步（server 文件夹 + SyncService）
 
 - 服务端：`server/index.mjs`（零依赖 Node）——`/api/health` 连接测试、
-  `/api/workspace` GET/PUT（Bearer 密钥，时序安全比较 + 鉴权失败限流 +
-  请求体 ≤50MB + 原子写入），首次运行自动生成密钥；`install.sh` 一键部署
+  `GET/PUT /api/workspace/{workspaceId}` 按工作区分槽存储（`/api/workspace`
+  为 `default` 槽别名，Bearer 密钥，时序安全比较 + 鉴权失败限流 +
+  请求体 ≤50MB + 槽位上限 64 + 原子写入），首次运行自动生成密钥，
+  启动时自动迁移旧单槽 `workspace.json` 进 `default` 槽；`install.sh` 一键部署
   （systemd 开机自启、探测 IP 并打印地址 + 密钥），`README.md` 提供手动/
   面板安装与 HTTPS 反代说明。
 - 客户端：设置 → 数据同步（服务器地址 + 密钥，连接测试 / 立即同步）；
   `SyncService` 在本地变更后 1.5s 防抖推送、每 5s 轮询拉取，按更新时间
   较新一方胜出；同步载荷复用工作区数据（快照/世界配置/世界书/档案/
-  开发者开关），**不含模型配置与 API Key**；密钥仅存本地 kv（settings.sync）。
+  开发者开关/长期记忆），**不含模型配置与 API Key**；密钥仅存本地 kv
+  （settings.sync）；同步游标 `sync.lastUpdatedAt` 为工作区作用域键，
+  切换工作区时 `reloadForWorkspace()` 重读游标并立即拉取。
 - 变化订阅：会话（CharacterManager.subscribe）、世界书、设置三路变化都会
   触发防抖推送；拉取应用期间抑制回推，避免同步回环。
 
-| 模块             | 职责                                                                                         | 依赖方向        |
-| ---------------- | -------------------------------------------------------------------------------------------- | --------------- |
-| `core/`          | 类型、状态校验/合并、版本图纯函数、错误体系                                                  | 无（纯函数）    |
-| `db/`            | Dexie schema、快照/世界书/kv 仓储                                                            | core            |
-| `manager/`       | 状态变更编排（校验→快照→应用→刷新）                                                          | core, db        |
-| `context/`       | World Info 触发、状态摘要、历史压缩、Prompt 组装                                             | core, llm/types |
-| `llm/`           | OpenAI-compatible 客户端、离线 demo、状态工具、agent 循环、token/费用估算、模型列表/连接测试 | core, context   |
-| `import-export/` | chara_card_v3 解析与序列化                                                                   | core            |
-| `stores/`        | Svelte 5 runes 响应式封装（薄层，不含业务逻辑）                                              | manager, db     |
-| `utils/`         | 纯工具（格式化、分组、斜杠命令解析/执行）                                                    | core            |
-| `components/`    | 展示与表单（显式 props，无 rest 透传）                                                       | stores, core    |
+| 模块             | 职责                                                                                         | 依赖方向                         |
+| ---------------- | -------------------------------------------------------------------------------------------- | -------------------------------- |
+| `core/`          | 类型、状态校验/合并、版本图纯函数、错误体系                                                  | 无（纯函数）                     |
+| `db/`            | Dexie schema（多工作区分区）、快照/世界书/记忆/kv 仓储、WorkspaceScope、作用域 kv            | core                             |
+| `manager/`       | 状态变更编排（校验→快照→应用→刷新）、runExclusive/reset（工作区切换）                        | core, db                         |
+| `workspace/`     | 工作区注册表与编排服务（切换/创建/复制/删除/导入/收集导出）                                  | core, db, manager, import-export |
+| `context/`       | World Info 触发、状态摘要、历史压缩、Prompt 组装                                             | core, llm/types                  |
+| `llm/`           | OpenAI-compatible 客户端、离线 demo、状态工具、agent 循环、token/费用估算、模型列表/连接测试 | core, context                    |
+| `import-export/` | chara_card_v3 解析与序列化、.cbox 工作区序列化（v2）                                         | core                             |
+| `stores/`        | Svelte 5 runes 响应式封装（薄层，不含业务逻辑）                                              | manager, db                      |
+| `utils/`         | 纯工具（格式化、分组、斜杠命令解析/执行）                                                    | core                             |
+| `components/`    | 展示与表单（显式 props，无 rest 透传），含工作区选择/管理组件                                | stores, core                     |
 
 ## Context Pipeline
 

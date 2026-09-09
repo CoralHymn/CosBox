@@ -1,4 +1,5 @@
 import { SearchError } from '../core/errors';
+import { platformFetch } from '../platform/http';
 import type { SearchClient, SearchResult, WebSearchConfig } from './types';
 
 /** 归一化搜索结果。 */
@@ -130,7 +131,7 @@ export class WebSearchClient implements SearchClient {
 	): Promise<unknown> {
 		let response: Response;
 		try {
-			response = await fetch(url, {
+			response = await platformFetch(url, {
 				method: body === undefined ? 'GET' : 'POST',
 				headers,
 				body,

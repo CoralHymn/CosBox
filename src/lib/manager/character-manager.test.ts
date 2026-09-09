@@ -186,6 +186,82 @@ describe('CharacterManager', () => {
 		expect(message.segments?.[2]).toMatchObject({ kind: 'tool', toolName: 'advance_time' });
 	});
 
+	it('editMessage 分段消息无 text 段时追加新的 text 段', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '', {
+			segments: [
+				{ kind: 'thinking', content: '只有思考' },
+				{ kind: 'tool', content: '已推进时间', toolName: 'advance_time' }
+			]
+		});
+		await manager.editMessage(manager.getHeadId()!, '补上的正文');
+		const message = manager.getConversation()[0]!;
+		expect(message.content).toBe('补上的正文');
+		expect(message.segments?.map((segment) => segment.kind)).toEqual(['thinking', 'tool', 'text']);
+		expect(message.segments?.[2]).toEqual({ kind: 'text', content: '补上的正文' });
+	});
+
+	it('reset 重载当前工作区并恢复持久化 head', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('user', '你好');
+		await manager.reset();
+		// 重置后从库中恢复：head 回到持久化的消息节点。
+		expect(manager.getConversation().map((message) => message.content)).toEqual(['你好']);
+		expect(manager.getSnapshots()).toHaveLength(2); // 根 + 消息仍在库中
+		expect(manager.getHeadId()).not.toBeNull();
+	});
+
+	it('appendSegments 向消息追加分段并保留原内容', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '正文', {
+			segments: [{ kind: 'text', content: '正文' }]
+		});
+		await manager.appendSegments(manager.getHeadId()!, [
+			{ kind: 'tool', content: '已推进', toolName: 'advance_time' }
+		]);
+		const message = manager.getConversation()[0]!;
+		expect(message.segments?.map((segment) => segment.kind)).toEqual(['text', 'tool']);
+	});
+
+	it('appendSegments 旧消息无分段时把 thinking/content 转为分段', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '旧正文', { thinking: '旧思考' });
+		await manager.appendSegments(manager.getHeadId()!, [
+			{ kind: 'tool', content: '已推进', toolName: 'advance_time' }
+		]);
+		const message = manager.getConversation()[0]!;
+		expect(message.segments).toEqual([
+			{ kind: 'thinking', content: '旧思考' },
+			{ kind: 'text', content: '旧正文' },
+			{ kind: 'tool', content: '已推进', toolName: 'advance_time' }
+		]);
+	});
+
+	it('appendSegments 全空分段为无操作；节点缺失/非消息抛错', async () => {
+		const manager = createManager();
+		await manager.init();
+		await manager.addMessage('assistant', '正文');
+		await manager.appendSegments(manager.getHeadId()!, [{ kind: 'tool', content: '   ' }]);
+		expect(manager.getConversation()[0]!.segments).toBeUndefined();
+		await expect(
+			manager.appendSegments('missing', [{ kind: 'tool', content: 'x' }])
+		).rejects.toThrow('快照不存在');
+		const rootId = manager.getSnapshots().find((node) => node.metadata.type === 'root')!.id;
+		await expect(manager.appendSegments(rootId, [{ kind: 'tool', content: 'x' }])).rejects.toThrow(
+			'只能向消息快照追加分段'
+		);
+	});
+
+	it('editMessage 快照不存在抛 SnapshotError', async () => {
+		const manager = createManager();
+		await manager.init();
+		await expect(manager.editMessage('missing', '新内容')).rejects.toThrow('快照不存在');
+	});
+
 	it('editMessage 原地改写正文并保留 thinking 与 worldTime', async () => {
 		const manager = createManager();
 		await manager.init();

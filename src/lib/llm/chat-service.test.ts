@@ -132,9 +132,7 @@ describe('ChatService', () => {
 		expect(reply).toBe('（自然回应）我们走吧。');
 		expect(chatWithTools).toHaveBeenCalledTimes(2);
 		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
-		expect(
-			retryMessages.some((message) => message.content.includes('重复循环'))
-		).toBe(true);
+		expect(retryMessages.some((message) => message.content.includes('重复循环'))).toBe(true);
 	});
 
 	it('工具路径：流式思考实时命中循环时中断当前请求并带提示重启', async () => {
@@ -159,11 +157,7 @@ describe('ChatService', () => {
 							reject(new Error('aborted'));
 							return;
 						}
-						signal?.addEventListener(
-							'abort',
-							() => reject(new Error('aborted')),
-							{ once: true }
-						);
+						signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
 						setTimeout(() => resolve({ content: '循环正文', toolCalls: [] }), 20);
 					})
 			)
@@ -173,14 +167,17 @@ describe('ChatService', () => {
 			chatWithTools
 		};
 		const service = new ChatService(client);
+		const onRestart = vi.fn();
 		const { reply } = await service.generateReply(
 			{ state: createInitialState(), conversation: [], worldInfo: [] },
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: makeToolContext() }
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), onRestart }
 		);
 		expect(reply).toBe('（自然回应）我们走吧。');
 		// 首次请求被实时中断，第二次为带「停止重复」提示的重启请求。
 		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		// 中断时通知 UI 清空流式草稿（首次请求已展示的内容不会落库）。
+		expect(onRestart).toHaveBeenCalledTimes(1);
 		const retryMessages = chatWithTools.mock.calls[1]![0] as ChatMessage[];
 		expect(retryMessages.some((message) => message.content.includes('重复循环'))).toBe(true);
 	});
@@ -837,6 +834,118 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
 	});
 
+	it('双通道：补调重试只产出文本形式调用时采纳执行并剔除语法', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '（笑了笑）我们这就走。',
+				toolCalls: [],
+				thinking: '用户想去食堂，我应该调用 goto_location'
+			})
+			.mockResolvedValueOnce({ content: '好的。goto_location(name=食堂)', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '我们到食堂了。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { reply, executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['goto_location']);
+		expect(ctx.getState().location.name).toBe('食堂');
+		expect(reply).toBe('我们到食堂了。');
+		// 采纳的文本调用写入下一轮 assistant 消息时已剔除调用语法。
+		const nextMessages = chatWithTools.mock.calls[2]![0] as ChatMessage[];
+		const echoed = nextMessages.filter((message) => message.role === 'assistant');
+		expect(echoed.some((message) => message.content === '好的。')).toBe(true);
+		expect(echoed.some((message) => message.content.includes('goto_location('))).toBe(false);
+	});
+
+	it('双通道护栏：结构化 tool_calls 与文本调用并存时只认结构化', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '我们走。',
+				toolCalls: [],
+				thinking: '调用 goto_location 切换地点'
+			})
+			.mockResolvedValueOnce({
+				content: 'goto_location(name=宿舍)',
+				toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+			})
+			.mockResolvedValueOnce({ content: '到了。', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx }
+		);
+		// 结构化优先：执行的是 JSON 里的「食堂」而非文本里的「宿舍」。
+		expect(executedTools.map((tool) => tool.name)).toEqual(['goto_location']);
+		expect(ctx.getState().location.name).toBe('食堂');
+	});
+
+	it('双通道关闭时补调重试与主循环都不解析文本形式调用', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({
+				content: '我们走。',
+				toolCalls: [],
+				thinking: '调用 goto_location 切换地点'
+			})
+			.mockResolvedValueOnce({ content: 'goto_location(name=食堂)', toolCalls: [] })
+			.mockResolvedValueOnce({ content: 'goto_location(name=食堂)', toolCalls: [] });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, reply } = await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx, textToolFallback: false }
+		);
+		expect(executedTools).toEqual([]);
+		expect(reply).toBe('我们走。');
+	});
+
+	it('LLM 状态确认：确认模型只输出文本形式调用时经双通道执行', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: '（到了）嗯，就是这里。', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '完成。goto_location(name=厕所)', toolCalls: [] })
+			.mockResolvedValueOnce({ content: '完成', toolCalls: [] });
+		const chat = vi.fn().mockResolvedValueOnce({ content: 'True', toolCalls: [] });
+		const client: LlmClient = { chat, chatWithTools };
+		const ctx = makeToolContext();
+		const service = new ChatService(client);
+		const { executedTools, judgeDebug } = await service.generateReply(
+			{
+				state: createInitialState(),
+				conversation: [
+					{ id: '1', role: 'user', content: '我们去厕所吧', timestamp: 1 },
+					{ id: '2', role: 'assistant', content: '（到了）嗯，就是这里。', timestamp: 2 }
+				],
+				worldInfo: []
+			},
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+		);
+		expect(judgeDebug?.needsTool).toBe(true);
+		expect(executedTools.map((tool) => tool.name)).toEqual(['goto_location']);
+		expect(ctx.getState().location.name).toBe('厕所');
+	});
+
 	it('LLM 状态确认：judgeConfig 指定的独立模型配置被用于判断请求', async () => {
 		const chatWithTools = vi.fn().mockResolvedValueOnce({ content: '嗯嗯。', toolCalls: [] });
 		const chat = vi.fn().mockResolvedValueOnce({ content: 'False', toolCalls: [] });
@@ -1200,7 +1309,11 @@ describe('ChatService', () => {
 		expect(rounds[0]!.content).toBe('（愣了一下，脸颊红了）啊！？');
 		expect(rounds[0]!.thinking).toBe('让我想想');
 		expect(rounds[0]!.tools).toEqual([
-			{ name: 'set_outfit', output: expect.stringContaining('黑色卫衣') }
+			{
+				name: 'set_outfit',
+				output: expect.stringContaining('黑色卫衣'),
+				args: 'slot=top, item=黑色卫衣'
+			}
 		]);
 		expect(reply).toBe('（扣好扣子）呼——好了。');
 	});
@@ -1226,8 +1339,61 @@ describe('ChatService', () => {
 		expect(rounds).toHaveLength(1);
 		expect(rounds[0]!.content).toBeNull();
 		expect(rounds[0]!.tools).toEqual([
-			{ name: 'goto_location', output: expect.stringContaining('食堂') }
+			{ name: 'goto_location', output: expect.stringContaining('食堂'), args: 'name=食堂' }
 		]);
+	});
+
+	it('agent 循环：工具执行按序发出 onToolStart / onToolResult 事件', async () => {
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools: vi
+				.fn()
+				.mockResolvedValueOnce({
+					content: null,
+					toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
+				})
+				.mockResolvedValueOnce({ content: '到了', toolCalls: [] })
+		};
+		const service = new ChatService(client);
+		const events: string[] = [];
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{
+				tools: [...STATE_TOOLS],
+				toolContext: makeToolContext(),
+				onToolStart: (call) => events.push(`start:${call.name}`),
+				onToolResult: (result) => events.push(`result:${result.name}:${result.output}`)
+			}
+		);
+		expect(events).toHaveLength(2);
+		expect(events[0]).toBe('start:goto_location');
+		expect(events[1]).toContain('result:goto_location:');
+		expect(events[1]).toContain('食堂');
+	});
+
+	it('工具路径：补调重试不接入流式回调且改为非流式（避免草稿吞句）', async () => {
+		const chatWithTools = vi
+			.fn()
+			.mockResolvedValueOnce({ content: null, toolCalls: [], thinking: '只思考' })
+			.mockResolvedValueOnce({ content: '补上的正文', toolCalls: [], thinking: '重试思考' });
+		const client: LlmClient = {
+			chat: vi.fn(async () => ({ content: 'x', toolCalls: [] })),
+			chatWithTools
+		};
+		const service = new ChatService(client);
+		const onDelta = vi.fn();
+		await service.generateReply(
+			{ state: createInitialState(), conversation: [], worldInfo: [] },
+			config,
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), onDelta }
+		);
+		expect(chatWithTools).toHaveBeenCalledTimes(2);
+		// 重试请求：不传流式增量回调、强制非流式。
+		expect(chatWithTools.mock.calls[1]![4]).toBeUndefined();
+		expect(chatWithTools.mock.calls[1]![5]).toBeUndefined();
+		expect(chatWithTools.mock.calls[1]![2]).toMatchObject({ stream: false });
+		expect(onDelta).not.toHaveBeenCalled();
 	});
 
 	it('agent 循环：超过最大轮数时已产生的轮次仍返回', async () => {
@@ -1795,9 +1961,9 @@ describe('detectThinkingLoop', () => {
 	});
 
 	it('正常思考不误报', () => {
-		expect(
-			detectThinkingLoop('她应该先穿上衣服，再自然地回应。窗外下着雨，天色有些暗。')
-		).toBe(false);
+		expect(detectThinkingLoop('她应该先穿上衣服，再自然地回应。窗外下着雨，天色有些暗。')).toBe(
+			false
+		);
 		expect(detectThinkingLoop('重复两次。重复两次。')).toBe(false);
 	});
 

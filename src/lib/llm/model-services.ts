@@ -1,5 +1,5 @@
 import { newId } from '../utils/id';
-import { CUSTOM_PROVIDER_ID } from './providers';
+import { CUSTOM_PROVIDER_ID, upgradeLegacyProxyBaseUrl } from './providers';
 import type { LlmConfig, ModelEntry, ModelRole, ModelService } from './types';
 
 /** 模型服务角色的中文标签（设置页分配区展示）。 */
@@ -24,6 +24,7 @@ export interface ModelServiceDraft {
 	provider: ModelService['provider'];
 	providerId: string;
 	baseUrl: string;
+	useProxy?: boolean;
 	apiKey: string;
 	models: ModelEntryDraft[];
 	notes?: string;
@@ -49,7 +50,10 @@ export function normalizeModelEntry(draft: ModelEntryDraft): ModelEntry {
  */
 export function normalizeModelService(draft: ModelServiceDraft): ModelService {
 	const now = Date.now();
-	const baseUrl = draft.baseUrl.trim().replace(/\/+$/, '');
+	const endpoint = upgradeLegacyProxyBaseUrl(
+		draft.baseUrl.trim().replace(/\/+$/, ''),
+		draft.useProxy
+	);
 	const legacyModel = (draft as unknown as { model?: string }).model?.trim() ?? '';
 	const label = draft.label.trim() || legacyModel || '未命名服务';
 	const models = draft.models.map(normalizeModelEntry);
@@ -57,24 +61,30 @@ export function normalizeModelService(draft: ModelServiceDraft): ModelService {
 		models.push({
 			id: 'm-default',
 			model: legacyModel,
-			...(draft as unknown as { contextWindow?: number }).contextWindow !== undefined
+			...((draft as unknown as { contextWindow?: number }).contextWindow !== undefined
 				? {
 						contextWindow: Math.floor(
 							(draft as unknown as { contextWindow?: number }).contextWindow as number
 						)
 					}
-				: {},
-			...(draft as unknown as { maxTokens?: number }).maxTokens !== undefined
-				? { maxTokens: Math.floor((draft as unknown as { maxTokens?: number }).maxTokens as number) }
-				: {}
+				: {}),
+			...((draft as unknown as { maxTokens?: number }).maxTokens !== undefined
+				? {
+						maxTokens: Math.floor((draft as unknown as { maxTokens?: number }).maxTokens as number)
+					}
+				: {})
 		});
 	}
 	return {
 		id: draft.id?.trim() !== '' && draft.id !== undefined ? draft.id : newId(),
 		label: label.slice(0, 40),
 		provider: draft.provider,
-		providerId: draft.provider === 'demo' ? CUSTOM_PROVIDER_ID : draft.providerId.trim() || CUSTOM_PROVIDER_ID,
-		baseUrl,
+		providerId:
+			draft.provider === 'demo'
+				? CUSTOM_PROVIDER_ID
+				: draft.providerId.trim() || CUSTOM_PROVIDER_ID,
+		baseUrl: endpoint.baseUrl,
+		...(endpoint.useProxy ? { useProxy: true } : {}),
 		apiKey: draft.apiKey.trim(),
 		models,
 		...(draft.notes !== undefined && draft.notes.trim() !== ''
@@ -107,20 +117,14 @@ export function modelEntryIdForRole(config: LlmConfig, role: ModelRole): string 
 }
 
 /** 在服务下按 id 查模型条目；缺省返回第一条。 */
-export function findModelEntry(
-	service: ModelService,
-	entryId: string
-): ModelEntry | undefined {
+export function findModelEntry(service: ModelService, entryId: string): ModelEntry | undefined {
 	const entries = service.models ?? [];
 	const hit = entries.find((entry) => entry.id === entryId);
 	return hit ?? entries[0];
 }
 
 /** 按 id 查找已保存的服务；不存在返回 undefined。 */
-export function findModelService(
-	config: LlmConfig,
-	id: string
-): ModelService | undefined {
+export function findModelService(config: LlmConfig, id: string): ModelService | undefined {
 	return (config.modelServices ?? []).find((service) => service.id === id);
 }
 
@@ -143,6 +147,7 @@ export function resolveServiceConfig(config: LlmConfig, role: ModelRole): LlmCon
 		provider: service.provider,
 		providerId: service.providerId,
 		baseUrl: service.baseUrl,
+		useProxy: service.useProxy ?? false,
 		apiKey: service.apiKey,
 		model: entry.model,
 		modelContextWindow: entry.contextWindow ?? config.modelContextWindow,
@@ -164,6 +169,7 @@ export function ensureModelServiceBindings(config: LlmConfig): LlmConfig {
 			provider: config.provider,
 			providerId: config.providerId,
 			baseUrl: config.baseUrl,
+			useProxy: config.useProxy,
 			apiKey: config.apiKey,
 			models: [
 				{
@@ -178,8 +184,15 @@ export function ensureModelServiceBindings(config: LlmConfig): LlmConfig {
 			createdAt: now
 		});
 	}
-	// 老格式服务迁移：顶层 model/contextWindow/maxTokens 转成单条模型条目。
-	const migratedServices = services.map((service) => {
+	// 老格式服务迁移：通道信息从 baseUrl 前缀搬到 useProxy（D112）；
+	// 顶层 model/contextWindow/maxTokens 转成单条模型条目。
+	const migratedServices = services.map((item) => {
+		const endpoint = upgradeLegacyProxyBaseUrl(item.baseUrl, item.useProxy);
+		const service: ModelService = {
+			...item,
+			baseUrl: endpoint.baseUrl,
+			...(endpoint.useProxy ? { useProxy: true } : {})
+		};
 		if ((service.models ?? []).length > 0) {
 			return service;
 		}
@@ -194,9 +207,7 @@ export function ensureModelServiceBindings(config: LlmConfig): LlmConfig {
 				{
 					id: 'm-default',
 					model: legacy.model ?? config.model,
-					...(legacy.contextWindow !== undefined
-						? { contextWindow: legacy.contextWindow }
-						: {}),
+					...(legacy.contextWindow !== undefined ? { contextWindow: legacy.contextWindow } : {}),
 					...(legacy.maxTokens !== undefined ? { maxTokens: legacy.maxTokens } : {})
 				}
 			]
@@ -242,9 +253,7 @@ export function bindingValue(serviceId: string, entryId: string): string {
 }
 
 /** 解析绑定下拉值；非法格式返回 null。 */
-export function parseBindingValue(
-	value: string
-): { serviceId: string; entryId: string } | null {
+export function parseBindingValue(value: string): { serviceId: string; entryId: string } | null {
 	const separator = value.indexOf('::');
 	if (separator <= 0 || separator === value.length - 2) {
 		return null;

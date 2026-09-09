@@ -4,6 +4,7 @@ import { createInitialState } from '../core/state';
 import type { BranchSummary, SnapshotDelta, SnapshotMetadata, SnapshotNode } from '../core/types';
 import { newId } from '../utils/id';
 import type { CosBoxDatabase } from './schema';
+import { WorkspaceScope } from './workspace-scope';
 
 /** 新增快照的输入参数。 */
 export interface AddSnapshotInput {
@@ -17,14 +18,20 @@ export interface AddSnapshotInput {
 /**
  * 快照仓储：IndexedDB 的读写边界。
  * 所有公开方法都带 try/catch，并把底层异常翻译为用户可读的 StorageError。
+ * 多工作区：所有查询按构造时注入的 WorkspaceScope 过滤；
+ * 带 `workspaceId` 参数的方法用于读写非当前工作区（导出/复制/删除）。
  */
 export class SnapshotRepository {
-	constructor(private readonly database: CosBoxDatabase) {}
+	constructor(
+		private readonly database: CosBoxDatabase,
+		private readonly scope: WorkspaceScope = new WorkspaceScope()
+	) {}
 
 	/** 追加一个快照节点。父节点必须存在（根除外），否则抛 SnapshotError。 */
 	async addSnapshot(input: AddSnapshotInput): Promise<SnapshotNode> {
 		const node: SnapshotNode = {
 			id: newId(),
+			workspaceId: this.scope.get(),
 			timestamp: input.timestamp ?? Date.now(),
 			parentId: input.parentId,
 			metadata: { ...input.metadata },
@@ -33,7 +40,7 @@ export class SnapshotRepository {
 		try {
 			if (node.parentId !== null) {
 				const parent = await this.database.snapshots.get(node.parentId);
-				if (!parent) {
+				if (!parent || parent.workspaceId !== node.workspaceId) {
 					throw new SnapshotError(`父快照不存在：${node.parentId}`);
 				}
 			}
@@ -47,28 +54,34 @@ export class SnapshotRepository {
 		}
 	}
 
-	/** 按 id 读取节点；不存在返回 undefined。 */
+	/** 按 id 读取节点；不存在或不属于当前工作区返回 undefined。 */
 	async getNode(id: string): Promise<SnapshotNode | undefined> {
 		try {
-			return await this.database.snapshots.get(id);
+			const node = await this.database.snapshots.get(id);
+			return node?.workspaceId === this.scope.get() ? node : undefined;
 		} catch (err) {
 			throw new StorageError('读取快照失败', { cause: err });
 		}
 	}
 
-	/** 读取全部节点。 */
-	async getAll(): Promise<SnapshotNode[]> {
+	/** 读取当前工作区全部节点。 */
+	async getAll(workspaceId = this.scope.get()): Promise<SnapshotNode[]> {
 		try {
-			return await this.database.snapshots.toArray();
+			return await this.database.snapshots.where('workspaceId').equals(workspaceId).toArray();
 		} catch (err) {
 			throw new StorageError('读取快照列表失败', { cause: err });
 		}
 	}
 
-	/** 读取指定父节点的直接子节点，按时间升序。 */
+	/** 读取指定父节点的直接子节点（当前工作区内），按时间升序。 */
 	async getChildren(parentId: string): Promise<SnapshotNode[]> {
 		try {
-			const rows = await this.database.snapshots.where('parentId').equals(parentId).toArray();
+			const workspaceId = this.scope.get();
+			const rows = await this.database.snapshots
+				.where('parentId')
+				.equals(parentId)
+				.and((node) => node.workspaceId === workspaceId)
+				.toArray();
 			return [...rows].sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
 		} catch (err) {
 			throw new StorageError('读取子快照失败', { cause: err });
@@ -100,37 +113,37 @@ export class SnapshotRepository {
 		}
 	}
 
-	/** 统计快照数量。 */
-	async count(): Promise<number> {
+	/** 统计当前工作区快照数量。 */
+	async count(workspaceId = this.scope.get()): Promise<number> {
 		try {
-			return await this.database.snapshots.count();
+			return await this.database.snapshots.where('workspaceId').equals(workspaceId).count();
 		} catch (err) {
 			throw new StorageError('统计快照失败', { cause: err });
 		}
 	}
 
-	/** 清空全部快照（工作区导入前重置）。 */
-	async clearAll(): Promise<void> {
+	/** 清空当前工作区快照（工作区导入前重置）。 */
+	async clearAll(workspaceId = this.scope.get()): Promise<void> {
 		try {
-			await this.database.snapshots.clear();
+			await this.database.snapshots.where('workspaceId').equals(workspaceId).delete();
 		} catch (err) {
 			throw new StorageError('清空快照失败', { cause: err });
 		}
 	}
 
-	/** 批量写入快照节点（工作区导入，保留原始 id）。 */
-	async bulkAdd(nodes: readonly SnapshotNode[]): Promise<void> {
+	/** 批量写入快照节点（工作区导入/复制，保留原始 id，统一盖章 workspaceId）。 */
+	async bulkAdd(nodes: readonly SnapshotNode[], workspaceId = this.scope.get()): Promise<void> {
 		try {
-			await this.database.snapshots.bulkAdd([...nodes]);
+			await this.database.snapshots.bulkAdd(nodes.map((node) => ({ ...node, workspaceId })));
 		} catch (err) {
 			throw new StorageError('导入快照失败', { cause: err });
 		}
 	}
 
 	/** 计算当前全部分支 tip。 */
-	async getBranches(): Promise<BranchSummary[]> {
+	async getBranches(workspaceId = this.scope.get()): Promise<BranchSummary[]> {
 		// getAll 已把底层异常翻译为 StorageError，这里不再重复包装。
-		return getBranchTips(await this.getAll());
+		return getBranchTips(await this.getAll(workspaceId));
 	}
 
 	/**

@@ -16,16 +16,26 @@
 		type ModelService
 	} from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
-	import type { AppProfile } from '../stores/settings.svelte';
+	import { DEFAULT_PROFILE, type AppProfile } from '../stores/settings.svelte';
 	import type { SyncResult } from '../sync/sync-service';
 	import type { SyncSettings } from '../sync/types';
 	import {
 		DEFAULT_THEME_CONFIG,
+		OFFICIAL_BACKGROUNDS,
 		THEME_PRESETS,
+		findOfficialBackground,
 		findThemePreset,
 		type ThemeColorKey,
 		type ThemeConfig
 	} from '../theme/theme';
+	import { getCreditGroups } from '../legal/credits';
+	import {
+		APP_VERSION,
+		checkForUpdate,
+		downloadAndInstall,
+		isTauri,
+		type UpdateInfo
+	} from '../platform/updater';
 	import ModelCombobox from './ModelCombobox.svelte';
 
 	interface Props {
@@ -36,7 +46,6 @@
 		theme: ThemeConfig;
 		onSaveConfig: (config: LlmConfig) => Promise<void>;
 		onSaveProfile: (profile: AppProfile) => Promise<void>;
-		onResetProfile: () => Promise<void>;
 		onSaveDeveloperMode: (enabled: boolean) => Promise<void>;
 		onSaveSync: (settings: SyncSettings) => Promise<void>;
 		onSaveTheme: (theme: ThemeConfig) => Promise<void>;
@@ -58,7 +67,6 @@
 		theme,
 		onSaveConfig,
 		onSaveProfile,
-		onResetProfile,
 		onSaveDeveloperMode,
 		onSaveSync,
 		onSaveTheme,
@@ -74,6 +82,8 @@
 	/** 服务商选择：'demo' | 预设 id | CUSTOM_PROVIDER_ID。 */
 	let presetSelection = $state<string>('demo');
 	let baseUrl = $state('');
+	/** 端点禁浏览器 CORS 直连时改走内置软件通道转发。 */
+	let useProxy = $state(false);
 	let apiKey = $state('');
 	let model = $state('');
 	let temperature = $state(0.8);
@@ -84,6 +94,7 @@
 	let stream = $state(false);
 	let allowAiStateTools = $state(false);
 	let llmStateConfirm = $state(false);
+	let textToolFallback = $state(true);
 	let memoryEnabled = $state(true);
 	let memoryInjectLimit = $state(5);
 	let memoryAutoExtract = $state(false);
@@ -96,12 +107,14 @@
 	let themePresetId = $state(DEFAULT_THEME_CONFIG.presetId);
 	let themeColors = $state<Partial<Record<ThemeColorKey, string>>>({});
 	let themeBackground = $state('');
+	let officialBackgroundId = $state('');
 	let themeOpacity = $state(1);
 	let themeBlur = $state(0);
 	let themeBusy = $state(false);
 	let themeInput = $state<HTMLInputElement | null>(null);
+	/** 「开源协议声明」弹窗是否打开。 */
+	let showCredits = $state(false);
 	let profileName = $state('');
-	let systemPrompt = $state('');
 	let saving = $state(false);
 	let fetchingModels = $state(false);
 	let testingConnection = $state(false);
@@ -128,6 +141,11 @@
 	/** 「获取模型列表」后勾选待批量添加的模型 id。 */
 	let selectedFetchedModels = $state<string[]>([]);
 	let savingService = $state(false);
+	/** 「关于」卡片：更新检查状态。 */
+	let updateBusy = $state(false);
+	let updateStatus = $state('');
+	let updateInfo = $state<UpdateInfo | null>(null);
+	let installProgress = $state('');
 
 	/** 主题颜色项：rgba 项只能文本输入，其余用取色器。 */
 	const themeColorKeys: { key: ThemeColorKey; label: string; rgba: boolean }[] = [
@@ -187,6 +205,7 @@
 		stream = config.stream === true;
 		allowAiStateTools = config.allowAiStateTools === true;
 		llmStateConfirm = config.llmStateConfirm === true;
+		textToolFallback = config.textToolFallback !== false;
 		memoryEnabled = config.memoryEnabled !== false;
 		memoryInjectLimit = config.memoryInjectLimit ?? 5;
 		memoryAutoExtract = config.memoryAutoExtract === true;
@@ -202,7 +221,6 @@
 		searchApiKey = config.webSearch.apiKey;
 		searchMaxResults = config.webSearch.maxResults;
 		profileName = profile.name;
-		systemPrompt = profile.systemPrompt ?? '';
 		devMode = developerMode;
 		syncEnabled = syncSettings.enabled;
 		syncServerUrl = syncSettings.serverUrl;
@@ -210,6 +228,7 @@
 		themePresetId = theme.presetId;
 		themeColors = { ...theme.colors };
 		themeBackground = theme.backgroundImage;
+		officialBackgroundId = theme.officialBackgroundId;
 		themeOpacity = theme.backgroundOpacity;
 		themeBlur = theme.backgroundBlur;
 	});
@@ -221,6 +240,7 @@
 			presetId: themePresetId,
 			colors: { ...base, ...themeColors },
 			backgroundImage: themeBackground,
+			officialBackgroundId,
 			backgroundOpacity: themeOpacity,
 			backgroundBlur: themeBlur
 		};
@@ -261,19 +281,28 @@
 		void persistTheme();
 	}
 
-	/** 选择背景图：读取为 data URL 并即时保存。 */
+	/** 选择官方背景：与自定义上传互斥，选中后清除已上传的 data URL。 */
+	function selectOfficialBackground(id: string): void {
+		officialBackgroundId = officialBackgroundId === id ? '' : id;
+		themeBackground = '';
+		void persistTheme();
+	}
+
+	/** 选择自定义背景图：读取为 data URL 并即时保存（清除官方背景选择）。 */
 	async function pickThemeBackground(): Promise<void> {
 		const file = themeInput?.files?.[0];
 		if (file === undefined) {
 			return;
 		}
 		const dataUrl = await readFileAsDataUrl(file);
+		officialBackgroundId = '';
 		themeBackground = dataUrl;
 		void persistTheme();
 	}
 
-	/** 移除背景图。 */
+	/** 移除背景图（官方或自定义）。 */
 	function removeThemeBackground(): void {
+		officialBackgroundId = '';
 		themeBackground = '';
 		void persistTheme();
 	}
@@ -282,26 +311,34 @@
 	function resetTheme(): void {
 		themePresetId = DEFAULT_THEME_CONFIG.presetId;
 		themeColors = {};
+		officialBackgroundId = '';
 		themeBackground = '';
 		themeOpacity = 1;
 		themeBlur = 0;
 		void persistTheme();
 	}
 
-	/** 切换服务商：选中预设时自动填充地址与默认模型。 */
+	/** 切换服务商：选中预设时自动填充地址、通道与默认模型。 */
 	function selectProvider(id: string): void {
 		presetSelection = id;
 		if (id === 'demo' || id === CUSTOM_PROVIDER_ID) {
 			modelContextWindow = undefined;
+			useProxy = false;
+			// 演示服务不需要端点，预置一行模型即可直接保存（误删后能一键建回来）。
+			if (id === 'demo' && editingServiceId === null && editorModels.length === 0) {
+				editorModels = [{ model: 'demo' }];
+			}
 			return;
 		}
 		const preset = findProviderPreset(id);
 		if (!preset) {
 			presetSelection = CUSTOM_PROVIDER_ID;
 			modelContextWindow = undefined;
+			useProxy = false;
 			return;
 		}
 		baseUrl = preset.baseUrl;
+		useProxy = preset.useProxy === true;
 		model = preset.defaultModel;
 		modelContextWindow = findModelInfo(preset.defaultModel)?.contextWindow;
 	}
@@ -312,6 +349,7 @@
 			provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
 			providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
 			baseUrl: baseUrl.trim(),
+			useProxy,
 			apiKey: apiKey.trim(),
 			model: model.trim() || DEFAULT_LLM_CONFIG.model,
 			temperature: Math.min(2, Math.max(0, temperature)),
@@ -322,6 +360,7 @@
 			stream,
 			allowAiStateTools,
 			llmStateConfirm,
+			textToolFallback,
 			memoryEnabled,
 			memoryInjectLimit,
 			memoryAutoExtract,
@@ -345,8 +384,8 @@
 		saving = true;
 		try {
 			// 先捕获输入值：await 期间 $effect 会用旧 profile 覆盖本地字段，避免保存空值。
-			const name = profileName.trim();
-			const prompt = systemPrompt.trim() || null;
+			// 提示词已经移到「提示词」标签页：这里只更新角色名，保留其余提示词字段。
+			const name = profileName.trim() || DEFAULT_PROFILE.name;
 			const dev = devMode;
 			const sync = {
 				enabled: syncEnabled,
@@ -354,7 +393,7 @@
 				serverKey: syncServerKey.trim()
 			};
 			await onSaveConfig(buildConfig());
-			await onSaveProfile({ name, systemPrompt: prompt });
+			await onSaveProfile({ ...profile, name });
 			await onSaveDeveloperMode(dev);
 			await onSaveSync(sync);
 		} finally {
@@ -392,9 +431,11 @@
 		}
 	}
 
-	/** 「回到默认」仅重置角色档案，不动其他设置。 */
-	async function resetProfile(): Promise<void> {
-		await onResetProfile();
+	/** 「恢复默认角色名」只重置名字，不动提示词与 LLM 配置。 */
+	async function resetProfileName(): Promise<void> {
+		const next: AppProfile = { ...profile, name: DEFAULT_PROFILE.name };
+		profileName = next.name;
+		await onSaveProfile(next);
 	}
 
 	/** 拉取模型列表并填充 datalist；自动补全当前模型的上下文窗口。 */
@@ -442,6 +483,7 @@
 			provider: presetSelection === 'demo' ? 'demo' : 'openai-compatible',
 			providerId: presetSelection === 'demo' ? CUSTOM_PROVIDER_ID : presetSelection,
 			baseUrl: baseUrl.trim(),
+			useProxy,
 			apiKey: apiKey.trim(),
 			model: model.trim() || DEFAULT_LLM_CONFIG.model,
 			modelContextWindow,
@@ -459,6 +501,7 @@
 		if (service === null) {
 			presetSelection = CUSTOM_PROVIDER_ID;
 			baseUrl = '';
+			useProxy = false;
 			apiKey = '';
 			model = '';
 			modelContextWindow = undefined;
@@ -471,6 +514,7 @@
 						? service.providerId
 						: CUSTOM_PROVIDER_ID;
 			baseUrl = service.baseUrl;
+			useProxy = service.useProxy ?? false;
 			apiKey = service.apiKey;
 			model = '';
 			modelContextWindow = undefined;
@@ -534,9 +578,12 @@
 			const draft = {
 				id: editingServiceId ?? undefined,
 				label: serviceLabel,
-				provider: (presetSelection === 'demo' ? 'demo' : 'openai-compatible') as ModelService['provider'],
+				provider: (presetSelection === 'demo'
+					? 'demo'
+					: 'openai-compatible') as ModelService['provider'],
 				providerId: presetSelection,
 				baseUrl,
+				useProxy,
 				apiKey,
 				models: editorModels,
 				notes: serviceNote
@@ -557,8 +604,7 @@
 				// 编辑已有服务：若角色绑定的是该服务但条目已不存在，回退第一条。
 				const firstEntryId = normalized.models[0]?.id ?? '';
 				const rebind = (serviceId: string, entryId: string): string =>
-					serviceId === normalized.id &&
-					!normalized.models.some((entry) => entry.id === entryId)
+					serviceId === normalized.id && !normalized.models.some((entry) => entry.id === entryId)
 						? firstEntryId
 						: entryId;
 				chatModelEntryId = rebind(chatModelId, chatModelEntryId);
@@ -575,7 +621,11 @@
 
 	/** 删除服务；若某个角色正指向它，改绑到剩余第一条服务。 */
 	async function deleteService(service: ModelService): Promise<void> {
-		if (!window.confirm(`确定删除模型服务「${service.label}」？${service.apiKey ? '其 API Key 将一并移除。' : ''}`)) {
+		if (
+			!window.confirm(
+				`确定删除模型服务「${service.label}」？${service.apiKey ? '其 API Key 将一并移除。' : ''}`
+			)
+		) {
 			return;
 		}
 		const remaining = services.filter((item) => item.id !== service.id);
@@ -723,6 +773,50 @@
 		}
 		return '#000000';
 	}
+
+	/** 检查更新（桌面版）；Web 版提示不支持。 */
+	async function checkUpdates(): Promise<void> {
+		updateBusy = true;
+		updateStatus = '';
+		updateInfo = null;
+		installProgress = '';
+		try {
+			const info = await checkForUpdate();
+			if (info === null) {
+				updateStatus = '已是最新版本';
+			} else {
+				updateInfo = info;
+				updateStatus = `发现新版本 v${info.version}`;
+			}
+		} catch (err) {
+			updateStatus = `检查更新失败：${err instanceof Error ? err.message : '未知错误'}`;
+		} finally {
+			updateBusy = false;
+		}
+	}
+
+	/** 下载并安装新版本；完成后自动重启应用。 */
+	async function installUpdateNow(): Promise<void> {
+		updateBusy = true;
+		installProgress = '正在下载并安装…';
+		updateStatus = '';
+		try {
+			await downloadAndInstall((progress) => {
+				if (progress.total !== null && progress.total > 0) {
+					const percent = Math.min(100, Math.round((progress.downloaded / progress.total) * 100));
+					installProgress = `正在下载并安装… ${percent}%`;
+				} else {
+					installProgress = '正在下载并安装…';
+				}
+			});
+			// 正常流程会在安装完成后自动重启，这里到不了。
+		} catch (err) {
+			installProgress = '';
+			updateStatus = `更新失败：${err instanceof Error ? err.message : '未知错误'}`;
+		} finally {
+			updateBusy = false;
+		}
+	}
 </script>
 
 <div class="panel">
@@ -734,10 +828,9 @@
 	<div class="card">
 		<h3 class="card-title">模型服务管理</h3>
 		<p class="muted" style="margin: 0 0 12px;">
-			把「服务商 + Key」保存为一个连接，下面挂多个可选模型（Key 只填一次）；
-			再为三类任务分配「服务 + 模型」：
-			对话用强模型、状态判断与生成用便宜模型，便于控制 token 与消费。API Key 仅保存在本地，
-			不会随工作区导出或同步到服务器。
+			把「服务商 + Key」保存为一个连接，下面挂多个可选模型（Key 只填一次）； 再为三类任务分配「服务
+			+ 模型」： 对话用强模型、状态判断与生成用便宜模型，便于控制 token 与消费。API Key
+			仅保存在本地， 不会随工作区导出或同步到服务器。
 		</p>
 
 		<div class="field">
@@ -752,8 +845,7 @@
 							id={`role-${role}`}
 							class="select"
 							value={roleId(role)}
-							onchange={(event) =>
-								setRole(role, (event.currentTarget as HTMLSelectElement).value)}
+							onchange={(event) => setRole(role, (event.currentTarget as HTMLSelectElement).value)}
 						>
 							{#each roleOptions as option (option.value)}
 								<option value={option.value}>{option.label}</option>
@@ -785,7 +877,8 @@
 									title="窗口 {entry.contextWindow ?? '未知'} · Max {entry.maxTokens ?? '全局'}"
 								>
 									{entry.model}
-									{#if entry.maxTokens !== undefined} ·{entry.maxTokens}{/if}
+									{#if entry.maxTokens !== undefined}
+										·{entry.maxTokens}{/if}
 								</span>
 							{/each}
 						</div>
@@ -838,6 +931,14 @@
 							placeholder="https://api.example.com/v1"
 						/>
 					</div>
+					{#if presetSelection === CUSTOM_PROVIDER_ID}
+						<div class="row-actions" style="margin-bottom: 10px;">
+							<input id="svc-use-proxy" class="checkbox" type="checkbox" bind:checked={useProxy} />
+							<label for="svc-use-proxy" class="muted"
+								>通过内置软件通道转发（端点不允许浏览器 CORS 直连时勾选）</label
+							>
+						</div>
+					{/if}
 					<div class="field">
 						<label for="svc-api-key">API Key</label>
 						<input
@@ -853,96 +954,100 @@
 					{#if currentPreset?.notes}
 						<p class="muted" style="margin-top: 2px;">{currentPreset.notes}</p>
 					{/if}
-					<div class="field">
-						<span class="muted" style="display: block; margin-bottom: 4px;">
-							模型列表（一个服务商下可多选多个模型）
-						</span>
-						{#each editorModels as entry, index (index)}
-							<div class="model-row">
-								<input
-									class="input"
-									value={entry.model}
-									placeholder="模型 id"
-									onchange={(event) =>
-										updateEditorModel(index, {
-											model: (event.currentTarget as HTMLInputElement).value
-										})}
-									aria-label="模型 id"
-								/>
-								<input
-									class="input"
-									style="width: 110px;"
-									type="number"
-									value={entry.contextWindow ?? ''}
-									placeholder="窗口"
-									onchange={(event) =>
-										updateEditorModel(index, {
-											contextWindow:
-												Number((event.currentTarget as HTMLInputElement).value) > 0
-													? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-													: undefined
-										})}
-									aria-label="上下文窗口"
-								/>
-								<input
-									class="input"
-									style="width: 90px;"
-									type="number"
-									value={entry.maxTokens ?? ''}
-									placeholder="Max"
-									onchange={(event) =>
-										updateEditorModel(index, {
-											maxTokens:
-												Number((event.currentTarget as HTMLInputElement).value) > 0
-													? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-													: undefined
-										})}
-									aria-label="Max Tokens"
-								/>
-								<button
-									class="btn btn-danger btn-small"
-									onclick={() => removeEditorModel(index)}
-									aria-label="移除该模型">✕</button
-								>
-							</div>
-						{/each}
-						<div class="model-row" style="margin-top: 6px;">
-							<ModelCombobox
-								value={model}
-								candidates={modelCandidates}
-								inputId="svc-model"
-								placeholder="输入/选择模型后加入"
-								onChange={onModelChange}
+				{/if}
+				<div class="field">
+					<span class="muted" style="display: block; margin-bottom: 4px;">
+						模型列表（一个服务商下可多选多个模型）
+					</span>
+					{#each editorModels as entry, index (index)}
+						<div class="model-row">
+							<input
+								class="input"
+								value={entry.model}
+								placeholder="模型 id"
+								onchange={(event) =>
+									updateEditorModel(index, {
+										model: (event.currentTarget as HTMLInputElement).value
+									})}
+								aria-label="模型 id"
 							/>
 							<input
 								class="input"
 								style="width: 110px;"
 								type="number"
-								value={modelContextWindow ?? ''}
+								value={entry.contextWindow ?? ''}
 								placeholder="窗口"
 								onchange={(event) =>
-									(modelContextWindow = Number((event.currentTarget as HTMLInputElement).value) > 0
-										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-										: undefined)}
+									updateEditorModel(index, {
+										contextWindow:
+											Number((event.currentTarget as HTMLInputElement).value) > 0
+												? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+												: undefined
+									})}
 								aria-label="上下文窗口"
 							/>
 							<input
 								class="input"
 								style="width: 90px;"
 								type="number"
-								value={serviceMaxTokens ?? ''}
+								value={entry.maxTokens ?? ''}
 								placeholder="Max"
 								onchange={(event) =>
-									(serviceMaxTokens = Number((event.currentTarget as HTMLInputElement).value) > 0
-										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
-										: undefined)}
+									updateEditorModel(index, {
+										maxTokens:
+											Number((event.currentTarget as HTMLInputElement).value) > 0
+												? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+												: undefined
+									})}
 								aria-label="Max Tokens"
 							/>
-							<button class="btn btn-small" onclick={addEditorModel} disabled={model.trim() === ''}>
-								＋ 加入
-							</button>
+							<button
+								class="btn btn-danger btn-small"
+								onclick={() => removeEditorModel(index)}
+								aria-label="移除该模型">✕</button
+							>
 						</div>
+					{/each}
+					<div class="model-row" style="margin-top: 6px;">
+						<ModelCombobox
+							value={model}
+							candidates={modelCandidates}
+							inputId="svc-model"
+							placeholder="输入/选择模型后加入"
+							onChange={onModelChange}
+						/>
+						<input
+							class="input"
+							style="width: 110px;"
+							type="number"
+							value={modelContextWindow ?? ''}
+							placeholder="窗口"
+							onchange={(event) =>
+								(modelContextWindow =
+									Number((event.currentTarget as HTMLInputElement).value) > 0
+										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+										: undefined)}
+							aria-label="上下文窗口"
+						/>
+						<input
+							class="input"
+							style="width: 90px;"
+							type="number"
+							value={serviceMaxTokens ?? ''}
+							placeholder="Max"
+							onchange={(event) =>
+								(serviceMaxTokens =
+									Number((event.currentTarget as HTMLInputElement).value) > 0
+										? Math.floor(Number((event.currentTarget as HTMLInputElement).value))
+										: undefined)}
+							aria-label="Max Tokens"
+						/>
+						<button class="btn btn-small" onclick={addEditorModel} disabled={model.trim() === ''}>
+							＋ 加入
+						</button>
 					</div>
+				</div>
+				{#if presetSelection !== 'demo'}
 					<div class="row-actions" style="margin-bottom: 10px;">
 						<button
 							class="btn btn-small"
@@ -951,7 +1056,11 @@
 						>
 							{fetchingModels ? '获取中…' : '获取模型列表'}
 						</button>
-						<button class="btn btn-small" onclick={test} disabled={fetchingModels || testingConnection}>
+						<button
+							class="btn btn-small"
+							onclick={test}
+							disabled={fetchingModels || testingConnection}
+						>
 							{testingConnection ? '测试中…' : '连接测试'}
 						</button>
 					</div>
@@ -994,7 +1103,11 @@
 					<input id="svc-note" class="input" bind:value={serviceNote} placeholder="用途说明" />
 				</div>
 				<div class="row-actions" style="gap: 6px;">
-					<button class="btn btn-small" onclick={saveService} disabled={savingService || editorModels.length === 0}>
+					<button
+						class="btn btn-small"
+						onclick={saveService}
+						disabled={savingService || editorModels.length === 0}
+					>
 						{savingService ? '保存中…' : '保存服务'}
 					</button>
 					<button
@@ -1102,6 +1215,18 @@
 				>使用 LLM 状态确认（AI 未调用工具时，由另一个 LLM 判断并补执行）</label
 			>
 		</div>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input
+				id="text-tool-fallback"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={textToolFallback}
+				disabled={!allowAiStateTools}
+			/>
+			<label for="text-tool-fallback" class="muted"
+				>文本形式工具调用双通道（结构化调用缺失时解析文本形式调用兜底；取消勾选则强制只走 JSON）</label
+			>
+		</div>
 		<p class="muted" style="margin: 0;">
 			开启后，AI
 			可在剧情中自行调用工具更新状态并生成快照，你可以在版本页回溯；关闭则保持纯文本回复。
@@ -1111,12 +1236,7 @@
 	<div class="card">
 		<h3 class="card-title">长期记忆</h3>
 		<div class="row-actions" style="margin-bottom: 10px;">
-			<input
-				id="memory-enabled"
-				class="checkbox"
-				type="checkbox"
-				bind:checked={memoryEnabled}
-			/>
+			<input id="memory-enabled" class="checkbox" type="checkbox" bind:checked={memoryEnabled} />
 			<label for="memory-enabled" class="muted"
 				>启用记忆召回（按关键词与重要度把相关记忆注入上下文）</label
 			>
@@ -1194,8 +1314,7 @@
 				id="theme-preset"
 				class="select"
 				value={themePresetId}
-				onchange={(event) =>
-					selectThemePreset((event.currentTarget as HTMLSelectElement).value)}
+				onchange={(event) => selectThemePreset((event.currentTarget as HTMLSelectElement).value)}
 			>
 				{#each THEME_PRESETS as preset (preset.id)}
 					<option value={preset.id}>{preset.label}</option>
@@ -1207,13 +1326,36 @@
 			</p>
 		</div>
 
+		<fieldset class="field official-bg-fieldset">
+			<legend>官方背景</legend>
+			<p class="muted" style="margin: 0 0 8px;">内置预设背景，点选即时生效；与自定义上传互斥。</p>
+			<div class="official-bg-grid">
+				{#each OFFICIAL_BACKGROUNDS as bg (bg.id)}
+					<button
+						type="button"
+						class="official-bg-card"
+						class:selected={officialBackgroundId === bg.id}
+						onclick={() => selectOfficialBackground(bg.id)}
+						title={bg.description}
+					>
+						<img class="official-bg-thumb" src={bg.thumbnailPath} alt={bg.label} loading="lazy" />
+						<span class="official-bg-label">{bg.label}</span>
+					</button>
+				{/each}
+			</div>
+		</fieldset>
+
 		<div class="field">
-			<label for="theme-bg-file">背景图</label>
+			<label for="theme-bg-file">自定义背景图</label>
 			<div class="row-actions">
 				<button class="btn btn-small" onclick={() => themeInput?.click()}>
-					{themeBackground === '' ? '选择背景图' : '更换背景图'}
+					{officialBackgroundId !== ''
+						? '上传自定义图片'
+						: themeBackground === ''
+							? '选择背景图'
+							: '更换背景图'}
 				</button>
-				{#if themeBackground !== ''}
+				{#if themeBackground !== '' || officialBackgroundId !== ''}
 					<button class="btn btn-small btn-danger" onclick={removeThemeBackground}>
 						移除背景图
 					</button>
@@ -1227,8 +1369,15 @@
 					onchange={pickThemeBackground}
 				/>
 			</div>
-			{#if themeBackground !== ''}
-				<p class="muted" style="margin: 4px 0 0;">已启用背景图（建议使用压缩后的图片，base64 会随设置持久化）。</p>
+			{#if themeBackground !== '' || officialBackgroundId !== ''}
+				<p class="muted" style="margin: 4px 0 0;">
+					{#if officialBackgroundId !== ''}
+						已启用官方背景「{findOfficialBackground(officialBackgroundId)?.label ??
+							officialBackgroundId}」，透明度与磨砂可继续调整。
+					{:else}
+						已启用自定义背景图（建议使用压缩后的图片，base64 会随设置持久化）。
+					{/if}
+				</p>
 				<div class="field">
 					<label for="theme-bg-opacity">背景图透明度：{Math.round(themeOpacity * 100)}%</label>
 					<input
@@ -1294,16 +1443,14 @@
 
 	<div class="card">
 		<h3 class="card-title">角色档案</h3>
-		<p class="muted" style="margin: 0 0 10px;">默认与内置角色「绫音」一致；可自由修改。</p>
+		<p class="muted" style="margin: 0 0 10px;">
+			角色名用于状态摘要与默认提示词；系统提示词等已移到「提示词」标签页。
+		</p>
 		<div class="field">
 			<label for="profile-name">角色名</label>
 			<input id="profile-name" class="input" bind:value={profileName} />
 		</div>
-		<div class="field">
-			<label for="profile-prompt">系统提示（可选，覆盖默认模板）</label>
-			<textarea id="profile-prompt" class="textarea" bind:value={systemPrompt}></textarea>
-		</div>
-		<button class="btn" onclick={resetProfile}>回到默认</button>
+		<button class="btn" onclick={resetProfileName}>恢复默认角色名</button>
 	</div>
 
 	<div class="card">
@@ -1373,6 +1520,87 @@
 		</div>
 	</div>
 
+	<div class="card">
+		<h3 class="card-title">开源协议声明</h3>
+		<p class="muted" style="margin: 0 0 12px;">
+			列出 CosBox 直接依赖与参考过的开源项目及对应许可证。
+		</p>
+		<button class="btn" onclick={() => (showCredits = true)}>查看开源协议声明</button>
+	</div>
+
+	<div class="card">
+		<h3 class="card-title">关于</h3>
+		<p class="muted" style="margin: 0 0 10px;">
+			CosBox v{APP_VERSION}（测试版）。{isTauri()
+				? '更新检查地址：cosbox.benng.cc'
+				: 'Web 演示版不支持自动更新，请使用桌面版。'}
+		</p>
+		{#if isTauri()}
+			<div class="row-actions">
+				<button class="btn" onclick={checkUpdates} disabled={updateBusy}>
+					{updateBusy && updateInfo === null ? '检查中…' : '检查更新'}
+				</button>
+				{#if updateInfo !== null}
+					<button class="btn btn-primary" onclick={installUpdateNow} disabled={updateBusy}>
+						{installProgress !== '' ? installProgress : `立即更新到 v${updateInfo.version}`}
+					</button>
+				{/if}
+				{#if updateStatus}
+					<span class="muted">{updateStatus}</span>
+				{/if}
+			</div>
+			{#if updateInfo !== null && updateInfo.notes !== ''}
+				<p class="muted" style="margin: 8px 0 0;">更新说明：{updateInfo.notes}</p>
+			{/if}
+		{/if}
+	</div>
+
+	{#if showCredits}
+		<div
+			class="prompt-backdrop"
+			role="presentation"
+			onclick={(event) => {
+				if (event.target === event.currentTarget) {
+					showCredits = false;
+				}
+			}}
+		>
+			<div class="prompt-modal credits-modal" role="dialog" aria-label="开源协议声明">
+				<div class="prompt-modal-head">
+					<span class="prompt-modal-title">开源协议声明</span>
+					<button class="btn btn-small" onclick={() => (showCredits = false)}>关闭</button>
+				</div>
+				<div class="prompt-modal-body">
+					<p class="muted" style="margin: 0 0 12px;">
+						CosBox 基于以下开源项目构建，并在设计与实现中参考了它们的做法。
+						各项目完整许可证文本以其官方仓库为准。
+					</p>
+					{#each getCreditGroups() as group (group.label)}
+						{#if group.items.length > 0}
+							<h4 class="credit-group-title">{group.label}</h4>
+							<div class="credit-list">
+								{#each group.items as item (item.name)}
+									<div class="credit-row">
+										<a
+											class="credit-name"
+											href={item.url}
+											target="_blank"
+											rel="external noreferrer"
+										>
+											{item.name}
+										</a>
+										<span class="license-badge">{item.license}</span>
+										<span class="muted credit-usage">{item.usage}</span>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					{/each}
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<button class="btn btn-primary" onclick={save} disabled={saving}>保存设置</button>
 </div>
 
@@ -1429,5 +1657,52 @@
 		padding: 8px;
 		margin-bottom: 10px;
 		background: var(--panel);
+	}
+	.credit-group-title {
+		margin: 14px 0 6px;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-dim);
+	}
+	.credit-list {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.credit-row {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		flex-wrap: wrap;
+		padding: 4px 0;
+		border-bottom: 1px solid var(--border);
+	}
+	.credit-row:last-child {
+		border-bottom: none;
+	}
+	.credit-name {
+		font-weight: 600;
+		color: var(--accent);
+		text-decoration: none;
+	}
+	.credit-name:hover {
+		text-decoration: underline;
+	}
+	.license-badge {
+		font-size: 11px;
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--accent) 15%, transparent);
+		color: var(--accent);
+		border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+		white-space: nowrap;
+	}
+	.credit-usage {
+		font-size: 12px;
+		flex: 1;
+		min-width: 180px;
+	}
+	.credits-modal {
+		width: min(720px, 94vw);
 	}
 </style>

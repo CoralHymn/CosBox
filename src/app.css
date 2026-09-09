@@ -1,19 +1,19 @@
 :root {
-	--bg: #0e1016;
-	--bg-elevated: #141821;
-	--panel: #171b26;
-	--panel-2: #1d2230;
-	--border: #2a3040;
-	--border-strong: #374055;
-	--text: #e8eaf1;
-	--text-dim: #9aa3b8;
-	--text-faint: #6b7387;
-	--accent: #7c9cff;
-	--accent-dim: rgba(124, 156, 255, 0.14);
-	--accent-2: #b18cff;
-	--ok: #4ade80;
-	--warn: #fbbf24;
-	--err: #f87171;
+	--bg: #131313;
+	--bg-elevated: #1a1a1a;
+	--panel: #2d2d2d;
+	--panel-2: #232323;
+	--border: #313131;
+	--border-strong: #4a4a4a;
+	--text: #ffffff;
+	--text-dim: #949494;
+	--text-faint: #6b6b6b;
+	--accent: #3cffd0;
+	--accent-dim: rgba(60, 255, 208, 0.12);
+	--accent-2: #5200ff;
+	--ok: #3cffd0;
+	--warn: #f5c542;
+	--err: #ff5d5d;
 	--radius: 10px;
 	--radius-sm: 7px;
 	--shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
@@ -164,6 +164,19 @@ button:disabled {
 	display: grid;
 	grid-template-columns: 172px 1fr;
 	min-height: 0;
+}
+
+/* 初始界面（未进入工作区）：无导航栏，横跨两行占满全屏 + 内容区可滚动。
+   注意 .app 是 `54px 1fr` 双行网格，header 不渲染时 body 是唯一流内子元素，
+   会被自动放进 54px 顶栏行——必须显式 span 两行，否则界面被压成顶部细条。 */
+.body.landing {
+	grid-row: 1 / -1;
+	display: flex;
+}
+
+.body.landing .content {
+	flex: 1;
+	overflow-y: auto;
 }
 
 .nav-rail {
@@ -334,6 +347,72 @@ button:disabled {
 
 .theme-color-field {
 	margin-bottom: 0;
+}
+
+/* 官方背景小图预览选择：缩略图 + 名称，选中态高亮主色描边。 */
+.official-bg-fieldset {
+	border: none;
+	padding: 0;
+	margin-bottom: 10px;
+	min-width: 0;
+}
+
+.official-bg-fieldset legend {
+	font-size: 12px;
+	color: var(--text-dim);
+	margin-bottom: 5px;
+	padding: 0;
+}
+
+.official-bg-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+	gap: 8px;
+}
+
+.official-bg-card {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 6px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--panel-2);
+	cursor: pointer;
+	transition:
+		border-color 120ms,
+		box-shadow 120ms;
+}
+
+.official-bg-card:hover {
+	border-color: var(--border-strong);
+}
+
+.official-bg-card.selected {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 1px var(--accent);
+}
+
+.official-bg-thumb {
+	display: block;
+	width: 100%;
+	aspect-ratio: 16 / 9;
+	object-fit: cover;
+	border-radius: calc(var(--radius-sm) - 2px);
+	background: var(--bg);
+}
+
+.official-bg-label {
+	font-size: 12px;
+	color: var(--text-dim);
+	text-align: center;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.official-bg-card.selected .official-bg-label {
+	color: var(--accent);
 }
 
 .color-input {
@@ -557,6 +636,40 @@ button:disabled {
 	flex-direction: column;
 	/* 气泡下方为操作条预留空间（消息本身 + 4px 间距 + 24px 控制条）。 */
 	gap: 8px;
+}
+
+/* 后处理状态条：正文输出后的补调/状态确认阶段可见，不再是黑盒停顿。 */
+.phase-bar {
+	align-self: flex-start;
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	padding: 4px 12px;
+	border-radius: 999px;
+	border: 1px solid var(--border);
+	background: var(--panel-2);
+	color: var(--text-faint);
+	font-size: 13px;
+}
+
+.phase-bar .phase-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--accent);
+	animation: phase-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes phase-pulse {
+	0%,
+	100% {
+		opacity: 0.25;
+		transform: scale(0.85);
+	}
+	50% {
+		opacity: 1;
+		transform: scale(1);
+	}
 }
 
 .message {
@@ -1097,9 +1210,6 @@ button:disabled {
 }
 
 /* 移动端专用元素：桌面端隐藏 */
-.mobile-nav-toggle,
-.nav-backdrop,
-.mobile-state-toggle,
 .mobile-state-panel {
 	display: none;
 }
@@ -1117,6 +1227,8 @@ button:disabled {
 		flex-wrap: wrap;
 		gap: 8px;
 		padding: 6px 10px;
+		/* 顶部安全区：状态栏/刘海下留出内容空间 */
+		padding-top: calc(6px + env(safe-area-inset-top, 0px));
 	}
 
 	.header-spacer {
@@ -1132,78 +1244,15 @@ button:disabled {
 		display: inline-flex;
 	}
 
-	/* 导航栏改为左侧抽屉：默认滑出屏幕，打开时滑入 */
+	/* 移动端无左侧导航：内容独占一列（功能标签收进聊天页「⋯」抽屉）；
+	   min-width:0 防止网格项自动最小尺寸把 1fr 轨道撑出横向滚动。 */
 	.body {
 		grid-template-columns: 1fr;
+		min-width: 0;
 	}
 
 	.content {
 		order: 1;
-	}
-
-	.nav-rail {
-		position: fixed;
-		top: 0;
-		bottom: 0;
-		left: 0;
-		width: 224px;
-		z-index: 70;
-		transform: translateX(-100%);
-		transition: transform 200ms ease;
-		flex-direction: column;
-		overflow-y: auto;
-		border-right: 1px solid var(--border);
-		padding: 14px 10px;
-		gap: 4px;
-		-webkit-overflow-scrolling: touch;
-	}
-
-	.nav-open .nav-rail {
-		transform: translateX(0);
-		box-shadow: var(--shadow);
-	}
-
-	.nav-item {
-		flex-direction: row;
-		gap: 10px;
-		padding: 11px 12px;
-		font-size: 13.5px;
-	}
-
-	.nav-icon {
-		font-size: 15px;
-		width: 18px;
-	}
-
-	/* 抽屉遮罩与汉堡按钮 */
-	.nav-backdrop {
-		display: block;
-		position: fixed;
-		inset: 0;
-		z-index: 65;
-		background: rgba(0, 0, 0, 0.5);
-		opacity: 0;
-		pointer-events: none;
-		transition: opacity 180ms ease;
-	}
-
-	.nav-backdrop.show {
-		opacity: 1;
-		pointer-events: auto;
-	}
-
-	.mobile-nav-toggle {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 32px;
-		height: 32px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border);
-		background: var(--panel-2);
-		color: var(--text);
-		font-size: 15px;
-		flex: none;
 	}
 
 	/* 面板与卡片收紧 */
@@ -1253,27 +1302,10 @@ button:disabled {
 		display: none;
 	}
 
-	.mobile-state-toggle {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		flex: 1;
-		min-width: 0;
-		padding: 5px 10px;
-		border-radius: 999px;
-		border: 1px solid var(--border);
-		background: var(--panel-2);
-		color: var(--text);
-		font-size: 12px;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
 	.mobile-state-panel {
 		position: fixed;
-		top: 52px;
+		/* 头部在安全区内增高，浮层同步下移 */
+		top: calc(52px + env(safe-area-inset-top, 0px));
 		right: 10px;
 		width: min(320px, calc(100vw - 20px));
 		max-height: 58vh;
@@ -1317,6 +1349,10 @@ button:disabled {
 
 	.composer {
 		padding: 8px 10px;
+		/* 底部安全区：输入条避开手势条；横屏时左右避开圆角/刘海 */
+		padding-left: calc(10px + env(safe-area-inset-left, 0px));
+		padding-right: calc(10px + env(safe-area-inset-right, 0px));
+		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 		gap: 8px;
 	}
 
@@ -1345,13 +1381,24 @@ button:disabled {
 		flex-wrap: wrap;
 		justify-content: flex-start;
 		gap: 6px;
+		/* 底部安全区 */
+		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 	}
 
-	/* 提示条占满宽度 */
+	/* 全屏弹窗的头部/底部避开安全区 */
+	.prompt-modal-head {
+		padding-top: calc(12px + env(safe-area-inset-top, 0px));
+	}
+
+	.prompt-modal-body {
+		padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+	}
+
+	/* 提示条占满宽度，底部避开手势条 */
 	.toasts {
 		left: 12px;
 		right: 12px;
-		bottom: 12px;
+		bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 	}
 
 	.toast {
@@ -1368,4 +1415,597 @@ button:disabled {
 	.btn {
 		min-height: 34px;
 	}
+
+	/* 设置页：模型编辑行换行收纳，模型名独占一行（避免被固定宽度输入框挤压） */
+	.model-row {
+		flex-wrap: wrap;
+	}
+
+	.model-row > :first-child {
+		flex: 1 1 100%;
+	}
+}
+
+/* ===== 移动端微信式布局（会话列表首屏 / 聊天沉浸页顶栏 / 设置分区） ===== */
+
+.mobile-chat-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	padding-top: calc(8px + env(safe-area-inset-top, 0px));
+	background: var(--bg-app-header, var(--bg-elevated));
+	border-bottom: 1px solid var(--border);
+	z-index: 5;
+}
+
+.mobile-back {
+	width: 34px;
+	height: 34px;
+	flex: none;
+	border-radius: 10px;
+	border: none;
+	background: none;
+	color: var(--text);
+	font-size: 22px;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.mobile-back:active {
+	background: var(--accent-dim);
+}
+
+.mobile-chat-title {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 1px;
+	border: none;
+	background: none;
+	padding: 0;
+	cursor: pointer;
+	text-align: left;
+}
+
+.mobile-chat-name {
+	font-size: 15.5px;
+	font-weight: 700;
+	color: var(--text);
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mobile-chat-sub {
+	font-size: 11px;
+	color: var(--text-faint);
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mobile-feature-toggle {
+	width: 34px;
+	height: 34px;
+	flex: none;
+	border-radius: 10px;
+	border: none;
+	background: none;
+	color: var(--text);
+	font-size: 20px;
+	letter-spacing: 1px;
+	cursor: pointer;
+}
+
+.mobile-feature-toggle:active {
+	background: var(--accent-dim);
+}
+
+/* 首屏容器：内容 + 底部「对话/设置」标签栏 */
+.mobile-home {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+	width: 100%;
+}
+
+.mobile-home-tabs {
+	flex: none;
+	display: flex;
+	border-top: 1px solid var(--border);
+	background: var(--bg-app-header, var(--bg-elevated));
+	padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-home-tab {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+	padding: 8px 0 9px;
+	border: none;
+	background: none;
+	color: var(--text-faint);
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.mobile-home-tab.active {
+	color: var(--accent);
+}
+
+.mobile-home-tab-ico {
+	font-size: 19px;
+	line-height: 1.2;
+}
+
+/* 首屏「设置」tab：分区菜单 */
+.mobile-settings-menu {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 8px 12px 14px;
+}
+
+.mobile-settings-title {
+	font-size: 19px;
+	font-weight: 700;
+	color: var(--text);
+	padding: 10px 4px 14px;
+	padding-top: calc(10px + env(safe-area-inset-top, 0px));
+}
+
+.mobile-settings-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 12px 10px;
+	border-radius: 10px;
+	border: none;
+	background: none;
+	color: var(--text);
+	cursor: pointer;
+	text-align: left;
+}
+
+.mobile-settings-item:active {
+	background: var(--accent-dim);
+}
+
+.mobile-settings-label {
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.mobile-settings-desc {
+	flex: 1;
+	min-width: 0;
+	font-size: 11.5px;
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mobile-settings-caret {
+	color: var(--text-faint);
+	flex: none;
+}
+
+/* 全屏子页（设置详情等）：头部返回 + 面板占满剩余高度 */
+.mobile-screen {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+
+.mobile-screen-head {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	padding-top: calc(8px + env(safe-area-inset-top, 0px));
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-app-header, var(--bg-elevated));
+}
+
+.mobile-screen-title {
+	font-size: 15px;
+	font-weight: 700;
+}
+
+.mobile-screen .panel {
+	height: auto;
+	flex: 1;
+	min-height: 0;
+}
+
+/* ===== 多工作区：初始界面 / 管理列表 / 弹层 / 导航切换器 ===== */
+
+.home {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 48px 20px 32px;
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+}
+
+.home-head {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	text-align: center;
+}
+
+.home-brand {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-size: 26px;
+	font-weight: 700;
+	color: var(--text);
+}
+
+.home-sub {
+	margin: 0;
+	color: var(--text-dim);
+	font-size: 14px;
+}
+
+.ws-manager {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.ws-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.ws-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 14px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.ws-row.current {
+	border-color: var(--accent);
+	background: var(--panel-2);
+}
+
+.ws-enter {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 2px;
+	background: none;
+	border: none;
+	cursor: pointer;
+	text-align: left;
+	padding: 0;
+}
+
+.ws-enter:disabled {
+	cursor: default;
+}
+
+.ws-name {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+
+.ws-meta {
+	font-size: 12px;
+	color: var(--text-faint);
+}
+
+.ws-row.current .ws-meta {
+	color: var(--accent);
+}
+
+.ws-actions {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.ws-edit {
+	flex: 1;
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.ws-edit input {
+	flex: 1;
+	min-width: 0;
+}
+
+.ws-create {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+
+.ws-create input {
+	flex: 1;
+	min-width: 160px;
+}
+
+.ws-file-input {
+	display: none;
+}
+
+.ws-modal-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(6, 8, 12, 0.62);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 120;
+	padding: 20px;
+}
+
+.ws-modal {
+	width: min(680px, 100%);
+	max-height: 84vh;
+	overflow-y: auto;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow);
+	padding: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.ws-modal-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.ws-modal-head h3 {
+	margin: 0;
+	font-size: 16px;
+	color: var(--text);
+}
+
+.nav-workspace {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 8px 10px 10px;
+	border-top: 1px solid var(--border);
+	margin-top: auto;
+}
+
+.nav-workspace-switch {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: var(--accent-dim);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+	padding: 8px 10px;
+	cursor: pointer;
+	font-size: 13px;
+}
+
+.nav-workspace-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: left;
+	font-weight: 600;
+}
+
+.nav-workspace-caret {
+	color: var(--text-faint);
+	font-size: 11px;
+}
+
+.nav-workspace-exit {
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-dim);
+	padding: 8px;
+	cursor: pointer;
+	font-size: 14px;
+	line-height: 1;
+}
+
+.nav-workspace-exit:hover {
+	color: var(--text);
+	border-color: var(--border-strong);
+}
+
+@media (max-width: 768px) {
+	.home {
+		padding: calc(24px + env(safe-area-inset-top, 0px)) 16px
+			calc(24px + env(safe-area-inset-bottom, 0px));
+	}
+}
+
+/* ===== Tauri 桌面版自定义标题栏（VSCode 式：窗口控制 + 工作区切换器） ===== */
+
+.titlebar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 40px;
+	padding: 0 0 0 12px;
+	background: var(--bg-app-header, var(--bg-elevated));
+	border-bottom: 1px solid var(--border);
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+/* 标题栏模式下网格改为 标题栏 40px + 内容 1fr。
+   （时间/模型/快照等状态 chips 已并入标题栏，桌面端不再渲染 54px 顶栏。） */
+.app.titlebar-mode {
+	grid-template-rows: 40px 1fr;
+}
+
+/* 初始界面（无顶栏）在标题栏模式下从第 2 行开始，跨到最后。 */
+.app.titlebar-mode .body.landing {
+	grid-row: 2 / -1;
+}
+
+.titlebar-brand {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13.5px;
+	font-weight: 700;
+	color: var(--text);
+}
+
+.titlebar-ws {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	max-width: 280px;
+	background: var(--accent-dim);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+	padding: 4px 10px;
+	cursor: pointer;
+	font-size: 12.5px;
+}
+
+.titlebar-ws:hover {
+	border-color: var(--border-strong);
+}
+
+.titlebar-ws-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.titlebar-caret {
+	color: var(--text-faint);
+	font-size: 11px;
+}
+
+.titlebar-exit {
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-dim);
+	padding: 4px 8px;
+	cursor: pointer;
+	font-size: 13px;
+	line-height: 1;
+}
+
+.titlebar-exit:hover {
+	color: var(--text);
+	border-color: var(--border-strong);
+}
+
+.titlebar-spacer {
+	flex: 1;
+	height: 100%;
+}
+
+.titlebar-controls {
+	display: flex;
+	height: 100%;
+}
+
+.titlebar-control {
+	width: 46px;
+	height: 100%;
+	border: none;
+	background: transparent;
+	color: var(--text-dim);
+	cursor: pointer;
+	font-size: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.titlebar-control:hover {
+	background: var(--panel);
+	color: var(--text);
+}
+
+.titlebar-close:hover {
+	background: #e81123;
+	color: #ffffff;
+}
+
+/* ===== 内联 SVG 图标（Icon.svelte）对齐 ===== */
+
+.icon {
+	display: block;
+	flex-shrink: 0;
+}
+
+.nav-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.nav-workspace-exit,
+.titlebar-exit,
+.titlebar-control,
+.ws-actions .btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.titlebar-ws-icon {
+	display: flex;
+	align-items: center;
+	color: var(--accent);
+}
+
+/* 标题栏内的状态 chips：与 40px 高度匹配的小号样式。 */
+.titlebar-chip {
+	font-size: 11.5px;
+	padding: 2px 8px;
 }

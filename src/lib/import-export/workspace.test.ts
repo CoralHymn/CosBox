@@ -12,16 +12,39 @@ function makeWorkspace(): WorkspaceData {
 		delta: null
 	};
 	return {
-		profile: { name: '绫音', systemPrompt: '你是绫音' },
+		profile: {
+			name: '绫音',
+			systemPrompt: '你是绫音',
+			characterPrompt: '16 岁高中生',
+			userPrompt: '用户是同学',
+			worldPrompt: '现代虚拟学园',
+			stylePrompt: '余华式白描'
+		},
 		developerMode: true,
 		worldInfo: [{ id: 'w1', keys: ['图书馆'], content: '校园传说', enabled: true, priority: 10 }],
+		memories: [
+			{
+				id: 'm1',
+				content: '记得带伞',
+				category: '其他',
+				keywords: ['下雨'],
+				importance: 3,
+				pinned: false,
+				source: 'manual',
+				createdAt: 1,
+				updatedAt: 1,
+				lastUsedAt: 0,
+				useCount: 0
+			}
+		],
 		config: {
 			places: [{ id: 'p1', category: '学校', name: '食堂', description: 'x' }],
 			wardrobe: [{ id: 'c1', category: '常服', kind: 'top', name: '衬衫', description: 'x' }],
 			scheduleEntries: [{ id: 's1', day: 0, start: 480, end: 540, title: '晨会' }]
 		},
 		headId: 'root',
-		snapshots: [root]
+		snapshots: [root],
+		workspaceName: '我的故事'
 	};
 }
 
@@ -48,10 +71,26 @@ function goodFiles(): Record<string, string> {
 }
 
 describe('workspace', () => {
-	it('序列化 → 解析往返（含完整数据）', () => {
+	it('序列化 → 解析往返（含完整数据与 v2 记忆/名称）', () => {
 		const data = makeWorkspace();
 		const parsed = parseWorkspace(serializeWorkspace(data));
 		expect(parsed).toEqual(data);
+	});
+
+	it('v1 文件兼容：无 memories.json 时记忆为空、无名称', () => {
+		const parsed = parseWorkspace(zipWith(goodFiles()));
+		expect(parsed.memories).toEqual([]);
+		expect(parsed.workspaceName).toBeUndefined();
+		expect(parsed.headId).toBeNull();
+	});
+
+	it('serializeWorkspace 兼容缺失 memories / workspaceName 字段', () => {
+		const data = makeWorkspace();
+		delete (data as Partial<WorkspaceData>).memories;
+		delete (data as Partial<WorkspaceData>).workspaceName;
+		const parsed = parseWorkspace(serializeWorkspace(data));
+		expect(parsed.memories).toEqual([]);
+		expect(parsed.workspaceName).toBeUndefined();
 	});
 
 	it('headId 为 null 时往返', () => {
@@ -77,7 +116,7 @@ describe('workspace', () => {
 
 		expect(() =>
 			parseWorkspace(
-				zipWith({ ...goodFiles(), 'manifest.json': JSON.stringify({ app: 'cosbox', version: 2 }) })
+				zipWith({ ...goodFiles(), 'manifest.json': JSON.stringify({ app: 'cosbox', version: 3 }) })
 			)
 		).toThrow('不支持的工作区版本');
 	});

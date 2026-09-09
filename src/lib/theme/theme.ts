@@ -29,8 +29,10 @@ export interface ThemeConfig {
 	presetId: string;
 	/** 已应用的颜色值（键与 ThemeColorKey 一致，值为 CSS 颜色）。 */
 	colors: Partial<Record<ThemeColorKey, string>>;
-	/** 背景图 data URL（base64）；空串表示不启用背景图。 */
+	/** 自定义背景图 data URL（base64）；空串表示未上传自定义背景图。 */
 	backgroundImage: string;
+	/** 官方背景图 id（OFFICIAL_BACKGROUNDS 中的一项）；空串表示未选择官方背景。 */
+	officialBackgroundId: string;
 	/** 背景图透明度，0-1（0 = 完全透明不显示，1 = 不透明）。 */
 	backgroundOpacity: number;
 	/** 背景图磨砂（模糊）程度，0-50 px；0 = 清晰。 */
@@ -45,23 +47,90 @@ export interface ThemePreset {
 	colors: Record<ThemeColorKey, string>;
 }
 
-/** CosBox 内置默认主题（与 app.css :root 保持一致）。 */
+/** 官方背景图：静态文件位于 static/backgrounds/（用户自创图片，无版权问题）。 */
+export interface OfficialBackground {
+	id: string;
+	label: string;
+	description: string;
+	/** 小图预览路径（thumbs 下的压缩缩略图）。 */
+	thumbnailPath: string;
+	/** 全屏背景图 URL（构建后为 /backgrounds/xxx.webp）。 */
+	fullPath: string;
+}
+
+/** 内置官方背景列表：官方背景与自定义上传互斥（官方 id 与 data URL 同时只保留一个）。 */
+export const OFFICIAL_BACKGROUNDS: readonly OfficialBackground[] = [
+	{
+		id: 'lowpoly-planet',
+		label: '低多边形星球',
+		description: '深空悬浮的低多边形微缩世界：蓝海绿洲、小屋与飞行的飞机。',
+		thumbnailPath: '/backgrounds/thumbs/lowpoly-planet.webp',
+		fullPath: '/backgrounds/lowpoly-planet.webp'
+	},
+	{
+		id: 'hourglass',
+		label: '琥珀沙漏',
+		description: '极简沙漏置于纯黑背景，琥珀色流沙与圆形光晕，静谧的时间意象。',
+		thumbnailPath: '/backgrounds/thumbs/hourglass.webp',
+		fullPath: '/backgrounds/hourglass.webp'
+	},
+	{
+		id: 'dark-grid',
+		label: '暗色网格',
+		description: '深色细线方格铺满全屏，低调科技感，最不影响文字可读性。',
+		thumbnailPath: '/backgrounds/thumbs/dark-grid.webp',
+		fullPath: '/backgrounds/dark-grid.webp'
+	},
+	{
+		id: 'red-spiral',
+		label: '赤红螺旋',
+		description: '纯黑底色上的鲜红几何螺旋，极简高饱和，冷静而富有张力。',
+		thumbnailPath: '/backgrounds/thumbs/red-spiral.webp',
+		fullPath: '/backgrounds/red-spiral.webp'
+	},
+	{
+		id: 'dino-skeleton',
+		label: '恐龙骨架',
+		description: '深色底上的银灰几何恐龙骨架剪影，极简趣味图标风。',
+		thumbnailPath: '/backgrounds/thumbs/dino-skeleton.webp',
+		fullPath: '/backgrounds/dino-skeleton.webp'
+	}
+];
+
+/** 按 id 查找官方背景；不存在返回 undefined。 */
+export function findOfficialBackground(id: string): OfficialBackground | undefined {
+	return OFFICIAL_BACKGROUNDS.find((bg) => bg.id === id);
+}
+
+/** 获取当前生效的背景图 URL（自定义 data URL 优先于官方背景）。 */
+export function getEffectiveBackgroundUrl(theme: ThemeConfig): string {
+	if (theme.backgroundImage.trim() !== '') {
+		return theme.backgroundImage;
+	}
+	const official = findOfficialBackground(theme.officialBackgroundId);
+	return official ? official.fullPath : '';
+}
+
+/**
+ * CosBox 内置默认主题（The Verge 酸薄荷：近黑画布 + 酸薄荷 + 紫外紫，
+ * 与 app.css :root 保持一致）。
+ */
 export const DEFAULT_THEME_COLORS: Record<ThemeColorKey, string> = {
-	bg: '#0e1016',
-	'bg-elevated': '#141821',
-	panel: '#171b26',
-	'panel-2': '#1d2230',
-	border: '#2a3040',
-	'border-strong': '#374055',
-	text: '#e8eaf1',
-	'text-dim': '#9aa3b8',
-	'text-faint': '#6b7387',
-	accent: '#7c9cff',
-	'accent-dim': 'rgba(124, 156, 255, 0.14)',
-	'accent-2': '#b18cff',
-	ok: '#4ade80',
-	warn: '#fbbf24',
-	err: '#f87171'
+	bg: '#131313',
+	'bg-elevated': '#1a1a1a',
+	panel: '#2d2d2d',
+	'panel-2': '#232323',
+	border: '#313131',
+	'border-strong': '#4a4a4a',
+	text: '#ffffff',
+	'text-dim': '#949494',
+	'text-faint': '#6b6b6b',
+	accent: '#3cffd0',
+	'accent-dim': 'rgba(60, 255, 208, 0.12)',
+	'accent-2': '#5200ff',
+	ok: '#3cffd0',
+	warn: '#f5c542',
+	err: '#ff5d5d'
 };
 
 /**
@@ -73,9 +142,25 @@ export const DEFAULT_THEME_COLORS: Record<ThemeColorKey, string> = {
 export const THEME_PRESETS: readonly ThemePreset[] = [
 	{
 		id: 'default',
-		label: '默认（CosBox 深色）',
-		description: '内置深色主题，蓝紫主色。',
-		colors: { ...DEFAULT_THEME_COLORS }
+		label: 'CosBox 深色（旧默认）',
+		description: '旧版内置深色主题，蓝紫主色。',
+		colors: {
+			bg: '#0e1016',
+			'bg-elevated': '#141821',
+			panel: '#171b26',
+			'panel-2': '#1d2230',
+			border: '#2a3040',
+			'border-strong': '#374055',
+			text: '#e8eaf1',
+			'text-dim': '#9aa3b8',
+			'text-faint': '#6b7387',
+			accent: '#7c9cff',
+			'accent-dim': 'rgba(124, 156, 255, 0.14)',
+			'accent-2': '#b18cff',
+			ok: '#4ade80',
+			warn: '#fbbf24',
+			err: '#f87171'
+		}
 	},
 	{
 		id: 'claude',
@@ -145,11 +230,12 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
 	}
 ];
 
-/** 默认主题配置：内置默认色 + 无背景图。 */
+/** 默认主题配置：The Verge 酸薄荷 + 无背景图。 */
 export const DEFAULT_THEME_CONFIG: ThemeConfig = {
-	presetId: 'default',
+	presetId: 'verge',
 	colors: {},
 	backgroundImage: '',
+	officialBackgroundId: '',
 	backgroundOpacity: 1,
 	backgroundBlur: 0
 };
@@ -160,12 +246,16 @@ export function findThemePreset(id: string): ThemePreset | undefined {
 }
 
 /** 用预设完整颜色构造主题配置（保留背景图设置）。 */
-export function themeFromPreset(presetId: string, base: ThemeConfig = DEFAULT_THEME_CONFIG): ThemeConfig {
+export function themeFromPreset(
+	presetId: string,
+	base: ThemeConfig = DEFAULT_THEME_CONFIG
+): ThemeConfig {
 	const preset = findThemePreset(presetId);
 	return {
 		presetId,
 		colors: preset ? { ...preset.colors } : {},
 		backgroundImage: base.backgroundImage,
+		officialBackgroundId: base.officialBackgroundId,
 		backgroundOpacity: base.backgroundOpacity,
 		backgroundBlur: base.backgroundBlur
 	};
@@ -178,7 +268,7 @@ export function resolveThemeCss(theme: ThemeConfig): Record<string, string> {
 	for (const [key, value] of Object.entries(merged)) {
 		vars[`--${key}`] = value;
 	}
-	if (theme.backgroundImage.trim() !== '') {
+	if (getEffectiveBackgroundUrl(theme) !== '') {
 		// 有背景图时让顶栏/导航/输入条/侧栏等结构面透明，背景图铺满全屏。
 		vars['--bg-app-header'] = 'transparent';
 		vars['--bg-app-panel'] = 'transparent';
@@ -203,8 +293,9 @@ export function applyThemeToDocument(theme: ThemeConfig): void {
 	// 背景图与透明度直接写到专用图层元素的内联样式：
 	// 超长 data URL 存 CSS 变量在部分浏览器会解析失败（表现为背景变黑）。
 	const backdrop = document.querySelector<HTMLElement>('.theme-backdrop');
-	if (theme.backgroundImage.trim() !== '') {
-		backdrop?.style.setProperty('background-image', `url("${theme.backgroundImage}")`);
+	const bgUrl = getEffectiveBackgroundUrl(theme);
+	if (bgUrl !== '') {
+		backdrop?.style.setProperty('background-image', `url("${bgUrl}")`);
 		backdrop?.style.setProperty('opacity', String(clampOpacity(theme.backgroundOpacity)));
 		const blur = clampBlur(theme.backgroundBlur);
 		// 模糊时轻微放大，避免磨砂边缘出现透明留白。

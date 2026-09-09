@@ -1,4 +1,5 @@
 import { LlmError } from '../core/errors';
+import { applyProxyPrefix, platformFetch } from '../platform/http';
 import type { MessageSegment } from '../core/types';
 import { annotateWorldTime } from './message-time';
 import { isDeepSeekModel } from './providers';
@@ -68,23 +69,26 @@ export class OpenAiCompatibleClient implements LlmClient {
 
 		let response: Response;
 		try {
-			response = await fetch(`${baseUrl}/chat/completions`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
-				},
-				body: JSON.stringify(
-					buildRequestBody(
-						messages,
-						tools,
-						config,
-						options?.forceToolCall === true,
-						options?.jsonMode === true
-					)
-				),
-				signal
-			});
+			response = await platformFetch(
+				applyProxyPrefix(`${baseUrl}/chat/completions`, config.useProxy),
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
+					},
+					body: JSON.stringify(
+						buildRequestBody(
+							messages,
+							tools,
+							config,
+							options?.forceToolCall === true,
+							options?.jsonMode === true
+						)
+					),
+					signal
+				}
+			);
 		} catch (err) {
 			if (err instanceof Error && err.name === 'AbortError') {
 				throw new LlmError('请求已取消');
@@ -479,6 +483,10 @@ function accumulateStreamToolCalls(
 			}
 			if (typeof fn.arguments === 'string') {
 				current.argumentsRaw += fn.arguments;
+			} else if (isRecord(fn.arguments)) {
+				// 部分代理在流式块里直接把 arguments 作为对象下发：序列化保留，
+				// 否则参数静默丢失，工具会以空参数执行并报错。
+				current.argumentsRaw = JSON.stringify(fn.arguments);
 			}
 		}
 		map.set(index, current);
@@ -555,10 +563,7 @@ export function buildRequestBody(
 }
 
 /** 把内部消息结构序列化为 OpenAI-compatible 消息。 */
-function serializeMessage(
-	message: ChatMessage,
-	deepSeekThinking = false
-): Record<string, unknown> {
+function serializeMessage(message: ChatMessage, deepSeekThinking = false): Record<string, unknown> {
 	// 世界时间只在「序列化给模型」这一步注入为元数据行，消息正文始终纯净。
 	const content =
 		message.worldTime !== undefined

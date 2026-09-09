@@ -44,7 +44,11 @@ function service(overrides: Partial<ModelService> = {}): ModelService {
 
 describe('normalizeModelEntry', () => {
 	it('补全 id、清理数值', () => {
-		const entry = normalizeModelEntry({ model: ' kimi-k3 ', contextWindow: 128_000.9, maxTokens: 0 });
+		const entry = normalizeModelEntry({
+			model: ' kimi-k3 ',
+			contextWindow: 128_000.9,
+			maxTokens: 0
+		});
 		expect(entry.id).not.toBe('');
 		expect(entry.model).toBe('kimi-k3');
 		expect(entry.contextWindow).toBe(128_000);
@@ -71,7 +75,11 @@ describe('normalizeModelService', () => {
 		expect(service.baseUrl).toBe('https://api.moonshot.cn/v1');
 		expect(service.apiKey).toBe('key');
 		expect(service.models).toHaveLength(2);
-		expect(service.models[0]).toMatchObject({ model: 'kimi-k3', contextWindow: 128_000, maxTokens: 2048 });
+		expect(service.models[0]).toMatchObject({
+			model: 'kimi-k3',
+			contextWindow: 128_000,
+			maxTokens: 2048
+		});
 		expect(service.models[1]).toMatchObject({ model: 'kimi-k2.5' });
 		expect(service.notes).toBe('备注');
 	});
@@ -107,6 +115,42 @@ describe('normalizeModelService', () => {
 		expect(service.provider).toBe('demo');
 		expect(service.providerId).toBe('custom');
 	});
+
+	it('useProxy 仅在开启时写入，缺省不落字段', () => {
+		const relay = normalizeModelService({
+			label: 'OpenCode',
+			provider: 'openai-compatible',
+			providerId: 'opencode-go',
+			baseUrl: 'https://opencode.ai/zen/go/v1/',
+			useProxy: true,
+			apiKey: 'k',
+			models: [{ model: 'kimi-k2.6' }]
+		});
+		expect(relay.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+		expect(relay.useProxy).toBe(true);
+		const direct = normalizeModelService({
+			label: 'DeepSeek',
+			provider: 'openai-compatible',
+			providerId: 'deepseek',
+			baseUrl: 'https://api.deepseek.com/v1',
+			apiKey: 'k',
+			models: [{ model: 'deepseek-v4-flash' }]
+		});
+		expect(direct.useProxy).toBeUndefined();
+	});
+
+	it('旧草稿把通道藏在 baseUrl 前缀里，归一化时搬到 useProxy', () => {
+		const upgraded = normalizeModelService({
+			label: 'OpenCode',
+			provider: 'openai-compatible',
+			providerId: 'opencode-go',
+			baseUrl: '/llm-proxy/zen/go/v1',
+			apiKey: 'k',
+			models: [{ model: 'kimi-k2.6' }]
+		});
+		expect(upgraded.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+		expect(upgraded.useProxy).toBe(true);
+	});
 });
 
 describe('resolveServiceConfig', () => {
@@ -135,6 +179,29 @@ describe('resolveServiceConfig', () => {
 		expect(resolved.model).toBe('kimi-k3');
 		expect(resolved.modelContextWindow).toBe(128_000);
 		expect(resolved.maxTokens).toBe(1024);
+		// 通道跟着服务走：服务没开就不因主配置开着而误转发。
+		expect(resolved.useProxy).toBe(false);
+	});
+
+	it('服务标记了通道时按服务地址走内置转发', () => {
+		const config = {
+			...BASE,
+			modelServices: [
+				service({
+					id: 'go',
+					providerId: 'opencode-go',
+					baseUrl: 'https://opencode.ai/zen/go/v1',
+					useProxy: true,
+					apiKey: 'k',
+					models: [{ id: 'm', model: 'kimi-k2.6' }]
+				})
+			],
+			chatModelId: 'go',
+			chatModelEntryId: 'm'
+		};
+		const resolved = resolveServiceConfig(config, 'chat');
+		expect(resolved.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+		expect(resolved.useProxy).toBe(true);
 	});
 
 	it('模型条目缺省时用服务第一条；条目字段缺省时回退主配置', () => {
@@ -190,6 +257,25 @@ describe('ensureModelServiceBindings', () => {
 		expect(migrated.chatModelEntryId).toBe(service.models[0]!.id);
 		expect(migrated.judgeModelId).toBe('default');
 		expect(migrated.generatorModelId).toBe('default');
+	});
+
+	it('已存服务的旧式 /llm-proxy 相对地址在自愈时升级', () => {
+		const legacy = service({
+			baseUrl: '/llm-proxy/zen/go/v1',
+			models: [{ id: 'm', model: 'kimi-k2.6' }]
+		});
+		const migrated = ensureModelServiceBindings({
+			...BASE,
+			modelServices: [legacy],
+			chatModelId: 's1'
+		});
+		const upgraded = migrated.modelServices![0]!;
+		expect(upgraded.baseUrl).toBe('https://opencode.ai/zen/go/v1');
+		expect(upgraded.useProxy).toBe(true);
+		// 未命中旧格式的服务保持原样。
+		expect(
+			ensureModelServiceBindings({ ...BASE, modelServices: [service()] }).modelServices![0]!.baseUrl
+		).toBe('https://api.deepseek.com/v1');
 	});
 
 	it('老格式服务（顶层 model）迁移为单条模型条目', () => {

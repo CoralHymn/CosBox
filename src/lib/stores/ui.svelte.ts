@@ -10,7 +10,9 @@ export type TabId =
 	| 'schedule'
 	| 'versions'
 	| 'world'
+	| 'prompts'
 	| 'memory'
+	| 'monitor'
 	| 'transfer'
 	| 'settings';
 
@@ -31,8 +33,9 @@ export function createToasts() {
 		window.setTimeout(() => remove(toast.id), 5000);
 	}
 
-	/** 展示错误：把任意异常翻译为用户可读文案。 */
+	/** 展示错误：把任意异常翻译为用户可读文案（同时留痕便于排查）。 */
 	function error(err: unknown): void {
+		console.error('[toast]', err);
 		push('error', toUserMessage(err));
 	}
 

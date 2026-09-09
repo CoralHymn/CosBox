@@ -59,13 +59,25 @@ export class ImportError extends CosBoxError {
 	}
 }
 
+/** 工作区管理操作失败（名称冲突、删除最后一个等）。 */
+export class WorkspaceError extends CosBoxError {
+	constructor(message: string) {
+		super(message, 'WORKSPACE');
+	}
+}
+
 /**
  * 把任意抛出的值转换为面向用户的简短中文提示。
  * 永远不向用户泄露堆栈。
+ * 注意：Tauri invoke 的拒绝值通常是 Rust 侧返回的错误字符串
+ * （如导出失败的具体原因），必须原样透传，否则会被吞成「发生未知错误」。
  */
 export function toUserMessage(err: unknown): string {
 	if (err instanceof Error) {
 		return err.message;
+	}
+	if (typeof err === 'string' && err.trim() !== '') {
+		return err;
 	}
 	return '发生未知错误，请重试';
 }

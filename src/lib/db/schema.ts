@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { SnapshotNode, WorldInfoEntry } from '../core/types';
 import type { MemoryEntry } from '../memory/types';
+import { DEFAULT_WORKSPACE_ID } from './workspace-scope';
 
 /** kv 表记录：应用级键值（设置、上次 checkout 的 head 等）。 */
 export interface KvRecord {
@@ -10,9 +11,11 @@ export interface KvRecord {
 
 /**
  * CosBox IndexedDB 数据库。
- * - snapshots：版本图节点，复合索引 [parentId+timestamp] 支撑按父查询。
+ * - snapshots：版本图节点，复合索引 [workspaceId+parentId+timestamp] 支撑按工作区+父查询。
  * - worldInfo：世界信息条目。
- * - kv：应用键值（设置、上次 checkout 的 head 等）。
+ * - memories：长期记忆条目。
+ * - kv：应用键值（设置、注册表、工作区作用域键等）。
+ * 多工作区采用「单库 + workspaceId 分区列」：三个业务表都按 workspaceId 过滤。
  */
 export class CosBoxDatabase extends Dexie {
 	snapshots!: Table<SnapshotNode, string>;
@@ -34,7 +37,41 @@ export class CosBoxDatabase extends Dexie {
 			memories: 'id, pinned, category',
 			kv: 'key'
 		});
+		// v3：多工作区——三个业务表增加 workspaceId 分区列与索引，
+		// 存量行统一归入默认工作区（D104）。
+		this.version(3)
+			.stores({
+				snapshots: 'id, [workspaceId+parentId+timestamp], workspaceId, parentId, timestamp',
+				worldInfo: 'id, workspaceId',
+				memories: 'id, workspaceId, pinned, category',
+				kv: 'key'
+			})
+			.upgrade(async (tx) => {
+				await stampWorkspaceId(tx, 'snapshots');
+				await stampWorkspaceId(tx, 'worldInfo');
+				await stampWorkspaceId(tx, 'memories');
+			});
 	}
+}
+
+/**
+ * v2 → v3：把存量行补上默认工作区 id。
+ * 用 `toCollection().modify()` 游标原地更新：老存档（尤其大快照表）迁移时
+ * 不再把全表读进内存再整表回写，避免打开页面卡顿（D104 优化）。
+ */
+interface UpgradeTxLike {
+	table(name: string): {
+		toCollection(): {
+			modify(changes: Record<string, unknown>): Promise<unknown>;
+		};
+	};
+}
+
+async function stampWorkspaceId(
+	tx: UpgradeTxLike,
+	table: 'snapshots' | 'worldInfo' | 'memories'
+): Promise<void> {
+	await tx.table(table).toCollection().modify({ workspaceId: DEFAULT_WORKSPACE_ID });
 }
 
 let sharedDb: CosBoxDatabase | null = null;

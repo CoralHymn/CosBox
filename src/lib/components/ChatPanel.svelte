@@ -4,6 +4,7 @@
 		BranchSummary,
 		CharacterState,
 		ChatMessageView,
+		MessageSegment,
 		SnapshotNode
 	} from '../core/types';
 	import { formatWorldTime } from '../core/state';
@@ -55,10 +56,10 @@
 		recentLog: string;
 		/** 导出最近日志。 */
 		onExportLog: () => void;
-		/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
-		streamingDraft: string | null;
-		/** 流式思考草稿：实时展示 AI 思考过程（reasoning_content）。 */
-		streamingThinking: string;
+		/** 流式分段草稿：正在生成、尚未落快照的 assistant 分段；null 表示未在生成。 */
+		streamingSegments: MessageSegment[] | null;
+		/** 后处理阶段文案（补调重试/状态确认等）；非 null 时气泡下方显示状态条。 */
+		streamingPhase: string | null;
 		/** 全部分支 tip（用于消息气泡下方的分支切换）。 */
 		branches: BranchSummary[];
 		/** 全部快照节点（用于计算分支备选路径）。 */
@@ -100,8 +101,8 @@
 		onEditMessage,
 		recentLog,
 		onExportLog,
-		streamingDraft,
-		streamingThinking,
+		streamingSegments,
+		streamingPhase,
 		branches,
 		snapshots,
 		headId,
@@ -124,13 +125,18 @@
 	let copyStatus = $state('');
 	let copyTimer: number | undefined;
 
-	/** 消息 id -> 可切换的备选分支（与该分支在该消息位置岔开，不含当前 head）。 */
-	const branchAlts = $derived.by(() => {
-		const result: Record<string, { tipId: string; timestamp: number }[]> = {};
+	/** 快照 id -> 节点（O(1) 查找；每个气泡的 branchNavFor 不再 O(n) 扫描全表）。 */
+	const nodeById = $derived.by(() => {
 		const byId: Record<string, SnapshotNode> = {};
 		for (const node of snapshots) {
 			byId[node.id] = node;
 		}
+		return byId;
+	});
+
+	/** 消息 id -> 可切换的备选分支（与该分支在该消息位置岔开，不含当前 head）。 */
+	const branchAlts = $derived.by(() => {
+		const result: Record<string, { tipId: string; timestamp: number }[]> = {};
 		const currentIds = conversation.map((message) => message.id);
 		const currentRoles = conversation.map((message) => message.role);
 		for (const branch of branches) {
@@ -143,7 +149,7 @@
 			let guard = 0;
 			while (cursor !== null && guard <= snapshots.length) {
 				guard += 1;
-				const current: SnapshotNode | undefined = byId[cursor];
+				const current: SnapshotNode | undefined = nodeById[cursor];
 				if (current === undefined) {
 					break;
 				}
@@ -190,8 +196,7 @@
 	} | null {
 		const entries = [...(branchAlts[messageId] ?? [])];
 		if (headId !== null) {
-			const headTimestamp =
-				snapshots.find((node) => node.id === headId)?.timestamp ?? Number.MAX_SAFE_INTEGER;
+			const headTimestamp = nodeById[headId]?.timestamp ?? Number.MAX_SAFE_INTEGER;
 			entries.push({ tipId: headId, timestamp: headTimestamp });
 		}
 		entries.sort((a, b) => a.timestamp - b.timestamp);
@@ -214,8 +219,8 @@
 
 	$effect(() => {
 		void conversation;
-		void streamingDraft;
-		void streamingThinking;
+		void streamingSegments;
+		void streamingPhase;
 		if (listEl !== null) {
 			listEl.scrollTop = listEl.scrollHeight;
 		}
@@ -285,7 +290,7 @@
 
 <div class="chat-layout">
 	<div class="chat-panel">
-		{#if conversation.length === 0 && streamingDraft === null}
+		{#if conversation.length === 0 && streamingSegments === null}
 			<div class="empty-chat">
 				<div>
 					<p style="font-size: 15px; margin: 0 0 6px;">开始一段新的故事吧</p>
@@ -299,23 +304,31 @@
 						{message}
 						onEdit={onEditMessage}
 						disabled={busy}
-						onRetry={onRetry}
+						{onRetry}
 						onConfirmState={allowStateTools ? onConfirmState : undefined}
 						branchNav={branchNavFor(message.id)}
 					/>
 				{/each}
-				{#if streamingDraft !== null}
+				{#if streamingSegments !== null}
 					<MessageBubble
 						message={{
 							id: 'stream-draft',
 							role: 'assistant',
-							content: streamingDraft,
+							content: streamingSegments
+								.filter((segment) => segment.kind === 'text')
+								.map((segment) => segment.content)
+								.join('\n'),
 							timestamp: Date.now(),
-							...(streamingThinking.trim() !== ''
-								? { thinking: streamingThinking }
-								: {})
+							...(streamingSegments.length > 0 ? { segments: streamingSegments } : {})
 						}}
 					/>
+				{/if}
+				{#if streamingPhase !== null}
+					<!-- 正文已输出后的后处理状态条：补调重试/状态判断/确认不再是黑盒停顿。 -->
+					<div class="phase-bar" role="status">
+						<span class="phase-dot"></span>
+						{streamingPhase}
+					</div>
 				{/if}
 			</div>
 		{/if}
@@ -332,7 +345,7 @@
 				{#if recentLog.trim() !== ''}
 					<button class="btn btn-small" onclick={onExportLog}>
 						导出最近日志（{recentLog.split('\n\n').length} 段
-						{#if streamingDraft !== null}，记录中{/if}）
+						{#if streamingSegments !== null}，记录中{/if}）
 					</button>
 				{/if}
 				<button class="btn btn-small" onclick={openPreview}> 开发者：预览输入框提示词 </button>

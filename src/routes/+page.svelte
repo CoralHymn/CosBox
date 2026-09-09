@@ -9,10 +9,12 @@
 	} from '../lib/core/types';
 	import { formatWorldTime } from '../lib/core/state';
 	import {
+		buildBaseSystemPrompt,
 		buildContext,
 		DEFAULT_MEMORY_INJECT_LIMIT,
 		type ContextBundle,
-		type ContextPipelineInput
+		type ContextPipelineInput,
+		type PromptSections
 	} from '../lib/context/pipeline';
 	import { summarizeState } from '../lib/context/state-summary';
 	import { KvRepository } from '../lib/db/kv-repo';
@@ -27,13 +29,10 @@
 		serializeCharaCard
 	} from '../lib/import-export/chara-card-v3';
 	import { parseConfigPart, serializeConfigPart } from '../lib/import-export/config-transfer';
-	import {
-		parseWorkspace,
-		serializeWorkspace,
-		type WorkspaceData
-	} from '../lib/import-export/workspace';
+	import { parseWorkspace, type WorkspaceData } from '../lib/import-export/workspace';
 	import {
 		ChatService,
+		formatToolArguments,
 		type DebugPromptView,
 		type PromptPreviewResult
 	} from '../lib/llm/chat-service';
@@ -62,11 +61,13 @@
 	import { resolveServiceConfig } from '../lib/llm/model-services';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
 	import type { JudgeDebugView } from '../lib/llm/state-judge';
-	import { STATE_TOOLS } from '../lib/llm/state-tools';
-	import type { LlmConfig, ModelRole, TokenUsage } from '../lib/llm/types';
+	import { STATE_TOOLS, isToolErrorOutput, type ExecutedToolCall } from '../lib/llm/state-tools';
+	import type { LlmConfig, ModelRole, ToolCall, TokenUsage } from '../lib/llm/types';
 	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
 	import type { SyncSettings } from '../lib/sync/types';
 	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
+	import { checkForUpdate, isTauri } from '../lib/platform/updater';
+	import { createHistoryBackSync } from '../lib/platform/back-nav';
 	import { rebuildFromNodes } from '../lib/core/snapshot';
 	import { createInitialState } from '../lib/core/state';
 	import type { SearchResult } from '../lib/search/types';
@@ -77,16 +78,25 @@
 	import { createCharacterSession } from '../lib/stores/character.svelte';
 	import { createContextUsageStore } from '../lib/stores/context-usage.svelte';
 	import { createMemoryStore } from '../lib/stores/memory.svelte';
+	import { createMetricsStore } from '../lib/stores/metrics.svelte';
 	import { createSettingsStore } from '../lib/stores/settings.svelte';
 	import { createToasts, type TabId } from '../lib/stores/ui.svelte';
 	import { createWorldInfoStore } from '../lib/stores/world-info.svelte';
 	import { downloadBytes, downloadTextFile } from '../lib/utils/download';
+	import { createScopeKv } from '../lib/db/scoped-kv';
+	import { WorkspaceScope } from '../lib/db/workspace-scope';
+	import { WorkspaceRegistry } from '../lib/workspace/workspace-registry';
+	import { WorkspaceService } from '../lib/workspace/workspace-service';
+	import type { WorkspaceMeta, WorkspaceAvatar } from '../lib/workspace/types';
+	import AvatarEditor from '../lib/components/AvatarEditor.svelte';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
 	import LocationsPanel from '../lib/components/LocationsPanel.svelte';
 	import MemoryPanel from '../lib/components/MemoryPanel.svelte';
+	import MonitorPanel from '../lib/components/MonitorPanel.svelte';
 	import NavRail from '../lib/components/NavRail.svelte';
+	import PromptPanel from '../lib/components/PromptPanel.svelte';
 	import SchedulePanel from '../lib/components/SchedulePanel.svelte';
 	import SettingsPanel from '../lib/components/SettingsPanel.svelte';
 	import StatePreview from '../lib/components/StatePreview.svelte';
@@ -95,34 +105,64 @@
 	import VersionPanel from '../lib/components/VersionPanel.svelte';
 	import WardrobePanel from '../lib/components/WardrobePanel.svelte';
 	import WorldInfoPanel from '../lib/components/WorldInfoPanel.svelte';
+	import WorkspaceHome from '../lib/components/WorkspaceHome.svelte';
+	import WorkspaceListHome from '../lib/components/WorkspaceListHome.svelte';
+	import WorkspaceModal from '../lib/components/WorkspaceModal.svelte';
+	import MobileFeatureDrawer from '../lib/components/MobileFeatureDrawer.svelte';
+	import Titlebar from '../lib/components/Titlebar.svelte';
 
 	/** 自动记忆提取的固定触发阈值：累计 N 条新对话消息后提取一次（用户/角色各算一条）。 */
 	const AUTO_MEMORY_EXTRACT_EVERY_MSGS = 10;
 
 	const db = getDb();
 	const kv = new KvRepository(db);
-	const snapshotRepo = new SnapshotRepository(db);
+	/** 当前工作区定位器：三表仓储按它过滤，切换工作区 = set + 重载。 */
+	const scope = new WorkspaceScope();
+	const scopedKv = createScopeKv(kv, scope);
+	const snapshotRepo = new SnapshotRepository(db, scope);
 	const manager = new CharacterManager({
 		snapshots: snapshotRepo,
-		kv
+		kv: scopedKv
 	});
-	const contextUsage = createContextUsageStore(kv);
-	const memoryRepo = new MemoryRepository(db);
+	const contextUsage = createContextUsageStore(scopedKv);
+	const memoryRepo = new MemoryRepository(db, scope);
 	const memoryStore = createMemoryStore(memoryRepo);
+	const metrics = createMetricsStore(kv);
 	const session = createCharacterSession(manager);
-	const settings = createSettingsStore(kv);
-	const worldInfo = createWorldInfoStore(new WorldInfoRepository(db));
-	const syncService = new SyncService(kv);
+	const settings = createSettingsStore(kv, scopedKv);
+	const worldInfoRepo = new WorldInfoRepository(db, scope);
+	const worldInfo = createWorldInfoStore(worldInfoRepo);
+	const syncService = new SyncService(scopedKv);
+	const workspaces = new WorkspaceRegistry(kv);
+	const workspaceService = new WorkspaceService({
+		registry: workspaces,
+		scope,
+		snapshots: snapshotRepo,
+		worldInfo: worldInfoRepo,
+		memories: memoryRepo,
+		kv,
+		manager,
+		onSwitched: () => reloadStoresAfterSwitch()
+	});
 	const toasts = createToasts();
 	const demoClient = new DemoLlmClient();
 	const openAiClient = new OpenAiCompatibleClient();
 	const searchClient = new WebSearchClient();
 
 	let tab = $state<TabId>('chat');
-	/** 是否处于移动端视口（≤768px）：决定是否渲染抽屉/状态浮层等移动端元素。 */
+	/**
+	 * Tauri 桌面版（非 Android WebView）：渲染自定义标题栏（窗口控制 + 工作区切换器），
+	 * 隐藏导航栏底部的工作区切换区；Web / 移动端在导航栏（工具区）最下方切换。
+	 */
+	const tauriDesktop = isTauri() && !navigator.userAgent.includes('Android');
+	/** 是否处于移动端视口（≤768px）：决定是否渲染会话列表/聊天沉浸页等移动端元素。 */
 	let isMobile = $state(false);
-	/** 移动端左侧抽屉导航是否打开。 */
-	let mobileNavOpen = $state(false);
+	/** 移动端首屏底部标签：会话列表 / 设置菜单 / 全屏设置详情。 */
+	let mobileHomeTab = $state<'chat' | 'settings' | 'settings-detail'>('chat');
+	/** 移动端聊天页右上角「⋯」功能抽屉是否打开。 */
+	let mobileFeatureOpen = $state(false);
+	/** 正在编辑头像的工作区（null = 未打开编辑器）。 */
+	let avatarEditing = $state<WorkspaceMeta | null>(null);
 	/** 移动端顶栏「实时状态」下拉是否打开。 */
 	let mobileStateOpen = $state(false);
 	let busy = $state(false);
@@ -131,7 +171,48 @@
 	let memoryExtracting = $state(false);
 	/** 最近一次成功提取已覆盖的非系统消息数，避免无新消息时重复调用 LLM。 */
 	let lastAutoExtractCount = 0;
-	let ready = $state(false);
+
+	/** 从当前角色档案提取五段提示词，供上下文组装与输入预览复用。 */
+	function promptOptionsFromProfile(): PromptSections {
+		return {
+			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			characterPrompt: settings.profile.characterPrompt ?? undefined,
+			userPrompt: settings.profile.userPrompt ?? undefined,
+			worldPrompt: settings.profile.worldPrompt ?? undefined,
+			stylePrompt: settings.profile.stylePrompt ?? undefined
+		};
+	}
+
+	/**
+	 * 导出角色卡时的 system_prompt：仅旧系统提示时保持原值； 一旦填写了人物/用户/世界观/风格等扩展段，则导出五段组装后的完整提示词。
+	 */
+	function charaCardSystemPrompt(name: string): string | null {
+		const profile = settings.profile;
+		const hasExtendedPrompt =
+			(profile.characterPrompt ?? '').trim() !== '' ||
+			(profile.userPrompt ?? '').trim() !== '' ||
+			(profile.worldPrompt ?? '').trim() !== '' ||
+			(profile.stylePrompt ?? '').trim() !== '';
+		if (!hasExtendedPrompt) {
+			return profile.systemPrompt?.trim() || null;
+		}
+		return buildBaseSystemPrompt(name, profile);
+	}
+
+	/** 注册表与设置已加载：初始界面（工作区选择）可用。 */
+	let booted = $state(false);
+	/** 已进入某个工作区（主界面显示）；false 时显示工作区选择初始界面。 */
+	let entered = $state(false);
+	/** 正在进入/切换/创建/复制/删除工作区（禁用相关操作，防竞态）。 */
+	let switchingWorkspace = $state(false);
+	/** 应用内的工作区管理弹层。 */
+	let workspaceModalOpen = $state(false);
+	/** 工作区列表的响应式镜像（注册表 subscribe 同步）。 */
+	let workspaceList = $state<WorkspaceMeta[]>([]);
+	/** 当前工作区 id 的响应式镜像。 */
+	let currentWorkspaceId = $state<string | null>(null);
+	/** 当前工作区名（导航栏切换器展示）。 */
+	let currentWorkspaceName = $state('');
 	/** 开发者模式下展示的最近一次发送给 AI 的完整提示词。 */
 	let debugPrompt = $state<DebugPromptView | null>(null);
 	/** 最近一次请求的上下文包、用量与压缩状态（供侧栏上下文面板展示）。 */
@@ -151,10 +232,16 @@
 	let compactState = $state<CompactionState | null>(null);
 	/** 正在执行手动压缩。 */
 	let compacting = $state(false);
-	/** 流式输出草稿：正在生成、尚未落快照的 assistant 文本。 */
-	let streamingDraft = $state<string | null>(null);
-	/** 流式思考草稿：实时展示 AI 思考过程（reasoning_content）。 */
-	let streamingThinking = $state('');
+	/**
+	 * 流式分段草稿：正在生成、尚未落快照的 assistant 分段（思考 / 正文 / 工具调用
+	 * 按流中实际顺序排列）；null 表示未在生成。
+	 */
+	let streamingSegments = $state<MessageSegment[] | null>(null);
+	/**
+	 * 后处理阶段文案（补调重试/状态判断/确认等）：正文已输出后仍可见
+	 * 「AI 还在做什么」；null 表示无进行中的后处理。
+	 */
+	let streamingPhase = $state<string | null>(null);
 	/** 当前生成任务的取消控制器（发送按钮在 busy 时变为「停止」）。 */
 	let abortController: AbortController | null = null;
 	/** 最近消息日志：从最近一次用户发言开始实时记录，再次发言时重置。 */
@@ -194,7 +281,19 @@
 			: null
 	);
 
-	/** 监听视口宽度，移动端才渲染汉堡菜单与状态浮层（桌面端 DOM 不受影响）。 */
+	const currentWorkspaceMeta = $derived(
+		workspaceList.find((meta) => meta.id === currentWorkspaceId) ?? null
+	);
+
+	/** 移动端首屏「设置」tab 的分区入口（点击均全屏打开设置面板）。 */
+	const MOBILE_SETTINGS_SECTIONS = [
+		{ label: '模型服务与 AI 行为', desc: '服务商 / 温度 / 记忆 / 压缩' },
+		{ label: '主题', desc: '配色预设与背景图' },
+		{ label: '数据同步', desc: '远程同步设置与手动同步' },
+		{ label: '关于', desc: '版本与更新检查' }
+	];
+
+	/** 监听视口宽度，移动端才渲染会话列表与功能抽屉（桌面端 DOM 不受影响）。 */
 	$effect(() => {
 		const query = window.matchMedia('(max-width: 768px)');
 		const update = (): void => {
@@ -210,57 +309,197 @@
 		applyThemeToDocument(settings.theme);
 	});
 
-	/** 移动端抽屉打开时支持 Esc 关闭。 */
-	$effect(() => {
-		if (!mobileNavOpen) {
-			return;
+	/**
+	 * 返回键还能退掉的层数：必须与 popMobileBackLevel 的弹出顺序一一对应，
+	 * 数字对不上会让 Android 返回键多退或少退一层。
+	 */
+	const mobileBackDepth = $derived.by(() => {
+		if (!isMobile) {
+			return 0;
 		}
-		const onKeydown = (event: KeyboardEvent): void => {
-			if (event.key === 'Escape') {
-				mobileNavOpen = false;
-			}
-		};
-		window.addEventListener('keydown', onKeydown);
-		return () => window.removeEventListener('keydown', onKeydown);
+		let depth = 0;
+		if (entered) {
+			// 工作区聊天沉浸页是一层；「⋯」里打开的功能全屏页再叠一层。
+			depth = tab === 'chat' ? 1 : 2;
+		} else if (mobileHomeTab === 'settings') {
+			depth = 1;
+		} else if (mobileHomeTab === 'settings-detail') {
+			depth = 2;
+		}
+		// 浮层最后叠加，因此也最先被返回键关掉。
+		if (mobileStateOpen) {
+			depth += 1;
+		}
+		if (mobileFeatureOpen) {
+			depth += 1;
+		}
+		if (workspaceModalOpen) {
+			depth += 1;
+		}
+		if (avatarEditing !== null) {
+			depth += 1;
+		}
+		return depth;
 	});
+
+	/** 返回键退一层：从最上面的浮层往下，最后才回「对话」标签 / 退出工作区。 */
+	function popMobileBackLevel(): void {
+		if (avatarEditing !== null) {
+			avatarEditing = null;
+		} else if (workspaceModalOpen) {
+			workspaceModalOpen = false;
+		} else if (mobileFeatureOpen) {
+			mobileFeatureOpen = false;
+		} else if (mobileStateOpen) {
+			mobileStateOpen = false;
+		} else if (entered) {
+			if (tab === 'chat') {
+				handleExitToLanding();
+			} else {
+				tab = 'chat';
+			}
+		} else if (mobileHomeTab === 'settings-detail') {
+			mobileHomeTab = 'settings';
+		} else if (mobileHomeTab === 'settings') {
+			mobileHomeTab = 'chat';
+		}
+	}
+
+	// Android 硬件返回键走 Tauri 的 webView.goBack()，因此把层级镜像到 history；
+	// 退到根界面时 history 见底，恢复默认的「退出到桌面」。
+	const backSync = createHistoryBackSync({
+		depth: () => mobileBackDepth,
+		pop: popMobileBackLevel
+	});
+	$effect(() => {
+		backSync.sync();
+	});
+	onMount(() => backSync.destroy);
 
 	/** 启动远程同步：读取设置、开始轮询并订阅本地变化。 */
 	function startSync(): void {
 		syncService.start({
 			getSettings: () => settings.sync,
-			collect: collectWorkspaceData,
+			getWorkspaceId: () => scope.get(),
+			collect: () => workspaceService.collectWorkspaceData(scope.get()),
 			apply: async (data) => applyWorkspaceData(data),
 			onChange: () => syncService.notifyChanged()
 		});
 	}
 
+	/** 同步工作区列表的响应式镜像（注册表变化时调用）。 */
+	function refreshWorkspaceList(): void {
+		workspaceList = workspaces.getWorkspaces();
+		currentWorkspaceId = workspaces.getCurrentId();
+		const current = workspaces.getById(currentWorkspaceId ?? '');
+		currentWorkspaceName = current?.name ?? '';
+	}
+
+	/** 切换工作区后由 service 触发的宿主重载：stores、瞬态、同步全部复位。 */
+	async function reloadStoresAfterSwitch(): Promise<void> {
+		// 四个独立的数据源并行加载，避免串行等待放大进入耗时。
+		await Promise.all([
+			worldInfo.init(),
+			memoryStore.load(),
+			contextUsage.load(),
+			settings.reloadWorkspaceScoped()
+		]);
+		const restored = contextUsage.usage;
+		lastContext =
+			restored !== null
+				? {
+						bundle: null,
+						usage: restored.usage,
+						compaction: restored.compaction,
+						keptRecent: restored.keptRecent
+					}
+				: { bundle: null, usage: null, compaction: null, keptRecent: 0 };
+		compactState = restored?.compaction ?? null;
+		debugPrompt = null;
+		lastJudgeDebug = null;
+		lastAutoExtractCount = 0;
+		streamingSegments = null;
+		streamingPhase = null;
+		recentLog = '';
+		refreshWorkspaceList();
+		syncService.stop();
+		await syncService.reloadForWorkspace();
+		startSync();
+		// 切换后按新工作区的会话刷新列表摘要（预览/时间）。
+		updateWorkspaceSummary();
+	}
+
+	/**
+	 * 会话摘要写入工作区元信息：最近一条非系统消息的预览与时间，
+	 * 供移动端会话列表与桌面端切换器下拉展示（无变化时不写库）。
+	 */
+	function updateWorkspaceSummary(): void {
+		if (!entered) {
+			return;
+		}
+		const id = scope.get();
+		const meta = workspaces.getById(id);
+		if (meta === undefined) {
+			return;
+		}
+		const last = [...session.conversation].reverse().find((message) => message.role !== 'system');
+		const preview = last === undefined ? undefined : last.content.trim().slice(0, 60);
+		const at = last?.timestamp;
+		if (meta.lastMessagePreview === preview && meta.lastMessageAt === at) {
+			return;
+		}
+		void workspaces
+			.patch(id, {
+				lastMessagePreview: preview,
+				lastMessageAt: at
+			})
+			.catch(() => undefined);
+	}
+
+	/** 保存工作区头像（编辑器确认回调；undefined = 恢复默认）。 */
+	async function handleSaveAvatar(avatar: WorkspaceAvatar | undefined): Promise<void> {
+		const target = avatarEditing;
+		avatarEditing = null;
+		if (target === null) {
+			return;
+		}
+		try {
+			await workspaces.patch(target.id, { avatar });
+			toasts.success('头像已保存');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
 	onMount(async () => {
 		try {
-			await manager.init();
-			await worldInfo.init();
+			await workspaces.migrateLegacy();
+			await workspaces.load();
+			workspaces.subscribe(refreshWorkspaceList);
+			refreshWorkspaceList();
 			await settings.load();
-			await contextUsage.load();
-			await memoryStore.load();
-			const restored = contextUsage.usage;
-			if (restored !== null) {
-				// 重启后恢复上次请求的用量面板：上下文包不落库（含完整消息数组），
-				// 仅恢复展示所需的 usage / compaction / keptRecent。
-				lastContext = {
-					bundle: null,
-					usage: restored.usage,
-					compaction: restored.compaction,
-					keptRecent: restored.keptRecent
-				};
-			}
+			await metrics.load();
 			await syncService.load();
-			startSync();
-			session.subscribe(() => syncService.notifyChanged());
+			session.subscribe(() => {
+				syncService.notifyChanged();
+				updateWorkspaceSummary();
+			});
 			worldInfo.subscribe(() => syncService.notifyChanged());
 			settings.subscribe(() => syncService.notifyChanged());
+			// 桌面版启动时静默检查更新：仅在新版本可用时提示，去「设置 → 关于」更新。
+			if (isTauri()) {
+				void checkForUpdate()
+					.then((info) => {
+						if (info !== null) {
+							toasts.push('info', `发现新版本 v${info.version}，可在「设置 → 关于」中更新。`);
+						}
+					})
+					.catch(() => undefined);
+			}
 		} catch (err) {
 			toasts.error(err);
 		} finally {
-			ready = true;
+			booted = true;
 		}
 	});
 
@@ -304,8 +543,8 @@
 				toasts.error(err);
 			}
 		} finally {
-			streamingDraft = null;
-			streamingThinking = '';
+			streamingSegments = null;
+			streamingPhase = null;
 			abortController = null;
 			busy = false;
 			searching = false;
@@ -318,17 +557,77 @@
 			return;
 		}
 		abortController?.abort();
-		streamingDraft = null;
-		streamingThinking = '';
+		streamingSegments = null;
+		streamingPhase = null;
 		busy = false;
 		toasts.push('info', '已停止生成');
+	}
+
+	/** 流式正文增量：同类型续接最后一段、异类型新开段；同步清洗时间标注。 */
+	function appendStreamText(segments: MessageSegment[], delta: string): MessageSegment[] {
+		const list = [...segments];
+		const last = list[list.length - 1];
+		if (last !== undefined && last.kind === 'text') {
+			list[list.length - 1] = { ...last, content: sanitizeAssistantText(last.content + delta) };
+		} else {
+			list.push({ kind: 'text', content: sanitizeAssistantText(delta) });
+		}
+		return list;
+	}
+
+	/** 流式思考增量：同类型续接最后一段、异类型新开段（保留 思考→正文→思考 的交替顺序）。 */
+	function appendStreamThinking(segments: MessageSegment[], delta: string): MessageSegment[] {
+		const list = [...segments];
+		const last = list[list.length - 1];
+		if (last !== undefined && last.kind === 'thinking') {
+			list[list.length - 1] = { ...last, content: last.content + delta };
+		} else {
+			list.push({ kind: 'thinking', content: delta });
+		}
+		return list;
+	}
+
+	/** 工具执行完成：把结果写入对应的「执行中」工具段（工具串行执行，按名称倒序匹配）。 */
+	function markStreamToolResult(
+		segments: MessageSegment[],
+		result: ExecutedToolCall
+	): MessageSegment[] {
+		for (let index = segments.length - 1; index >= 0; index -= 1) {
+			const segment = segments[index]!;
+			if (
+				segment.kind === 'tool' &&
+				segment.status === 'running' &&
+				segment.toolName === result.name
+			) {
+				const next = [...segments];
+				next[index] = {
+					...segment,
+					content: result.output,
+					...(isToolErrorOutput(result.output)
+						? { status: 'error' as const }
+						: { status: undefined })
+				};
+				return next;
+			}
+		}
+		return [
+			...segments,
+			{
+				kind: 'tool',
+				toolName: result.name,
+				content: result.output,
+				...(isToolErrorOutput(result.output) ? { status: 'error' as const } : {})
+			}
+		];
 	}
 
 	/** 用当前会话状态生成回复并落库（普通发送与消息重试共用）；调用方需已设置 busy。 */
 	async function runAiReply(searchResults?: SearchResult[]): Promise<void> {
 		streamedAny = false;
-		streamingDraft = '';
-		streamingThinking = '';
+		streamingSegments = [];
+		const turnStartAt = Date.now();
+		let turnRetries = 0;
+		let turnFallbacks = 0;
 		const controller = new AbortController();
 		abortController = controller;
 		const input: ContextPipelineInput = {
@@ -336,23 +635,19 @@
 			conversation: session.conversation,
 			worldInfo: worldInfo.entries,
 			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
-			memoryLimit:
-				settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
+			memoryLimit: settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
 			enableStateTools: settings.config.allowAiStateTools === true,
 			characterName:
 				settings.profile.name ||
 				(typeof session.state.attributes.name === 'string'
 					? session.state.attributes.name
 					: undefined),
-			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			...promptOptionsFromProfile(),
 			...(searchResults !== undefined ? { searchResults } : {})
 		};
 		const chatConfig = roleConfig('chat');
 		const service = new ChatService(chatConfig.provider === 'demo' ? demoClient : openAiClient);
-		const contextWindow = resolveContextWindow(
-			chatConfig.modelContextWindow,
-			chatConfig.model
-		);
+		const contextWindow = resolveContextWindow(chatConfig.modelContextWindow, chatConfig.model);
 		const compactionOptions =
 			chatConfig.autoCompact === true
 				? {
@@ -372,22 +667,58 @@
 			finishReason,
 			judgeDebug,
 			rounds,
-			replySegments
+			replySegments,
+			executedTools
 		} = await service.generateReply(
 			input,
 			chatConfig,
 			{
 				onDelta: (delta) => {
 					// 边生成边剔除模型误输出的时间标注，保持流式展示与最终落库一致。
-					streamingDraft = sanitizeAssistantText(`${streamingDraft ?? ''}${delta}`);
+					// 分段维护（同类型续接、异类型新开段），保留 思考→正文→思考→正文 的交替顺序。
+					streamingSegments = appendStreamText(streamingSegments ?? [], delta);
 					// 实时记录原始流式内容（不覆盖、不清洗），供排查流式专属问题。
 					recentLog += delta;
 					streamedAny = true;
 				},
 				onThinkingDelta: (delta) => {
-					// 思考增量实时展示（流式气泡的思考区），让用户知道 AI 正在思考。
-					streamingThinking = `${streamingThinking}${delta}`;
+					// 思考增量实时展示（流式气泡的工作过程区），让用户知道 AI 正在思考。
+					streamingSegments = appendStreamThinking(streamingSegments ?? [], delta);
 				},
+				onToolStart: (call: ToolCall) => {
+					// 工具开始执行：气泡里立即出现「工具调用中」，避免长时间无反馈。
+					const argsText = formatToolArguments(call.arguments);
+					streamingSegments = [
+						...(streamingSegments ?? []),
+						{
+							kind: 'tool',
+							toolName: call.name,
+							...(argsText !== '' ? { toolArgs: argsText } : {}),
+							content: '',
+							status: 'running'
+						}
+					];
+				},
+				onToolResult: (result: ExecutedToolCall) => {
+					streamingSegments = markStreamToolResult(streamingSegments ?? [], result);
+				},
+				onRestart: () => {
+					// 思考循环中断重启：首次请求已流式输出的内容不会落库，清空草稿保持一致。
+					streamingSegments = [];
+				},
+				onPhase: (label) => {
+					streamingPhase = label;
+				},
+				onMetric: (name) => {
+					metrics.record(name);
+					if (name.startsWith('retry.') && name.endsWith('.triggered')) {
+						turnRetries += 1;
+					}
+					if (name.includes('text_fallback')) {
+						turnFallbacks += 1;
+					}
+				},
+				textToolFallback: settings.config.textToolFallback !== false,
 				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
 				toolContext: {
 					getState: () => session.state,
@@ -402,13 +733,23 @@
 		);
 		debugPrompt = debug;
 		lastJudgeDebug = judgeDebug;
-		const keptRecent = bundle.history.filter(
-			(message) => message.id !== 'context-summary'
-		).length;
+		const keptRecent = bundle.history.filter((message) => message.id !== 'context-summary').length;
 		lastContext = { bundle, usage: usage ?? null, compaction, keptRecent };
 		void persistCurrentContextUsage();
 		compactState = compaction;
-		streamingDraft = null;
+		streamingSegments = null;
+		streamingPhase = null;
+		// 监控：记录一轮样本（耗时/用量/工具与兜底计数），供监控 tab 图表展示。
+		metrics.recordTurn({
+			t: Date.now(),
+			latencyMs: Date.now() - turnStartAt,
+			promptTokens: usage?.promptTokens ?? 0,
+			completionTokens: usage?.completionTokens ?? 0,
+			toolCalls: executedTools.length,
+			retries: turnRetries,
+			textFallbacks: turnFallbacks,
+			...(finishReason !== undefined ? { finishReason } : {})
+		});
 		// AI 一轮回复合并为单条 assistant 消息：思考 / 正文 / 工具调用按序
 		// 保存为 segments，气泡内分段展示——不再把每个工具轮次拆成独立消息，
 		// 避免「一个思考绑一个输出」导致中间内容被吞。
@@ -421,7 +762,13 @@
 				mergedSegments.push({ kind: 'text', content: round.content.trim() });
 			}
 			for (const tool of round.tools) {
-				mergedSegments.push({ kind: 'tool', content: tool.output, toolName: tool.name });
+				mergedSegments.push({
+					kind: 'tool',
+					content: tool.output,
+					toolName: tool.name,
+					...(tool.args !== undefined && tool.args !== '' ? { toolArgs: tool.args } : {}),
+					...(isToolErrorOutput(tool.output) ? { status: 'error' as const } : {})
+				});
 			}
 		}
 		// 最终回复若携带思考/正文交替顺序（interleaved thinking），按序分段展示，
@@ -468,9 +815,7 @@
 				.join('\n');
 			await session.addMessage('assistant', plainText, {
 				segments: mergedSegments,
-				...(thinking !== undefined && thinking.trim() !== ''
-					? { thinking: thinking.trim() }
-					: {})
+				...(thinking !== undefined && thinking.trim() !== '' ? { thinking: thinking.trim() } : {})
 			});
 		} else {
 			toasts.push(
@@ -553,8 +898,8 @@
 				toasts.error(err);
 			}
 		} finally {
-			streamingDraft = null;
-			streamingThinking = '';
+			streamingSegments = null;
+			streamingPhase = null;
 			abortController = null;
 			busy = false;
 		}
@@ -574,6 +919,7 @@
 			.reverse()
 			.find((message) => message.role === 'user');
 		busy = true;
+		streamingPhase = '正在判断是否需要同步状态…';
 		try {
 			// 用该轮发生时的状态（含世界配置覆盖）做判断，避免被后续消息污染。
 			const stateAt = await session.getStateAt(assistant.id);
@@ -589,7 +935,12 @@
 					getState: () => session.state,
 					update: (patch, metadata) => session.update(patch, metadata),
 					advanceTime: (minutes) => session.advanceTime(minutes)
-				}
+				},
+				onPhase: (label) => {
+					streamingPhase = label;
+				},
+				onMetric: (name) => metrics.record(name),
+				textToolFallback: settings.config.textToolFallback !== false
 			});
 			lastJudgeDebug = debug;
 			// 工具反馈追加进原 AI 气泡的分段：前端可见，后续上下文展开为系统反馈。
@@ -599,7 +950,8 @@
 					executed.map((tool) => ({
 						kind: 'tool',
 						content: tool.output,
-						toolName: tool.name
+						toolName: tool.name,
+						...(isToolErrorOutput(tool.output) ? { status: 'error' as const } : {})
 					}))
 				);
 			}
@@ -611,6 +963,7 @@
 		} catch (err) {
 			toasts.error(err);
 		} finally {
+			streamingPhase = null;
 			busy = false;
 		}
 	}
@@ -674,16 +1027,14 @@
 				}
 				return;
 			}
-			const effectiveUsage: TokenUsage =
-				lastContext.usage ??
-				{
-					promptTokens: estimateMessagesTokens([
-						{ role: 'system', content: lastContext.bundle.systemMessage },
-						...lastContext.bundle.messages
-					]),
-					completionTokens: 0,
-					cachedTokens: 0
-				};
+			const effectiveUsage: TokenUsage = lastContext.usage ?? {
+				promptTokens: estimateMessagesTokens([
+					{ role: 'system', content: lastContext.bundle.systemMessage },
+					...lastContext.bundle.messages
+				]),
+				completionTokens: 0,
+				cachedTokens: 0
+			};
 			await contextUsage.save({
 				usage: effectiveUsage,
 				compaction: lastContext.compaction,
@@ -874,14 +1225,13 @@
 			conversation,
 			worldInfo: worldInfo.entries,
 			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
-			memoryLimit:
-				settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
+			memoryLimit: settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
 			characterName:
 				settings.profile.name ||
 				(typeof session.state.attributes.name === 'string'
 					? session.state.attributes.name
 					: undefined),
-			systemPrompt: settings.profile.systemPrompt ?? undefined,
+			...promptOptionsFromProfile(),
 			historyOptions: { maxMessages: Math.max(1, conversation.length) }
 		};
 		const bundle = buildContext(input);
@@ -1059,10 +1409,11 @@
 		}
 	}
 
-	async function handleResetProfile(): Promise<void> {
+	/** 「提示词」标签页保存：同一份档案，仅成功文案不同。 */
+	async function handleSavePrompts(profile: AppProfile): Promise<void> {
 		try {
-			await settings.resetProfile();
-			toasts.success('角色档案已恢复默认');
+			await settings.saveProfile(profile);
+			toasts.success('提示词已保存');
 		} catch (err) {
 			toasts.error(err);
 		}
@@ -1092,6 +1443,157 @@
 		}
 	}
 
+	/** 进入/切换工作区：切换成功后进入主界面。 */
+	async function handleEnterWorkspace(id: string): Promise<void> {
+		if (switchingWorkspace) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			await workspaceService.switchTo(id);
+			entered = true;
+			tab = 'chat';
+			workspaceModalOpen = false;
+			mobileStateOpen = false;
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 新建工作区并进入。 */
+	async function handleCreateWorkspace(name: string): Promise<void> {
+		try {
+			const meta = await workspaceService.createWorkspace(name);
+			entered = true;
+			tab = 'chat';
+			workspaceModalOpen = false;
+			toasts.success(`工作区「${meta.name}」已创建`);
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 重命名工作区。 */
+	async function handleRenameWorkspace(id: string, name: string): Promise<void> {
+		try {
+			await workspaces.rename(id, name);
+			refreshWorkspaceList();
+			toasts.success('工作区已重命名');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 复制工作区：service 自动生成不重名的「xx 副本」并切换过去。 */
+	async function handleDuplicateWorkspace(id: string): Promise<void> {
+		if (switchingWorkspace) {
+			return;
+		}
+		const source = workspaces.getById(id);
+		if (source === undefined) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			const meta = await workspaceService.duplicateWorkspace(id, `${source.name} 副本`);
+			entered = true;
+			workspaceModalOpen = false;
+			toasts.success(`已复制为「${meta.name}」并切换过去`);
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 删除工作区（确认弹窗展示数据量；删除当前工作区会自动切走）。 */
+	async function handleDeleteWorkspace(id: string): Promise<void> {
+		const meta = workspaces.getById(id);
+		if (meta === undefined) {
+			return;
+		}
+		try {
+			const [snapshotCount, worldInfoCount, memoryCount] = await Promise.all([
+				snapshotRepo.count(id),
+				worldInfoRepo.getAll(id).then((entries) => entries.length),
+				memoryRepo.getAll(id).then((entries) => entries.length)
+			]);
+			if (
+				!window.confirm(
+					`删除工作区「${meta.name}」？将移除 ${snapshotCount} 个快照、${worldInfoCount} 条世界信息、${memoryCount} 条记忆，且不可恢复。`
+				)
+			) {
+				return;
+			}
+		} catch (err) {
+			toasts.error(err);
+			return;
+		}
+		if (switchingWorkspace) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			await workspaceService.removeWorkspace(id);
+			toasts.success(`工作区「${meta.name}」已删除`);
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 导出任意工作区（含非当前工作区）为 .cbox。 */
+	async function handleExportWorkspaceById(id: string): Promise<void> {
+		try {
+			const meta = workspaces.getById(id);
+			const safeName = (meta?.name ?? 'workspace').replace(/[\\/:*?"<>|]/g, '_');
+			const bytes = await workspaceService.exportWorkspace(id);
+			const saved = await downloadBytes(`cosbox-${safeName}-${stamp()}.cbox`, bytes);
+			toasts.success(saved !== null ? `工作区已导出，保存于：${saved}` : '工作区已导出');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 导入 .cbox 为新工作区并切换过去。 */
+	async function handleImportAsNewWorkspace(file: File): Promise<void> {
+		if (switchingWorkspace) {
+			return;
+		}
+		switchingWorkspace = true;
+		try {
+			const bytes = new Uint8Array(await file.arrayBuffer());
+			const data = parseWorkspace(bytes);
+			const meta = await workspaceService.importAsNewWorkspace(data);
+			entered = true;
+			tab = 'chat';
+			workspaceModalOpen = false;
+			toasts.success(`已导入为新工作区「${meta.name}」`);
+		} catch (err) {
+			toasts.error(err);
+		} finally {
+			switchingWorkspace = false;
+		}
+	}
+
+	/** 退出到工作区选择初始界面（生成中不可退出）。 */
+	function handleExitToLanding(): void {
+		if (busy) {
+			toasts.push('info', '请先停止当前生成，再退出到工作区选择');
+			return;
+		}
+		syncService.stop();
+		workspaceModalOpen = false;
+		mobileFeatureOpen = false;
+		mobileStateOpen = false;
+		entered = false;
+		// 回到会话列表首屏：底部标签复位到「对话」。
+		mobileHomeTab = 'chat';
+	}
+
 	/** 保存主题（即时生效，SettingsPanel 在每次修改时调用）。 */
 	async function handleSaveTheme(next: ThemeConfig): Promise<void> {
 		try {
@@ -1114,7 +1616,7 @@
 	/** 获取模型列表（使用设置面板当前草稿配置）。失败返回空列表并由面板显示 toast。 */
 	async function handleFetchModels(draft: LlmConfig): Promise<FetchedModel[]> {
 		try {
-			const models = await fetchModelList(draft.baseUrl, draft.apiKey);
+			const models = await fetchModelList(draft.baseUrl, draft.apiKey, draft.useProxy);
 			toasts.success(`获取到 ${models.length} 个模型`);
 			return models;
 		} catch (err) {
@@ -1126,7 +1628,7 @@
 	/** 连接测试：验证当前草稿配置的端点与 API Key 是否可用。 */
 	async function handleTestConnection(draft: LlmConfig): Promise<void> {
 		try {
-			await testConnection(draft.baseUrl, draft.apiKey);
+			await testConnection(draft.baseUrl, draft.apiKey, draft.useProxy);
 			toasts.success('连接成功，API 可用');
 		} catch (err) {
 			toasts.error(err);
@@ -1139,9 +1641,11 @@
 			const mapped = mapCardToCosBox(card);
 			await session.update(mapped.statePatch, { desc: `导入角色卡「${card.data.name}」` });
 			await worldInfo.importEntries(mapped.worldInfo);
+			const importedProfile: AppProfile = { ...settings.profile, name: card.data.name };
 			if (mapped.systemPrompt !== null) {
-				await settings.saveProfile({ name: card.data.name, systemPrompt: mapped.systemPrompt });
+				importedProfile.systemPrompt = mapped.systemPrompt;
 			}
+			await settings.saveProfile(importedProfile);
 			if (mapped.greeting !== null) {
 				await session.addMessage('assistant', mapped.greeting);
 			}
@@ -1172,9 +1676,20 @@
 	}
 
 	/** 导出单个配置段（地点/衣柜/日程）为 JSON 模板。 */
-	function handleExportConfig(kind: GeneratorKind, items: GeneratedItem[]): void {
-		downloadTextFile(`${KIND_LABELS[kind]}-${stamp()}.json`, serializeConfigPart(kind, items));
-		toasts.success(`已导出${KIND_LABELS[kind]}`);
+	async function handleExportConfig(kind: GeneratorKind, items: GeneratedItem[]): Promise<void> {
+		try {
+			const saved = await downloadTextFile(
+				`${KIND_LABELS[kind]}-${stamp()}.json`,
+				serializeConfigPart(kind, items)
+			);
+			toasts.success(
+				saved !== null
+					? `已导出${KIND_LABELS[kind]}，保存于：${saved}`
+					: `已导出${KIND_LABELS[kind]}`
+			);
+		} catch (err) {
+			toasts.error(err);
+		}
 	}
 
 	/** 导入单个配置段：解析、去重合并进世界配置。 */
@@ -1196,24 +1711,10 @@
 		toasts.success(`已导入 ${freshCount} 项到${KIND_LABELS[kind]}`);
 	}
 
-	/** 导出工作区：除模型配置外的全部数据打包为 .cbox。 */
-	/** 收集当前完整工作区数据（不含模型配置与 API Key），供导出与远程同步复用。 */
-	function collectWorkspaceData(): WorkspaceData {
-		return {
-			profile: settings.profile,
-			developerMode: settings.developerMode,
-			worldInfo: worldInfo.entries,
-			config: {
-				places: session.state.places,
-				wardrobe: session.state.outfit.wardrobe,
-				scheduleEntries: session.state.schedule.entries
-			},
-			headId: session.headId,
-			snapshots: session.snapshots
-		};
-	}
-
-	/** 应用工作区数据：校验快照链后整体恢复本地（保留当前模型配置与 Key）。 */
+	/**
+	 * 应用工作区数据到当前工作区：校验快照链后整体恢复本地
+	 * （保留当前模型配置与 Key）。仅用于「导入到当前工作区」。
+	 */
 	async function applyWorkspaceData(data: WorkspaceData): Promise<void> {
 		if (data.headId !== null) {
 			rebuildFromNodes(
@@ -1226,18 +1727,33 @@
 		await snapshotRepo.bulkAdd(data.snapshots);
 		await worldInfo.clear();
 		await worldInfo.importEntries(data.worldInfo);
+		await memoryRepo.clear();
+		await memoryRepo.bulkPut(data.memories ?? []);
+		await memoryStore.load();
 		await settings.saveProfile(data.profile);
 		await settings.saveDeveloperMode(data.developerMode);
 		await manager.restoreWorkspace(data.config, data.headId);
+		// 导入整体替换了剧情数据：压缩边界/调试视图/最近日志一并复位。
+		compactState = null;
+		debugPrompt = null;
+		lastJudgeDebug = null;
+		lastAutoExtractCount = 0;
+		recentLog = '';
+		lastContext = { bundle: null, usage: null, compaction: null, keptRecent: 0 };
 	}
 
-	function handleExportWorkspace(): void {
-		const data = collectWorkspaceData();
-		downloadBytes(`cosbox-${stamp()}.cbox`, serializeWorkspace(data));
-		toasts.success('工作区已导出');
+	/** 导出当前工作区：除模型配置外的全部数据打包为 .cbox。 */
+	async function handleExportWorkspace(): Promise<void> {
+		try {
+			const bytes = await workspaceService.exportWorkspace(scope.get());
+			const saved = await downloadBytes(`cosbox-${stamp()}.cbox`, bytes);
+			toasts.success(saved !== null ? `工作区已导出，保存于：${saved}` : '工作区已导出');
+		} catch (err) {
+			toasts.error(err);
+		}
 	}
 
-	/** 导入工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
+	/** 导入工作区到当前工作区：校验后整体恢复（保留当前模型配置与 Key）。 */
 	async function handleImportWorkspace(file: File): Promise<void> {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		const data = parseWorkspace(bytes);
@@ -1252,7 +1768,7 @@
 		return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
 	}
 
-	function handleExport(): void {
+	async function handleExport(): Promise<void> {
 		try {
 			const attributes = session.state.attributes;
 			const name =
@@ -1266,7 +1782,7 @@
 					: undefined;
 			const card = buildCharaCardV3({
 				name,
-				systemPrompt: settings.profile.systemPrompt,
+				systemPrompt: charaCardSystemPrompt(name),
 				worldInfo: worldInfo.entries,
 				conversation: session.conversation,
 				creator: typeof attributes.creator === 'string' ? attributes.creator : undefined,
@@ -1276,55 +1792,56 @@
 						: undefined,
 				tags
 			});
-			downloadTextFile(`${name}.chara-v3.json`, serializeCharaCard(card));
-			toasts.success('角色卡已导出');
+			const saved = await downloadTextFile(`${name}.chara-v3.json`, serializeCharaCard(card));
+			toasts.success(saved !== null ? `角色卡已导出，保存于：${saved}` : '角色卡已导出');
 		} catch (err) {
 			toasts.error(err);
 		}
 	}
 
 	/** 导出最近消息日志（从最近一次用户发言开始的全部文本）。 */
-	function handleExportLog(): void {
+	async function handleExportLog(): Promise<void> {
 		if (recentLog.trim() === '') {
 			toasts.push('info', '暂无最近日志，发送一条消息后即可导出');
 			return;
 		}
-		downloadTextFile(`cosbox-log-${stamp()}.txt`, recentLog);
-		toasts.success('最近日志已导出');
+		try {
+			const saved = await downloadTextFile(`cosbox-log-${stamp()}.txt`, recentLog);
+			toasts.success(saved !== null ? `最近日志已导出，保存于：${saved}` : '最近日志已导出');
+		} catch (err) {
+			toasts.error(err);
+		}
 	}
 </script>
 
-<div class="app" class:nav-open={mobileNavOpen}>
+<div class="app" class:titlebar-mode={tauriDesktop}>
 	<!-- 主题背景图图层：图片与透明度由 JS 直接设置，不走 CSS 变量
 	     （超长 data URL 存 CSS 变量在部分浏览器会解析失败）。 -->
 	<div class="theme-backdrop" aria-hidden="true"></div>
-	<header class="header">
-		{#if isMobile}
-			<button
-				class="mobile-nav-toggle"
-				aria-label="打开菜单"
-				title="菜单"
-				onclick={() => (mobileNavOpen = !mobileNavOpen)}
-			>
-				☰
-			</button>
-		{/if}
-		<div class="brand">
-			<span class="brand-mark">C</span>
-			<span>CosBox</span>
-		</div>
-		<div class="header-spacer"></div>
-		{#if ready && isMobile}
-			<button
-				class="mobile-state-toggle"
-				aria-label="实时状态"
-				title="实时状态"
-				onclick={() => (mobileStateOpen = !mobileStateOpen)}
-			>
-				{formatWorldTime(session.state.schedule.time)} · {session.state.location.name}
-			</button>
-		{/if}
-		{#if ready}
+	{#if tauriDesktop}
+		<Titlebar
+			workspaces={workspaceList}
+			{currentWorkspaceId}
+			timeText={formatWorldTime(session.state.schedule.time)}
+			{providerLabel}
+			snapshotCount={session.snapshots.length}
+			{busy}
+			onSwitchWorkspace={(id) => void handleEnterWorkspace(id)}
+			onCreateWorkspace={handleCreateWorkspace}
+			onDuplicateWorkspace={(id) => void handleDuplicateWorkspace(id)}
+			onDeleteWorkspace={(id) => void handleDeleteWorkspace(id)}
+			onEditAvatar={(meta) => (avatarEditing = meta)}
+			onOpenWorkspace={() => (workspaceModalOpen = true)}
+			onExitToLanding={handleExitToLanding}
+		/>
+	{/if}
+	{#if entered && !tauriDesktop && !isMobile}
+		<header class="header">
+			<div class="brand">
+				<span class="brand-mark">C</span>
+				<span>CosBox</span>
+			</div>
+			<div class="header-spacer"></div>
 			<span class="chip"
 				><span class="dot"></span>{formatWorldTime(session.state.schedule.time)}</span
 			>
@@ -1333,10 +1850,46 @@
 			{#if busy}
 				<span class="chip busy"><span class="dot"></span>思考中…</span>
 			{/if}
-		{/if}
-	</header>
+		</header>
+	{/if}
+	{#if entered && isMobile}
+		<!-- 移动端聊天沉浸页顶栏：返回（回会话列表/回对话）+ 工作区名 + 状态副标题 + 「⋯」 -->
+		<header class="mobile-chat-head">
+			<button
+				class="mobile-back"
+				aria-label={tab === 'chat' ? '返回会话列表' : '返回对话'}
+				onclick={() => {
+					if (tab === 'chat') {
+						handleExitToLanding();
+					} else {
+						tab = 'chat';
+					}
+				}}>‹</button
+			>
+			<button
+				class="mobile-chat-title"
+				aria-label="实时状态"
+				onclick={() => (mobileStateOpen = !mobileStateOpen)}
+			>
+				<span class="mobile-chat-name">{currentWorkspaceName}</span>
+				<span class="mobile-chat-sub"
+					>{formatWorldTime(session.state.schedule.time)} ·
+					{session.state.location.name}</span
+				>
+			</button>
+			{#if busy}
+				<span class="chip busy"><span class="dot"></span>思考中…</span>
+			{/if}
+			<button
+				class="mobile-feature-toggle"
+				aria-label="功能菜单"
+				title="功能菜单"
+				onclick={() => (mobileFeatureOpen = true)}>⋯</button
+			>
+		</header>
+	{/if}
 
-	{#if isMobile && mobileStateOpen}
+	{#if entered && isMobile && mobileStateOpen}
 		<div class="mobile-state-panel" role="dialog" aria-label="实时状态">
 			<div class="mobile-state-head">
 				<span>实时状态</span>
@@ -1363,27 +1916,114 @@
 		</div>
 	{/if}
 
-	<div class="body">
-		{#if isMobile}
-			<div
-				class="nav-backdrop"
-				class:show={mobileNavOpen}
-				role="presentation"
-				onclick={() => (mobileNavOpen = false)}
-			></div>
+	<div class="body" class:landing={!entered}>
+		{#if entered && !isMobile}
+			<NavRail
+				active={tab}
+				workspaceName={currentWorkspaceName}
+				hideWorkspace={tauriDesktop}
+				onOpenWorkspace={() => (workspaceModalOpen = true)}
+				onExitToLanding={handleExitToLanding}
+				onSelect={(next) => {
+					tab = next;
+				}}
+			/>
 		{/if}
-		<NavRail
-			active={tab}
-			onSelect={(next) => {
-				tab = next;
-				mobileNavOpen = false;
-			}}
-		/>
-		<main class="content">
-			{#if !ready}
+		<main class="content" class:full={!entered}>
+			{#if !booted}
 				<div class="panel">
 					<p class="empty-hint">正在加载本地数据库…</p>
 				</div>
+			{:else if !entered}
+				{#if isMobile}
+					<!-- 移动端首屏：会话列表 / 设置（底部标签栏切换，微信式） -->
+					<div class="mobile-home">
+						{#if mobileHomeTab === 'settings-detail'}
+							<div class="mobile-screen">
+								<div class="mobile-screen-head">
+									<button
+										class="mobile-back"
+										aria-label="返回设置菜单"
+										onclick={() => (mobileHomeTab = 'settings')}>‹</button
+									>
+									<span class="mobile-screen-title">设置</span>
+								</div>
+								<SettingsPanel
+									config={settings.config}
+									profile={settings.profile}
+									developerMode={settings.developerMode}
+									syncSettings={settings.sync}
+									onSaveConfig={handleSaveConfig}
+									onSaveProfile={handleSaveProfile}
+									onSaveDeveloperMode={handleSaveDeveloperMode}
+									onSaveSync={handleSaveSync}
+									onTestSync={handleTestSync}
+									onSyncNow={handleSyncNow}
+									theme={settings.theme}
+									onSaveTheme={handleSaveTheme}
+									onAutoSaveConfig={handleAutoSaveConfig}
+									onFetchModels={handleFetchModels}
+									onTestConnection={handleTestConnection}
+									onExportWorkspace={handleExportWorkspace}
+									onImportWorkspace={handleImportWorkspace}
+								/>
+							</div>
+						{:else if mobileHomeTab === 'settings'}
+							<div class="mobile-settings-menu">
+								<div class="mobile-settings-title">设置</div>
+								{#each MOBILE_SETTINGS_SECTIONS as section (section.label)}
+									<button
+										class="mobile-settings-item"
+										onclick={() => (mobileHomeTab = 'settings-detail')}
+									>
+										<span class="mobile-settings-label">{section.label}</span>
+										<span class="mobile-settings-desc">{section.desc}</span>
+										<span class="mobile-settings-caret">›</span>
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<WorkspaceListHome
+								workspaces={workspaceList}
+								busy={switchingWorkspace}
+								onEnter={handleEnterWorkspace}
+								onOpenManager={() => (workspaceModalOpen = true)}
+								onEditAvatar={(meta) => (avatarEditing = meta)}
+							/>
+						{/if}
+						{#if mobileHomeTab !== 'settings-detail'}
+							<nav class="mobile-home-tabs" aria-label="首屏导航">
+								<button
+									class="mobile-home-tab"
+									class:active={mobileHomeTab === 'chat'}
+									onclick={() => (mobileHomeTab = 'chat')}
+								>
+									<span class="mobile-home-tab-ico">💬</span>对话
+								</button>
+								<button
+									class="mobile-home-tab"
+									class:active={mobileHomeTab === 'settings'}
+									onclick={() => (mobileHomeTab = 'settings')}
+								>
+									<span class="mobile-home-tab-ico">⚙️</span>设置
+								</button>
+							</nav>
+						{/if}
+					</div>
+				{:else}
+					<WorkspaceHome
+						workspaces={workspaceList}
+						currentId={currentWorkspaceId}
+						busy={switchingWorkspace}
+						onEnter={handleEnterWorkspace}
+						onCreate={handleCreateWorkspace}
+						onRename={handleRenameWorkspace}
+						onDuplicate={handleDuplicateWorkspace}
+						onDelete={handleDeleteWorkspace}
+						onExport={handleExportWorkspaceById}
+						onImportFile={handleImportAsNewWorkspace}
+					/>
+				{/if}
 			{:else if tab === 'chat'}
 				<ChatPanel
 					conversation={session.conversation}
@@ -1408,8 +2048,8 @@
 					onEditMessage={handleEditMessage}
 					{recentLog}
 					onExportLog={handleExportLog}
-					{streamingDraft}
-					{streamingThinking}
+					{streamingSegments}
+					{streamingPhase}
 					branches={session.branches}
 					snapshots={session.snapshots}
 					headId={session.headId}
@@ -1468,6 +2108,8 @@
 					onUpsert={handleWorldUpsert}
 					onRemove={handleWorldRemove}
 				/>
+			{:else if tab === 'prompts'}
+				<PromptPanel profile={settings.profile} onSaveProfile={handleSavePrompts} />
 			{:else if tab === 'memory'}
 				<MemoryPanel
 					entries={memoryStore.sorted}
@@ -1477,6 +2119,15 @@
 					onRemove={handleMemoryRemove}
 					onExtract={handleMemoryExtract}
 					onImportExtracted={handleMemoryImportExtracted}
+				/>
+			{:else if tab === 'monitor'}
+				<MonitorPanel
+					counters={metrics.counters}
+					turns={metrics.turns}
+					events={metrics.events}
+					onReset={() => {
+						void metrics.reset().then(() => toasts.success('已清空监控数据'));
+					}}
 				/>
 			{:else if tab === 'transfer'}
 				<ImportExportPanel onImport={handleImport} onExport={handleExport} />
@@ -1488,7 +2139,6 @@
 					syncSettings={settings.sync}
 					onSaveConfig={handleSaveConfig}
 					onSaveProfile={handleSaveProfile}
-					onResetProfile={handleResetProfile}
 					onSaveDeveloperMode={handleSaveDeveloperMode}
 					onSaveSync={handleSaveSync}
 					onTestSync={handleTestSync}
@@ -1504,6 +2154,44 @@
 			{/if}
 		</main>
 	</div>
+
+	{#if entered && isMobile && mobileFeatureOpen}
+		<MobileFeatureDrawer
+			active={tab}
+			workspace={currentWorkspaceMeta ?? { name: currentWorkspaceName }}
+			onSelect={(next) => {
+				tab = next;
+				mobileFeatureOpen = false;
+			}}
+			onClose={() => (mobileFeatureOpen = false)}
+		/>
+	{/if}
+
+	{#if avatarEditing !== null}
+		<AvatarEditor
+			name={avatarEditing.name}
+			avatar={avatarEditing.avatar}
+			fullscreen={isMobile}
+			onSave={(avatar) => void handleSaveAvatar(avatar)}
+			onClose={() => (avatarEditing = null)}
+		/>
+	{/if}
+
+	{#if workspaceModalOpen}
+		<WorkspaceModal
+			workspaces={workspaceList}
+			currentId={currentWorkspaceId}
+			busy={busy || switchingWorkspace}
+			onClose={() => (workspaceModalOpen = false)}
+			onEnter={handleEnterWorkspace}
+			onCreate={handleCreateWorkspace}
+			onRename={handleRenameWorkspace}
+			onDuplicate={handleDuplicateWorkspace}
+			onDelete={handleDeleteWorkspace}
+			onExport={handleExportWorkspaceById}
+			onImportFile={handleImportAsNewWorkspace}
+		/>
+	{/if}
 
 	<Toasts toasts={toasts.toasts} onDismiss={(id) => toasts.remove(id)} />
 </div>

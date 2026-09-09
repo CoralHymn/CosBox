@@ -27,6 +27,8 @@ export interface ModelService {
 	/** 服务商预设 id（见 providers.ts）；'custom' 表示自定义端点。 */
 	providerId: string;
 	baseUrl: string;
+	/** 端点不允许浏览器 CORS 直连时经内置软件通道转发（缺省视为不转发）。 */
+	useProxy?: boolean;
 	apiKey: string;
 	/** 该服务商连接下已保存的模型条目（多选）。 */
 	models: ModelEntry[];
@@ -41,6 +43,8 @@ export interface LlmConfig {
 	providerId: string;
 	/** OpenAI-compatible 基址，如 http://localhost:4000/v1。 */
 	baseUrl: string;
+	/** 端点不允许浏览器 CORS 直连时经内置软件通道转发（缺省视为不转发）。 */
+	useProxy?: boolean;
 	apiKey: string;
 	model: string;
 	temperature: number;
@@ -57,6 +61,12 @@ export interface LlmConfig {
 	allowAiStateTools?: boolean;
 	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
 	llmStateConfirm?: boolean;
+	/**
+	 * 文本形式工具调用双通道：结构化 tool_calls 缺失时，允许解析文本形式调用兜底
+	 * （仅限补调重试/状态确认路径提示模型，主流程保持严格 JSON）。缺失视为开启；
+	 * 关闭后强制只认结构化 tool_calls，供排查「模型主流程偷懒」问题。
+	 */
+	textToolFallback?: boolean;
 	/** 长期记忆：启用召回注入（缺失视为开启）。 */
 	memoryEnabled?: boolean;
 	/** 长期记忆：单次请求最多注入的条数（默认 5）。 */
@@ -189,6 +199,7 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	provider: 'demo',
 	providerId: 'custom',
 	baseUrl: 'http://localhost:4000/v1',
+	useProxy: false,
 	apiKey: '',
 	model: 'gpt-4o-mini',
 	temperature: 0.8,
@@ -200,6 +211,7 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	stream: false,
 	allowAiStateTools: false,
 	llmStateConfirm: false,
+	textToolFallback: true,
 	memoryEnabled: true,
 	memoryInjectLimit: 5,
 	memoryAutoExtract: false,

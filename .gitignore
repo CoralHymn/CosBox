@@ -7,6 +7,14 @@ test-results/
 tmp/
 .DS_Store
 *.local
+
 .env
 .env.*
 !.env.example
+.trae/
+
+# Android 签名私钥与安装包（严禁提交，丢失将无法再发布更新）
+*.keystore
+*.jks
+*.apk
+*.aab

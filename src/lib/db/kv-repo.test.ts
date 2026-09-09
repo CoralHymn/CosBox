@@ -57,11 +57,32 @@ describe('KvRepository', () => {
 		expect(all.map((r) => r.key).sort()).toEqual(['a', 'b']);
 	});
 
+	it('getAllWithPrefix 返回前缀匹配记录', async () => {
+		await repo.set('ws:a:k1', 1);
+		await repo.set('ws:a:k2', 2);
+		await repo.set('ws:b:k1', 3);
+		await repo.set('other', 4);
+		const matched = await repo.getAllWithPrefix('ws:a:');
+		expect(matched.map((r) => r.key).sort()).toEqual(['ws:a:k1', 'ws:a:k2']);
+	});
+
+	it('removeByPrefix 只删除前缀匹配键', async () => {
+		await repo.set('ws:a:k1', 1);
+		await repo.set('ws:a:k2', 2);
+		await repo.set('ws:b:k1', 3);
+		await repo.removeByPrefix('ws:a:');
+		expect(await repo.get('ws:a:k1')).toBeUndefined();
+		expect(await repo.get('ws:a:k2')).toBeUndefined();
+		expect(await repo.get('ws:b:k1')).toBe(3);
+	});
+
 	it('数据库关闭后操作抛 StorageError', async () => {
 		await db.close();
 		await expect(repo.get('x')).rejects.toThrow(StorageError);
 		await expect(repo.set('x', 1)).rejects.toThrow(StorageError);
 		await expect(repo.remove('x')).rejects.toThrow(StorageError);
 		await expect(repo.getAll()).rejects.toThrow(StorageError);
+		await expect(repo.getAllWithPrefix('ws:')).rejects.toThrow(StorageError);
+		await expect(repo.removeByPrefix('ws:')).rejects.toThrow(StorageError);
 	});
 });

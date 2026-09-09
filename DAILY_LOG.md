@@ -2162,6 +2162,7 @@ DeepSeek V4 思考模式的回传要求在上一提交已补齐（每条 assista
 ### 排查指引
 
 若仍出现不思考，打开「开发者：查看最近一次完整提示词」核对：
+
 1. `reasoningSummary` 是否「缺失 0 条」——缺失 > 0 说明请求序列化漏了字段；
 2. 「最近响应：思考=0 字」说明端点本次没有返回 `reasoning_content`
    （模型 / 代理侧），可对比上一轮思考 > 0 的请求体差异。
@@ -2591,3 +2592,522 @@ AI 思考引用系统提醒「本次发言涉及地点变化，需要调用 goto
 ### 门禁
 
 - 751 个单元测试全过；check / lint / prettier 全绿；代理链路实测通过。
+
+## 2026-08-08（续）：开源协议声明
+
+### 需求
+
+在「设置」中加入开源协议声明，列出 CosBox 直接依赖与参考/调研过的全部开源项目
+及对应许可证；经确认采用「点击后打开小窗」样式，避免设置页被长列表占满。
+
+### 实现
+
+- 新增 `src/lib/legal/credits.ts`：集中维护声明数据，分为「直接依赖 /
+  参考·调研的开源项目 / 非开源设计参考」三组；许可证信息于 2026-08 逐项
+  联网核对上游仓库（opencode=MIT、Chatbox=GPL-3.0、SillyTavern=AGPL-3.0、
+  LiteLLM=MIT（enterprise/ 除外）、Ollama=MIT、vLLM=Apache-2.0、
+  mem0/Letta/Zep=Apache-2.0、LangMem/LangChain/OmniRoute=MIT 等；
+  opencode-mem 仓库未标注许可证，如实注明「调研参考」）。
+- 设置页「开源协议声明」卡片仅保留一行说明与「查看开源协议声明」按钮，
+  点击后复用全局 `prompt-backdrop / prompt-modal` 弹窗展示完整分组列表；
+  支持点击遮罩或「关闭」按钮退出，移动端沿用 94vw 宽度。
+- 新增 `src/lib/legal/credits.test.ts`：锁定分组结构、字段完整性与名称唯一性。
+
+### 门禁
+
+- 754 个单元测试全过（新增 3 条）；check / lint / prettier / build 全绿。
+
+### 补充
+
+- 经用户提醒，声明清单补入 `VoltAgent/awesome-design-md`（MIT）——
+  内置主题预设（Claude / Discord / The Verge）的设计分析参考；
+  许可证已联网核对，名称唯一性与字段完整性测试同步覆盖。
+
+## 2026-08-08（续二）：AI 气泡双层布局 + 工具调用实时反馈 + 工具 schema 修复
+
+### 需求
+
+- AI 气泡交错输出（思考→正文→思考→正文）在流式阶段被压成「一段思考 + 一段正文」，
+  后续思考/正文在原位追加；补调重试的输出被丢弃时「流式看到、完成后被吞」。
+- 对齐主流 agent（Claude / ChatGPT）：可折叠「工作过程区」+ 下方最终答案。
+- 工具调用要有「调用中」实时反馈；调用失败的错误样式要可见
+  （失败文本一直有回馈模型，但 UI 从未区分展示）。
+- 排查「工具老是调用不起来」：对标主流实践修正 schema 与描述的矛盾。
+
+### 实现
+
+- `types.ts`：`MessageSegment` 增加 `toolArgs`（参数摘要）与 `status`（running/error）。
+- `+page.svelte`：`streamingDraft/streamingThinking` 两字符串改为
+  `streamingSegments` 分段数组（同类型续接、异类型新开段，保留交替顺序）；
+  新增 `onToolStart/onToolResult/onRestart` 处理；落库分段携带参数与失败状态。
+- `chat-service.ts`：新增 `onToolStart/onToolResult/onRestart` 选项，工具执行
+  （含 host_infer 兜底）发出事件；轮次反馈携带参数摘要；所有补调/重试改非流式
+  且不接入草稿回调（可被丢弃的结果不再流式展示）；思考循环中断时通知 UI 清空草稿。
+- `MessageBubble.svelte`：双层渲染——最后一次工具调用及之前的分段进可折叠
+  「工作过程（N 步）」区（流式中展开、完成后收起），之后的正文为最终答案；
+  工具段显示参数与「调用中…/失败红字」；无工具段时思考归过程区、正文归最终答案。
+- `ChatPanel.svelte`：流式草稿气泡传 segments。
+- `state-tools.ts`：`set_outfit` 去掉与中文别名矛盾的英文 enum、required 改
+  `['item']`；`goto_location` required 改 `['name']`；各工具描述前置关键约束与示例；
+  导出 `isToolErrorOutput` 统一失败判定。
+- `openai-client.ts`：流式 tool_calls 兼容代理以对象（非字符串）下发 arguments。
+- 测试：新增工具事件、重试流式隔离、onRestart 用例；既有 rounds 断言补充 args；
+  e2e 两处改为展开工作过程区后断言。
+
+### 门禁
+
+- 756 个单元测试全过（新增 2 条）；45 条 e2e 全过；check / lint / prettier 全绿。
+
+## 2026-08-09：假正文出上下文 + 文本双通道（护栏 + 开关）+ 后处理状态条 + 监控 tab
+
+### 背景
+
+- 用户反馈：AI 思考里写「让我调用 goto_location」却直接输出正文不调用，之后的停顿
+  不可见；假正文进上下文导致车轱辘；状态确认阶段执行工具也看不到。
+- 否决宿主按关键词推断 goto_location 的方案：「真希望能去海滩走走」「想起了公园」
+  会被误判为实际移动——剧情判断全部留给 LLM，宿主只解析明确的调用语法（D102）。
+
+### 实现
+
+- `pipeline.ts`：`expandSegmentedMessage` 重写——只发工具反馈 + 最后工具段之后的正文
+  （思考合并挂 reasoning），假正文不进上下文；以工具段收尾时回退保留全部正文。
+- `text-tools.ts`：新增 `TEXT_TOOL_FALLBACK_HINT`（仅限补调/确认提示词使用）与
+  `stripTextToolCalls`（采纳文本调用后剔除正文里的调用语法）。
+- `chat-service.ts`：新增 `onPhase/onMetric/textToolFallback` 选项；三个补调重试接受
+  文本形式调用（结构化永远优先），第二档用 `FORCE_TOOL_NUDGE` 与第一档拉开差异；
+  关键路径（重试/循环中断/判断/确认/空回复/截断/压缩）发出指标事件。
+- `state-judge.ts`：confirmation 循环双通道 + 透传 `onToolStart/onToolResult/onMetric`；
+  确认提示词追加兜底语法指引。
+- `types.ts`/`providers.ts`：`LlmConfig` 新增 `textToolFallback`（默认 true），旧存档归一化。
+- `SettingsPanel.svelte`：AI 行为区新增「文本形式工具调用双通道」勾选（随允许 AI
+  自主修改状态禁用）。
+- `stores/metrics.svelte.ts`：计数器 + 每轮样本 + 事件流水，KV 防抖持久化，滚动窗口
+  300 轮/500 事件；供监控面板展示与清空。
+- `LineChart.svelte`/`MonitorPanel.svelte`：无依赖 SVG spline 多序列折线图（Catmull-Rom
+  转贝塞尔）；监控面板含 Token 消耗/耗时/工具与兜底三张图、计数卡（文本兜底置顶高亮）、
+  最近事件流水。
+- `NavRail.svelte`/`ui.svelte.ts`/`+page.svelte`：新增「监控」tab；`streamingPhase`
+  状态条接线（生成与手动状态确认共用）；每轮结束记录样本与指标。
+- `ChatPanel.svelte`/`app.css`：气泡下方状态条 `.phase-bar`（正文输出后仍可见）。
+
+### 护栏（防模型利用兜底偷懒）
+
+- 提示词物理隔离：主流程系统提示与每轮提醒绝不提及文本形式调用。
+- 代码级优先级压制：仅当 `toolCalls.length === 0` 才解析文本；并存时只认 JSON。
+- 设置开关可随时关闭双通道强制只走 JSON，配合监控指标排查「主流程摆烂」。
+
+### 门禁
+
+- 763 个单元测试全过（新增 7 条：stripTextToolCalls 3 条、双通道/护栏/开关/确认 4 条）；
+  45 条 e2e 全过（mobile 导航项断言 10→11）；check / lint / prettier 全绿。
+
+## 2026-08-11：Tauri 2 打包骨架——Windows + Android 双端薄壳初始化
+
+### 背景
+
+- 目标：CosBox 打包为 Windows 与 Android 应用。确认方案：保留共享 Web 层
+  （SvelteKit SPA 唯一代码库），双端均采用 Tauri 2 薄壳（Windows 用系统
+  WebView2，Android 用系统 WebView）；不引入 Electron / Capacitor，不原生重写。
+- 机器环境补齐：Android SDK 命令行版装至 `D:\Android\Sdk`（platform-tools
+  37.0.1 / platforms;android-36 / build-tools;36.0.0 / ndk;27.1.12297006，
+  许可全部接受）；Rust 1.97.1 + 四个 Android target（aarch64 / armv7 / i686 /
+  x86_64）；用户级环境变量 ANDROID_HOME / NDK_HOME / JAVA_HOME。
+- 测试环境：使用 MuMu 12 模拟器（adb connect 127.0.0.1:16384），不建 AVD。
+
+### 实现
+
+- `@tauri-apps/cli` 加入 devDependencies；`tauri init` 生成 `src-tauri/`
+  （frontendDist `../build`、devUrl `http://localhost:5173`，before 命令接
+  `npm run dev` / `npm run build`）。
+- `tauri.conf.json`：identifier 定为 `com.cosbox.app`（Android applicationId
+  与 Windows 升级路径由此派生）；`Cargo.toml` 补元数据（描述 / 作者 / 协议）。
+- `tauri android init` 生成 `src-tauri/gen/android/` Gradle 工程：
+  compileSdk 36 / minSdk 24 / targetSdk 36；debug 构建
+  `usesCleartextTraffic = true`（开发期可连局域网 http 端点），release 保持关闭。
+- `.gitignore`：`target/`、`gen/schemas`、Android `build/` 产物均忽略
+  （git check-ignore 实测生效）；补 `*.jks` / `*.keystore` 防签名文件误提交。
+
+### 验证
+
+- `cargo check` 通过（1m03s，crates.io 直连）；`npm run build` 产物正常落到
+  `build/`（与 frontendDist 对齐）。
+- git 未跟踪清单 64 项均为源码/配置，无编译产物混入。
+
+### 待办（功能开发完成后）
+
+- 应用图标：`tauri icon <源图>` 生成全平台规格。
+- Android 首次构建：联网下载 Gradle / AGP 依赖后 `tauri android build`。
+- 平台适配层：`src/lib/platform/` 端口（WorkspaceStore / FilePort / llmFetch），
+  见 D103 与 PACKAGING.md。
+- 发布签名 keystore 与自动更新（tauri-plugin-updater）配置。
+
+## 2026-08-14：修复 Android 端导出闪退（写入系统「下载」目录）
+
+### 背景
+
+- 实机测试：Android 上任何导出（导出工作区 / 角色卡 / 配置段 / 日志）都会闪退，
+  而不是保存到系统「下载」目录。
+- 定位：`android_save.rs` 用 `ndk_context::android_context()` 取 JavaVM/Activity，
+  但该函数在上下文未初始化时直接 `expect` panic。逐一核对 tao 0.35 / wry 0.55 /
+  tauri 2.11 源码，Tauri v2 运行时根本不调用 `ndk_context::initialize_android_context`
+  （tao 用自己 vendored 的 ndk_glue），所以每次导出必然 panic → 进程崩溃。
+
+### 实现
+
+- 弃用 ndk-context（`Cargo.toml` 移除依赖），改用两条自有通路：
+  - `android_save.rs` 定义 `JNI_OnLoad`（app_lib 加载时回调，全依赖树无同名符号），
+    保存进程级 `JavaVM`，并用全局引用预热 `CosBoxBridge` 类
+    （后台线程上 FindClass 只能解析系统类，应用类必须用启动时缓存的引用）。
+  - 新增 Kotlin `CosBoxBridge`（ContentProvider，manifest 注册，进程启动时由系统
+    实例化）保存 Application Context，Rust 经 JNI 调 `getAppContext()` 取得。
+  - `build.rs` 把 tauri.conf.json 的 identifier 注入 `COSBOX_ANDROID_IDENTIFIER`，
+    JNI 类名与打包配置自动同步。
+- MediaStore 逻辑保留：API 29+ 写 `MediaStore.Downloads`（relative_path
+  `Download/`），API < 29 回落 `getExternalFilesDir("Download")`；新增文件名非法
+  字符清洗（\ / : * ? " < > | 与控制字符 → `_`），避免角色名等导致 insert 抛异常。
+- 传输加固：导出字节由「TypedArray → 超长 JSON 数字数组」改为 base64 字符串，
+  消除大工作区导出时 WebView 内存暴涨这条潜在闪退路径。
+- release 开 R8：`proguard-rules.pro` 加 `CosBoxBridge.getAppContext` keep 规则。
+
+### 验证
+
+- `cargo check`（桌面）+ `cargo check --target aarch64-linux-android` 通过；
+  `svelte-check` 0 错误；Vitest 763 用例全绿（新增 Android base64 传输用例）。
+- `tauri android build --target aarch64` 全流程构建通过（APK + AAB）；解包验证：
+  `libapp_lib.so` 导出 `JNI_OnLoad`、引用 `CosBoxBridge`，R8 后 classes.dex 保留
+  `CosBoxBridge.getAppContext`，合并 manifest 含 bridge provider。
+- 待实机回归：导出各项应写入系统「下载」目录并 toast 显示 content:// URI。
+
+### 同日补充：导出不再闪退，但出现「发生未知错误，请重试」
+
+- 实机复测：旧崩溃已消除（说明 JNI_OnLoad / 桥接类链路生效），但导出 toast
+  显示「发生未知错误，请重试」。
+- 定位：Tauri v2 的 `invoke` 拒绝值就是 Rust 命令返回的错误字符串（非 Error
+  对象），`toUserMessage` 对非 Error 值一律返回通用文案，把真实原因吞掉了；
+  `android_save.rs` 的 `take_exception` 结果此前也被丢弃。
+- 处理（本轮改动）：
+  - `toUserMessage` 透传非空字符串（Rust 侧错误都是可读中文）；toast 的
+    error 出口加 console.error 留痕。
+  - MediaStore 写公共下载目录失败时：先取回并清除 pending 的 Java 异常细节，
+    再自动回落写入应用专属外部 Download 目录（Android/data/<包名>/files/Download），
+    保证导出始终有文件产出；两路都失败时返回合并后的完整原因。
+  - `relative_path` 改回官方示例写法 `Download`（去掉尾部斜杠）。
+  - 复核 `libapp_lib.so` 动态符号表：`JNI_OnLoad` 确实导出（`llvm-nm -D`），
+    ART 加载时会调用，排除「JavaVM 未初始化」路径。
+- 验证：`cargo check`（桌面 + aarch64-linux-android）通过；svelte-check 0 错；
+  Vitest 相关用例全绿；`tauri android build --target aarch64` 产出新 APK，
+  解包复核 JNI_OnLoad / CosBoxBridge / getAppContext 均保留。
+- 待实机回归：若仍失败，toast 会直接显示具体原因（如 MediaStore insert 异常
+  文本），据此可一步定位。
+
+### 同日补充：实机出现黑屏 —— 系并发构建污染前端包
+
+- 现象：安装 12:15 构建的 APK 后，打开应用直接黑屏。
+- 排查：Tauri v2 的前端资源是编译期内嵌进 `libapp_lib.so` 的（`generate_context!`），
+  APK 的 `assets/` 里没有前端属正常现象。用 `llvm-nm` 确认 `JNI_OnLoad` 导出，
+  并比对 .so 内嵌的 chunk 名，均正常。
+- 根因：12:15 那次 `tauri android build` 与并发的 `npm run check`
+  （内部执行 `svelte-kit sync`）同时读写 `.svelte-kit`，vite 读到了半写入的
+  生成代码，产物虽构建成功但内嵌包损坏 → WebView 白屏/黑屏。
+- 处理：干净重建（无任何并发 npm 进程），`svelte-check` 0 错、Vitest 全绿、
+  Playwright e2e 45/45 通过（生产包，含 .cbox 工作区导出导入用例），
+  最终 APK 内嵌包与 e2e 验证的 `build/` 一致（chunk 名 `app.BXykyrII.js`）。
+- 经验：`tauri android build` 执行期间不要并行跑任何会碰 `.svelte-kit` 的命令
+  （`npm run check` / `svelte-kit sync`），否则前端包可能被污染。
+
+## 2026-08-14（续）：多工作区（多存档）——初始界面 + 切换/管理 + 同步分槽
+
+### 背景
+
+- 单一存档已无法满足多角色/多剧情并行的需求；用户要求：打开应用先进入
+  「工作区选择」初始界面（可选工作区、可新增），而不是直接进入对话。
+- 既有 .cbox 工作区是「整包导出导入」，不是可切换的多存档；远程同步服务端
+  只有单槽，多工作区会互相覆盖。
+
+### 设计决策（详见 DECISIONS D104–D108）
+
+- **D104 存储**：单库加 `workspaceId` 分区列（schema v3），三张业务表
+  （快照/世界书/记忆）按 `WorkspaceScope` 过滤；工作区级 kv 键前缀
+  `ws:{id}:`；复制/导入为新工作区时三表 **remap id**（id 是全局主键）。
+- **D105 切换**：`CharacterManager.runExclusive` 把切换编排排到 pending 变更
+  之后（防跨工作区脏写），scope 切换 + `resetInternal()` 重载；busy 期间禁切。
+- **D106 .cbox v2**：新增 `memories.json` 与 `workspaceName`，兼容 v1；
+  顺带修复「记忆不随工作区导出/同步」的既有缺口。
+- **D107 初始界面**：每次启动/刷新先进工作区选择页，进入后才初始化会话与
+  同步；应用内导航栏切换器打开同款管理弹层，可退出回初始界面。
+- **D108 同步 v2**：服务端 `GET/PUT /api/workspace/{id}` 按工作区分槽
+  （`/api/workspace` 为 default 槽别名），存储 `data/workspaces.json` 并在
+  启动时迁移旧单槽文件；客户端切换工作区时 `reloadForWorkspace()`。
+
+### 完成内容
+
+- **db 层**：schema v3 + 存量盖章 `default` 的升级迁移；`WorkspaceScope`、
+  `scoped-kv`（`createScopeKv` / `createWorkspaceKv` / `workspaceKvPrefix`）；
+  快照/世界书/记忆三仓储按 scope 过滤、写入统一盖章，并新增显式
+  `workspaceId` 参数的重载（复制/删除/导出非当前工作区用）；kv-repo 增加
+  `getAllWithPrefix` / `removeByPrefix`。
+- **workspace 模块**：`WorkspaceRegistry`（注册表 CRUD + 首启迁移旧裸键进
+  `ws:default:` + 名称去重校验）与 `WorkspaceService`（switchTo /
+  createWorkspace / duplicateWorkspace / removeWorkspace /
+  importAsNewWorkspace / collectWorkspaceData / exportWorkspace；
+  复制/导入全量 remap id，失败回滚）。
+- **manager/stores**：`CharacterManager` deps 改作用域 kv，新增
+  `runExclusive` / `reset` / `resetInternal`；settings store 拆分应用级
+  （llm/sync/theme）与工作区级（profile/developer），新增
+  `reloadWorkspaceScoped()`；context-usage 走作用域 kv；世界书/记忆 store
+  切换后重载。
+- **UI**：`WorkspaceHome`（初始界面）+ `WorkspaceManager`（列表/新建/重命名/
+  复制/导出/删除/导入）+ `WorkspaceModal`（应用内管理弹层）+ NavRail 顶部
+  工作区切换器与「退出到工作区选择」；`+page.svelte` 启动改为
+  booted（注册表+设置）→ entered（进入工作区）两阶段，进入/切换/创建/删除/
+  导出/导入全接线；删除确认弹窗展示数据量。
+- **同步**：`server/index.mjs` 重构出 `createHandler`（多槽 + default 别名 +
+  id 白名单 + 槽位上限 64 + v1 迁移）；新增 `server/index.test.mjs`
+  （`npm run test:server`，node --test 8 用例）；客户端 SyncService 支持
+  异步 collect、`getWorkspaceId`、`reloadForWorkspace`。
+- **测试**：新增 registry/service/scoped-kv/schema 迁移等单测 30+ 条；
+  单测总数 804 全绿；e2e 全量适配「启动先进初始界面」（新增 `e2e/utils.ts`
+  的 `enterDefaultWorkspace` 助手 + `workspace.spec.ts` 6 条工作区流程），
+  51/51 通过（含既有 45 条全量回归）。
+
+### 验证
+
+- `npm run check` 0 错误 0 警告；`npm run lint` 通过；`npm test` 804 用例全绿；
+  `npm run test:server` 8 用例全绿；`npm run test:e2e` 51/51 通过。
+- 覆盖率：本次改动的 db/import-export/workspace 文件全部保持 100% 语句/行/函数
+  （manager 仅剩改动前就存在的防御死代码 537 行）；全局 100% 阈值在本轮改动前
+  即未达标（基线 96.97%，存量缺口在 llm/context 等与多工作区无关的文件，
+  本轮实测 97.91% 已较基线提升）。
+- 兼容性：旧存档首启自动归入「默认工作区」；v1 .cbox 可继续导入；旧客户端
+  连新服务端落 default 槽（行为等同旧版单槽）。
+
+### 遗留与下一步
+
+- 「记住上次工作区并自动进入」偏好项（当前每次启动都停在选择页）。
+- 每工作区独立模型配置（当前应用级共享，Key 不随工作区导出/同步的安全
+  边界不变）。
+- 打包版 Android 的 SQLite 迁移（D103）落地时，多工作区分区键需要一并映射。
+
+### 同日补充：初始界面被压成顶部 54px 细条（布局修复）
+
+- 现象：未进入工作区时，初始界面全部缩在左上角一条极窄区域里，
+  看起来像「控件全部消失、只剩背景」；dev 与 preview、Edge 与 Chrome 一致。
+- 根因：`.app` 是 `grid-template-rows: 54px 1fr` 双行网格，初始界面不渲染
+  header，`.body` 作为唯一流内子元素被自动放进第一行（54px 顶栏行），
+  整个界面高度被压成 54px；此前只加 `display: flex` 修列宽、没跨行，
+  所以宽度对了但高度仍塌缩。
+- 处理：`.body.landing { grid-row: 1 / -1; display: flex; }` 显式跨两行 +
+  `.body.landing .content { flex: 1; overflow-y: auto; }` 让内容区横向撑满；
+  桌面端 `.home` 恢复为居中 720px 卡片（1280/1920 宽验证 x=280/x=600），
+  移动端 390px 满宽。
+- 回归护栏：`workspace.spec.ts` 首条用例新增几何断言（`.home` 高度 > 500、
+  `.ws-create` 宽度 > 500），塌缩成细条会直接红。Playwright 51/51 通过。
+- 教训：多工作区改动涉及外壳网格布局时，`isVisible` 不足以防回归（细条里的
+  元素仍算可见），必须断言 boundingBox 几何尺寸。
+
+### 同日补充：工作区切换位置重排 + Tauri 桌面自定义标题栏
+
+- 用户反馈：切换器放导航栏顶部很突兀；桌面版要去掉 Windows 系统标题栏，
+  改用 VSCode 式自定义标题栏（软件控制最小化/最大化/关闭）。
+- 落地方案：
+  - **Web / 移动端**：工作区切换器 + 退出按钮固定在导航栏（工具区）最下方
+    （`margin-top: auto` 钉底，移动端即抽屉底部、整体左下角）。
+  - **Tauri 桌面版**：`tauri.conf.json` 主窗口 `decorations: false`；新增
+    `Titlebar.svelte`（40px，`data-tauri-drag-region` 拖拽区 + 品牌 +
+    工作区切换器 + 退出 + 最小化/最大化/关闭，窗口控制经
+    `@tauri-apps/api/window` 动态引入）；capabilities 增加
+    `core:window:allow-minimize / allow-toggle-maximize / allow-close /
+    allow-start-dragging`；`.app.titlebar-mode` 网格改为 40px/54px/1fr，
+    初始界面 body 从第 2 行起跨行。
+  - 平台判定：`isTauri() && userAgent 不含 Android`（Android 仍走移动端抽屉）。
+- 验证：svelte-check 0 错；lint 通过；e2e 51/51（Web/移动端布局回归）。
+  待实机：`tauri dev` 下确认拖拽、最小化/最大化/关闭与无边框窗口效果。
+
+### 同日补充：修复桌面端进入工作区后控件被压成 54px 细条 + 控件图标替换
+
+- Bug：Tauri 桌面（标题栏模式）进入工作区后，内容区被压在上方 54px 细条。
+  根因：标题栏模式的网格是 40px/54px/1fr 三行，但 header 渲染条件写成了
+  `entered && !tauriDesktop`，标题栏模式下 header 不渲染，`.body` 落到中间
+  54px 行。修复：header 恢复为 `entered` 时渲染（标题栏模式隐藏 header 品牌
+  避免重复），三行网格各就其位。
+- 图标替换：工作区相关控件去掉 emoji，改用 iconify（Lucide 风格）内联 SVG——
+  新增 `components/icons.ts`（路径常量表）+ `components/Icon.svelte`；
+  切换器 🗂️→layers、退出 ⇤→log-out、重命名 ✏️→pencil、复制 ⧉→copy、
+  导出 ⬇️→download、删除 🗑️→trash-2；标题栏窗口控制 ─/□/✕→minus/square/x。
+- 回归护栏：新增 `e2e/titlebar.spec.ts`（注入 `__TAURI_INTERNALS__` 模拟
+  标题栏模式，断言标题栏 40px、窗口控制按钮存在、初始界面与进入后 body
+  高度 > 500）。e2e 52/52 通过；svelte-check 0 错；lint 通过。
+
+### 同日补充：导航图标 Lucide 化 + 桌面状态 chips 并入标题栏 + 默认主题改 The Verge + 迁移提速
+
+- **图标**：导航栏全部 tab emoji（💬🧍📍👗🗓️🌳📖🧠📈📦⚙️）替换为 Lucide
+  风格内联 SVG（message-circle/user/map-pin/shirt/calendar-days/git-branch/
+  book-open/brain/activity/package/settings），切换器/标题栏下拉箭头 ▾ 改
+  chevron-down；`icons.ts` 路径常量表扩充。
+- **桌面标题栏**：时间/模型/快照/思考中 chips 并入 40px 标题栏（时间等状态
+  信息不再单独占一条 54px 顶栏，画面更紧凑）；标题栏模式网格简化为
+  `40px 1fr`，桌面端不再渲染 header（移动端不受影响）。
+- **默认主题**：The Verge 酸薄荷成为默认（`DEFAULT_THEME_COLORS`、
+  `DEFAULT_THEME_CONFIG.presetId='verge'`、app.css :root 同步），旧的蓝紫
+  主题保留为「CosBox 深色（旧默认）」预设；已有用户保存的主题不受影响。
+- **迁移提速**：v2→v3 盖章从 `toArray + bulkPut`（全表读入内存再整表回写，
+  大快照表会卡）改为 `toCollection().modify()` 游标原地更新，老存档首次
+  打开明显更快、内存占用更低。
+- 验证：svelte-check 0 错；lint 通过；单测 804 全绿；e2e 52/52（主题用例
+  同步断言 verge 默认值）。
+
+### 同日补充：启动性能优化——O(n²) 分支导航查找 + 三重复读
+
+- 用户反馈：有数据的旧存档打开应用「要等一段时间才能用」。实测复现：
+  空数据 214ms；3000 条快照 2s；10000 条快照进入聊天 **>30s**（超线性）。
+- 根因一（大头）：`ChatPanel.branchNavFor` 在每个消息气泡渲染时被调用，
+  内部 `snapshots.find(...)` 每次 O(n) 全表扫描——5000 条消息 × 10000 快照
+  ≈ 5000 万次查找（O(n²)）。修复：抽出 `nodeById` 派生 Map（O(n) 构建一次），
+  branchAlts 与 branchNavFor 全部 O(1) 查表。
+- 根因二：`CharacterManager.reload()` 对快照表读了 3 次全表
+  （getAll + getBranches 的 getAll + rebuildState 的 getAll）。修复：只读一次，
+  分支与状态重建复用同一份数据（`getBranchTips` / `rebuildFromNodes` 纯函数），
+  顺带让每次 update/addMessage 的刷新也快 3 倍。
+- 根因三：切换工作区后的世界书/记忆/用量/设置重载改为 `Promise.all` 并行。
+- 实测（生产构建）：enter→chat 3000 条 1081ms→286ms（3.8x），10000 条
+  >30s→1260ms（25x+）；空数据不受影响（~200ms）。一次性 v2→v3 迁移
+  （modify 盖章）已在前一轮优化过，10k 行约 2.4s 仅首次升级发生。
+- 验证：单测 808 全绿；e2e 52/52；svelte-check 0 错；lint 通过。
+- 测量脚本：`e2e/measure-startup.mjs`（可复用于后续启动性能回归）。
+
+### 同日补充：dev 启动/首屏优化——堵死「按需发现依赖 → 二次优化 → 整页重载」
+
+- 用户现象：dev 开启后打开两个浏览器（一个有大量数据、一个没有），UI 几乎
+  同一时间才出现——瓶颈不在数据读取，而在 dev 初始化本身。
+- 定位（Vite 日志）：启动扫描只覆盖入口，dexie/nanoid 等静态依赖在首屏模块
+  加载时才被发现 → `dependencies optimized: dexie, nanoid` → `reloading`，
+  首个浏览器被挂起十几秒，后续浏览器共享同一延迟。
+- 处理（vite.config.ts）：
+  - `optimizeDeps.include` 显式列出全部静态依赖（dexie/nanoid/svelte/
+    svelte/reactivity）+ Tauri 动态导入包（@tauri-apps/api/core|window、
+    plugin-updater、plugin-process），启动时一次预打包完成，首屏不再有
+    「新依赖发现」。
+  - 弃用 `server.warmup`：实测它会让 ready 后后台编译再次触发二次优化，
+    反而拖慢首个请求。
+- 实测：暖缓存下页面加载 396ms/391ms（此前首访约 2.5s + 偶发二次优化挂起
+  15-20s）；冷缓存（清 .vite 后）启动一次性 ~22s（主要成本为预打包 svelte），
+  之后启动 ~1s。验证：svelte-check 0 错、lint 通过、e2e 52/52。
+
+### 同日补充：dev 首次加载 36s 根因定位与预热修复
+
+- 用户复测：即使优化后，「ready 打印后依旧要等十几秒才载入网页」。
+- 定位（curl 计时）：**进程内第一个 HTTP 请求（任意路径，404 也一样）会被
+  SvelteKit dev 中间件一次性初始化阻塞 25-47s**（CPU 采样无明显占用、属于
+  等待型），之后所有请求毫秒级；组件编译本身只要 0.17s/个（并行 ~1.9s）。
+  → 用户看到的「两个浏览器同时晚出 UI」就是这个首次初始化的等待。
+- 修复（vite.config.ts 内联插件 `warmupFirstRequest`，apply:'serve'）：
+  - 服务器一 listening 就发起内部请求预热掉这次一次性初始化；
+  - 预热完成前不打印 Local 地址（覆盖 `server.printUrls`），并输出
+    「正在预热…（约 30-60s）」提示——用户看到地址时页面已可秒开。
+  - 配合 `server.warmup` 预热入口组件，首屏组件编译也消化在启动阶段。
+- 实测（暖缓存）：预热完成后首次加载 HTML 23ms、首屏 811ms（二次 296ms）；
+  此前 HTML 36s + 首屏 1.9s。冷缓存启动一次性多 ~30-60s（预热期间打印提示）。
+- 验证：单测 808 全绿；e2e 52/52；svelte-check 0 错；lint 通过。
+- 测量脚本：`e2e/measure-startup.mjs`（可复用于启动性能回归）。
+
+### 同日补充（定案）：dev 首请求 38-47s 的根因是 chokidar 惰性初始化全项目监视器
+
+- 前几轮的「HTML 首次请求 25-47s」最终由子代理 CPU profile 定性：
+  SvelteKit/Vite dev 在进程内第一个 HTTP 请求到达时，才惰性把**整个项目树**
+  递归加入 chokidar 文件监视器（fs.watch）——实测 19,302 文件/3,762 目录
+  耗时 38-47s，vite 进程单核 110-140% 满载、句柄从 736 暴涨到 23,300+；
+  期间无子进程、Defender 零占用。之后 watcher 就位，所有请求毫秒级。
+  与依赖预打包缓存、组件编译、数据量均无关（冷热缓存都复现）。
+- 大头来源：`src-tauri/target`（17,457 个文件，13.2GB Rust 构建产物）+
+  `src-tauri/gen`（1,454 个文件）。
+- 根治：`server.watch.ignored: ['**/src-tauri/target/**', '**/src-tauri/gen/**']`，
+  监视树缩小到 ~2 千文件。实测预热时长 38-47s → **1s**；dev 从启动到打印
+  Local 地址约 2s，打开浏览器首屏 ~0.9s（二次 ~0.4s）。
+- 同时修正 warmup 插件的两个缺陷：
+  - 预热地址从写死 127.0.0.1 改为 `server.resolvedUrls.local[0]`——本机 Vite
+    默认只绑定 IPv6 ::1，写死 IPv4 会打到错误的服务器（曾导致「预热 0s 但
+    打开仍要 18s」的假象）；残留后台 dev 进程双绑 5173 的问题一并清理。
+  - 提示文案按新时长修正（约 1-10s）。
+- 更正此前「零 CPU=等待型」的误判：实际是单核满载（当时采样到了 npm 包装
+  进程而非 vite 子进程）。
+- 验证：check 0 错、lint 通过、单测 808 全绿、e2e 52/52。
+
+## 2026-08-15：桌面版打包成功 —— 修复 updater 签名密码坑
+
+- 现象：`npm run tauri build` 报
+  `A public key has been found, but no private key...TAURI_SIGNING_PRIVATE_KEY`。
+- 排查：私钥 `src-tauri/.keys/cosbox.key` 存在（8/12 生成、已 gitignore），
+  公钥与 tauri.conf.json 的 plugins.updater.pubkey 一致；错误是环境变量
+  `TAURI_SIGNING_PRIVATE_KEY` 未设置导致。
+- 进一步发现：设置私钥路径后仍卡在
+  `Decrypting updater signing key, expect a prompt for password`——
+  密钥文件头为 `rsign encrypted secret key`，即"空字符串密码加密"密钥
+  （minisign 0.7.x 对 `-p ""` 的已知行为：生成加密密钥但密码为空）。
+- 解决：构建时补设 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 即可
+  （用 `tauri signer sign -p ""` 实测确认空密码可解密）。
+- 产物：`src-tauri/target/release/bundle/` 下 0.0.2 的 msi/exe + .sig 均生成。
+- 沉淀：新增根目录 `pack.bat`（版本一致性检查 + 自动设置签名环境变量 + 构建，   
+  用 PowerShell 包装以支持空字符串密码变量）；PACKAGING.md 补充空密码密钥说明。 
+
+## 2026-08-15（续）：打包版 OpenCode GO 双报错修复——接入 tauri-plugin-http（D109）
+
+- 现象：打包版（桌面 / Android）OpenCode GO 预设两种地址都失败——默认
+  `/llm-proxy/...` 命中 SPA fallback 返回 HTML，报
+  「Unexpected token '<', "<!doctype "... is not valid JSON」；手填
+  `https://opencode.ai/...` 则被 WebView CORS 拦截报「Failed to fetch」。
+  根因：D99 的 Vite 代理只覆盖 dev/preview，打包产物没有代理后端。
+- 实现：
+  - Rust 侧接入 `tauri-plugin-http`（桌面 + Android 通用）：Cargo.toml 依赖、
+    lib.rs 注册、capabilities/default.json 加 `http:default`，scope 放行
+    `https://**` / `http://**`（兼容自定义服务商与本地网关）。
+  - 新增 `src/lib/platform/http.ts`：`platformFetch` 浏览器走原生 fetch（dev 的
+    Vite 代理行为不变），Tauri 动态导入插件 fetch（Rust 侧发出、无 CORS）并把
+    `/llm-proxy/` 重写回 `https://opencode.ai/`（`resolveProxyUrl`）。
+  - `openai-client` / `model-service` / `search-client` 统一换用
+    `platformFetch`（搜索在打包版同样绕过 CORS）；同步服务不走该通道。
+  - `vite.config.ts` optimizeDeps 预打包插件；providers.ts 注释更新为
+    「逻辑前缀」双态语义。
+- 验证：新增 http.test.ts（4 条：URL 重写、浏览器直通、插件路由）；全量 812
+  单测过、check / lint / prettier / vite build 全绿、`cargo check` 通过
+  （含 capabilities schema 校验）。
+- 用户侧：需重新执行 `npm run tauri build` / `npm run tauri android build`
+  重新打包安装；旧安装包不含 HTTP 插件，无法热修。
+
+
+### 同日补充：pack.bat 双击闪退修复（cmd 解析两处坑）
+
+- 现象：双击 pack.bat 窗口瞬间关闭。
+- 排查（cmd 实测二分定位）：
+  1. 编码坑：UTF-8 无 BOM + LF 行尾的 bat 在中文系统 GBK 代码页下解析错乱。
+     已改为纯 ASCII + CRLF（check-version.bat 同步统一为 CRLF）。
+  2. 语法坑：cmd 的括号块 if (...) 内若出现 ( ... ) 且后面还有内容
+     （如 echo (plugins.updater.pubkey).），子块闭合后行尾 token 会触发
+     `. was unexpected at this time.`。已把块内 echo 行中的括号去掉。
+- 验证：cmd /c "pack.bat < nul" 全流程跑通（版本检查 + 空密码解密 +
+  npm run tauri build + 签名），退出码 0，产出 0.0.3 安装包与 .sig。
+- 教训：bat 一律纯 ASCII + CRLF；块内 echo 不要出现括号对。
+
+## 2026-08-19：移动端微信式改造（会话列表首屏 + 头像自定义 + 桌面切换器下拉，D111）
+
+- 需求：移动端 UI 不好用（抽屉 12 标签、切工作区繁琐）+ 设置页窄屏挤压；
+  用户要求做成微信式「会话列表 → 聊天」体验，并新增角色头像自定义（三端）；
+  桌面端工作区选择器保持原有小尺寸、增强下拉面板。先做了两个 HTML 交互演示
+  （tmp/mobile-demo.html、tmp/desktop-demo.html）给用户确认后再实施。
+- 数据层：`WorkspaceMeta` 新增 `avatar`（glyph 色板/图片 data URL）与
+  `lastMessagePreview/lastMessageAt`；`WorkspaceRegistry.patch` 局部更新元信息
+  （不动 updatedAt 排序）；复制工作区时头像随元信息搬迁。
+- 移动端（≤768px）：首屏 `WorkspaceListHome` 会话列表 + 底部「对话/设置」
+  标签栏；设置分区菜单→全屏 SettingsPanel；聊天沉浸页顶栏（返回/工作区名/
+  状态副标题/「⋯」），`MobileFeatureDrawer` 右侧抽屉按三组收纳其余功能标签；
+  汉堡抽屉与旧顶栏退役；状态浮层改为点聊天页标题唤起。
+- 头像：`WorkspaceAvatar`（名称首字+哈希派生色兜底）与 `AvatarEditor`
+  （色板/首字表情/上传≤4MB，移动端全屏、桌面模态框）；入口：会话列表点头像、
+  桌面切换器头像悬停✎、下拉行内✎。
+- 桌面端：`Titlebar` 工作区按钮保持单行小尺寸（layers 图标→头像），
+  新增 `WorkspaceDropdown`（搜索/预览/当前高亮/行内复制删除/管理全部/内联新建）。
+- 附带修复：设置页 `.model-row` 窄屏换行（模型名独占一行）；移动端 `.body`
+  补 `min-width:0`——曾被网格项自动最小尺寸把 1fr 轨道撑到 449px 出横向滚动。
+- 验证：新增 registry.patch 单测；重写 mobile.spec.ts（会话列表/底部标签/
+  头像编辑/沉浸页/抽屉/溢出）与 titlebar.spec.ts 切换器断言；819 单测 +
+  52 e2e 全过；check/lint 全绿。
+

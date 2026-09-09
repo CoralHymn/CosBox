@@ -9,6 +9,8 @@ export interface LlmProviderPreset {
 	label: string;
 	/** OpenAI-compatible 基址。 */
 	baseUrl: string;
+	/** 端点禁浏览器 CORS 直连，需走内置软件通道转发（缺省视为不需要）。 */
+	useProxy?: boolean;
 	/** 默认模型。 */
 	defaultModel: string;
 	/** 常用模型建议（datalist 下拉）。 */
@@ -39,7 +41,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'claude-sonnet-4-6',
 		models: ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'],
 		requiresApiKey: true,
-		notes: '通过 Anthropic 的 OpenAI 兼容端点（/chat/completions）接入'
+		notes: '通过 Anthropic 的 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'google',
@@ -48,7 +50,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'gemini-2.5-flash',
 		models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash', 'gemini-3-pro'],
 		requiresApiKey: true,
-		notes: '使用 Google 官方 OpenAI 兼容端点'
+		notes: '通过 Google 官方 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'baidu',
@@ -57,7 +59,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'ernie-5.0-8k',
 		models: ['ernie-5.0-8k', 'ernie-4.0-8k', 'ernie-lite-8k', 'ernie-speed-128k'],
 		requiresApiKey: true,
-		notes: '千帆 v2 OpenAI 兼容模式'
+		notes: '通过千帆 v2 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'tencent',
@@ -66,7 +68,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'hunyuan-turbo',
 		models: ['hunyuan-turbo', 'hunyuan-standard', 'hunyuan-lite'],
 		requiresApiKey: true,
-		notes: '腾讯云 OpenAI 兼容端点'
+		notes: '通过腾讯云 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'yi',
@@ -75,7 +77,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'yi-large',
 		models: ['yi-large', 'yi-medium'],
 		requiresApiKey: true,
-		notes: '零一万物官方兼容端点'
+		notes: '通过零一万物 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'deepseek',
@@ -83,8 +85,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		baseUrl: 'https://api.deepseek.com/v1',
 		defaultModel: 'deepseek-v4-flash',
 		models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-		requiresApiKey: true,
-		notes: 'deepseek-chat / deepseek-reasoner 别名已于 2026-07 弃用'
+		requiresApiKey: true
 	},
 	{
 		id: 'moonshot',
@@ -92,8 +93,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		baseUrl: 'https://api.moonshot.cn/v1',
 		defaultModel: 'kimi-k3',
 		models: ['kimi-k3', 'kimi-k2.5', 'moonshot-v1-8k'],
-		requiresApiKey: true,
-		notes: '海外可改用 https://api.moonshot.ai/v1'
+		requiresApiKey: true
 	},
 	{
 		id: 'zhipu',
@@ -110,8 +110,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'glm-5.2',
 		models: ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
 		requiresApiKey: true,
-		notes:
-			'GLM Coding Plan 订阅专属端点（与通用 /api/paas/v4 不通用）；海外可改用 https://api.z.ai/api/coding/paas/v4'
+		notes: '通过 GLM Coding Plan 专属 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'qwen',
@@ -120,7 +119,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'qwen-max',
 		models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen3-flagship'],
 		requiresApiKey: true,
-		notes: '阿里云百炼 OpenAI 兼容模式'
+		notes: '通过阿里云百炼 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'minimax',
@@ -129,7 +128,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'MiniMax-M3',
 		models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5', 'MiniMax-M2.1', 'MiniMax-M2'],
 		requiresApiKey: true,
-		notes: '国际端点；国内用户可改用 https://api.minimaxi.com/v1；M3 支持 1M 上下文'
+		notes: '通过 MiniMax 国际 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'mistral',
@@ -150,8 +149,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		baseUrl: 'https://api.groq.com/openai/v1',
 		defaultModel: 'llama-3.3-70b-versatile',
 		models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
-		requiresApiKey: true,
-		notes: '以高速推理著称，模型列表动态更新'
+		requiresApiKey: true
 	},
 	{
 		id: 'cerebras',
@@ -159,8 +157,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		baseUrl: 'https://api.cerebras.ai/v1',
 		defaultModel: 'gpt-oss-120b',
 		models: ['gpt-oss-120b', 'llama-3.3-70b', 'gemma-4-31b'],
-		requiresApiKey: true,
-		notes: '晶圆级芯片极速推理；模型列表动态更新，以 GET /v1/models 为准'
+		requiresApiKey: true
 	},
 	{
 		id: 'xai',
@@ -182,14 +179,17 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 			'google/gemini-2.5-flash'
 		],
 		requiresApiKey: true,
-		notes: '统一网关，模型 ID 格式为 vendor/model，以 OpenRouter 列表为准'
+		notes: '通过 OpenRouter 统一网关 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'opencode-go',
 		label: 'OpenCode GO（订阅）',
-		// opencode.ai 不支持浏览器 CORS，经 Vite dev/preview 代理（/llm-proxy）转发；
-		// 静态部署时需自建同路径反向代理，或改回 https://opencode.ai/zen/go/v1。
-		baseUrl: '/llm-proxy/zen/go/v1',
+		// opencode.ai 不允许浏览器 CORS 直连（OPTIONS 预检直接 404），故标 useProxy：
+		// 请求前由 platform/http.ts 换成 /llm-proxy/<host>/ 逻辑前缀——浏览器
+		// dev/preview 交给 vite.config.ts 的 llmRelay 中间件（D99），Tauri 打包版
+		// 在 platform/http.ts 里还原成真实端点并走 HTTP 插件（D109 / D112）。
+		baseUrl: 'https://opencode.ai/zen/go/v1',
+		useProxy: true,
 		defaultModel: 'kimi-k2.6',
 		models: [
 			'kimi-k2.6',
@@ -202,13 +202,13 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 			'grok-4.5'
 		],
 		requiresApiKey: true,
-		notes:
-			'首月 $5、之后 $10/月的开源模型订阅网关，Key 在 opencode.ai/auth 获取；经 /llm-proxy 开发代理转发（opencode.ai 不允许浏览器 CORS 直连）。MiniMax/Qwen 系模型仅走 Anthropic /messages 端点，此处不可用'
+		notes: '通过 OpenCode GO 订阅端点接入'
 	},
 	{
 		id: 'opencode-zen',
 		label: 'OpenCode Zen（按量计费）',
-		baseUrl: '/llm-proxy/zen/v1',
+		baseUrl: 'https://opencode.ai/zen/v1',
+		useProxy: true,
 		defaultModel: 'minimax-m3',
 		models: [
 			'minimax-m3',
@@ -220,8 +220,35 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 			'deepseek-v4-flash-free'
 		],
 		requiresApiKey: true,
-		notes:
-			'OpenCode 按量计费网关；经 /llm-proxy 开发代理转发（opencode.ai 不允许浏览器 CORS 直连）。Claude/GPT/Gemini 系走原生端点，此处仅可用 Chat Completions 模型'
+		notes: '通过 OpenCode Zen 按量端点接入'
+	},
+	{
+		id: 'command-code',
+		label: 'Command Code GOAT（订阅）',
+		// 与 OpenCode 相反：api.commandcode.ai 允许浏览器 CORS 直连（预检 204 +
+		// Access-Control-Allow-Origin: *），因此不标 useProxy。
+		baseUrl: 'https://api.commandcode.ai/provider/v1',
+		defaultModel: 'xiaomi/mimo-v2.5',
+		models: [
+			'gpt-5.6-sol',
+			'gpt-5.6-luna',
+			'zai-org/GLM-5.2',
+			'z-ai/glm-5.3-flash',
+			'deepseek/deepseek-v4-pro',
+			'deepseek/deepseek-v4-flash',
+			'moonshotai/Kimi-K2.7-Code',
+			'MiniMaxAI/MiniMax-M3',
+			'google/gemini-3.8-flash',
+			'Qwen/Qwen3.8-Max',
+			'Qwen/Qwen3.7-Max',
+			'Qwen/Qwen3.7-Plus',
+			'Qwen/Qwen3.6-Plus',
+			'xiaomi/mimo-v2.5',
+			'xiaomi/mimo-v2.5-pro',
+			'tencent/hy3-paid'
+		],
+		requiresApiKey: true,
+		notes: '通过commandcode的 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'ollama',
@@ -230,7 +257,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'qwen3:8b',
 		models: ['qwen3:8b', 'llama3.1:8b', 'mistral:7b'],
 		requiresApiKey: false,
-		notes: '模型名以本地 ollama pull 的标签为准'
+		notes: '通过本地 Ollama OpenAI 兼容端点接入'
 	},
 	{
 		id: 'litellm',
@@ -239,7 +266,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'gpt-4o-mini',
 		models: ['gpt-4o-mini', 'claude-sonnet-4-6', 'gemini-2.5-flash'],
 		requiresApiKey: false,
-		notes: '模型名由 LiteLLM 代理配置决定'
+		notes: '通过本地 LiteLLM Proxy OpenAI 兼容端点接入'
 	},
 	{
 		id: 'siliconflow',
@@ -248,7 +275,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'deepseek-ai/DeepSeek-V3',
 		models: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen3-32B'],
 		requiresApiKey: true,
-		notes: '注册赠送额度，模型 ID 为 org/name 格式'
+		notes: '通过硅基流动 OpenAI 兼容端点接入'
 	},
 	{
 		id: 'together',
@@ -265,7 +292,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'Qwen/Qwen2.5-72B-Instruct',
 		models: ['Qwen/Qwen2.5-72B-Instruct', 'meta-llama/Llama-3.1-8B-Instruct'],
 		requiresApiKey: false,
-		notes: '本地部署的 vLLM 服务，模型名取决于部署参数'
+		notes: '通过本地 vLLM OpenAI 兼容端点接入'
 	},
 	{
 		id: 'azure',
@@ -274,7 +301,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 		defaultModel: 'gpt-4o',
 		models: ['gpt-4o', 'gpt-4o-mini'],
 		requiresApiKey: true,
-		notes: '把地址中的 YOUR_RESOURCE 替换为你的资源名；模型名填部署名'
+		notes: '通过 Azure OpenAI 兼容端点接入'
 	}
 ];
 
@@ -286,6 +313,24 @@ export function findProviderPreset(id: string): LlmProviderPreset | undefined {
 	return LLM_PROVIDER_PRESETS.find((preset) => preset.id === id);
 }
 
+/**
+ * 旧存档升级：早期把「走内置通道」藏在 baseUrl 里（如 `/llm-proxy/zen/go/v1`，
+ * 前缀后第一段是路径而非主机名，当时通道只指向 opencode.ai）。
+ * 现在通道由 `useProxy` 表达，baseUrl 一律存真实绝对地址（见 D112）。
+ */
+export function upgradeLegacyProxyBaseUrl(
+	baseUrl: string,
+	useProxy?: boolean
+): { baseUrl: string; useProxy: boolean } {
+	if (!baseUrl.startsWith('/llm-proxy/')) {
+		return { baseUrl, useProxy: useProxy ?? false };
+	}
+	return {
+		baseUrl: `https://opencode.ai/${baseUrl.slice('/llm-proxy/'.length)}`,
+		useProxy: true
+	};
+}
+
 /** 应用预设：返回以该预设填充的完整配置（保留已有 key 之外的显式值）。 */
 export function applyProviderPreset(config: LlmConfig, preset: LlmProviderPreset): LlmConfig {
 	return {
@@ -293,6 +338,7 @@ export function applyProviderPreset(config: LlmConfig, preset: LlmProviderPreset
 		provider: 'openai-compatible',
 		providerId: preset.id,
 		baseUrl: preset.baseUrl,
+		useProxy: preset.useProxy ?? false,
 		model: preset.defaultModel,
 		apiKey: config.apiKey
 	};
@@ -316,6 +362,7 @@ export interface LlmConfigPatch {
 	provider?: LlmConfig['provider'];
 	providerId?: string;
 	baseUrl?: string;
+	useProxy?: boolean;
 	apiKey?: string;
 	model?: string;
 	temperature?: number;
@@ -326,6 +373,7 @@ export interface LlmConfigPatch {
 	stream?: boolean;
 	allowAiStateTools?: boolean;
 	llmStateConfirm?: boolean;
+	textToolFallback?: boolean;
 	memoryEnabled?: boolean;
 	memoryInjectLimit?: number;
 	memoryAutoExtract?: boolean;
@@ -352,10 +400,12 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		apiKey: savedSearch?.apiKey ?? defaults.webSearch.apiKey,
 		maxResults: savedSearch?.maxResults ?? defaults.webSearch.maxResults
 	};
+	const endpoint = upgradeLegacyProxyBaseUrl(partial.baseUrl ?? defaults.baseUrl, partial.useProxy);
 	return {
 		provider: partial.provider ?? defaults.provider,
 		providerId: partial.providerId ?? CUSTOM_PROVIDER_ID,
-		baseUrl: partial.baseUrl ?? defaults.baseUrl,
+		baseUrl: endpoint.baseUrl,
+		useProxy: endpoint.useProxy,
 		apiKey: partial.apiKey ?? defaults.apiKey,
 		model: partial.model ?? defaults.model,
 		temperature: partial.temperature ?? defaults.temperature,
@@ -366,6 +416,7 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		stream: partial.stream ?? defaults.stream ?? false,
 		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
 		llmStateConfirm: partial.llmStateConfirm ?? defaults.llmStateConfirm ?? false,
+		textToolFallback: partial.textToolFallback ?? defaults.textToolFallback ?? true,
 		memoryEnabled: partial.memoryEnabled ?? defaults.memoryEnabled ?? true,
 		memoryInjectLimit: partial.memoryInjectLimit ?? defaults.memoryInjectLimit ?? 5,
 		memoryAutoExtract: partial.memoryAutoExtract ?? defaults.memoryAutoExtract ?? false,
