@@ -143,6 +143,68 @@ https://cosbox.benng.cc/updates/{{target}}/{{arch}}/latest.json
 - `{{current_version}}` 变量可用于服务端按版本判断，当前用固定
   `latest.json` 简化静态托管。
 
+## GitHub Release 自动发布（打 tag）
+
+`.github/workflows/release.yml` 在推送 `v*` tag 时运行：
+
+1. **校验**：tag 必须是 `v1.2.3` 形式，且与上面四处版本号完全一致；随后跑
+   `npm run check` / `lint` / `test` / `build`，任一失败即停止。
+2. **Windows**：构建 NSIS + MSI，并用仓库密钥生成 updater 签名（`.sig`）。
+3. **Android**：构建 arm64 的签名 APK + AAB（`--target aarch64`）。
+4. **发布**：创建 GitHub Release，上传全部安装包、签名与 `SHA256SUMS.txt`。
+
+Release 只是分发/归档渠道；自动更新端点仍是
+`https://cosbox.benng.cc/updates/...`，要让老客户端收到更新，仍需按上一节把
+安装包和 `latest.json` 部署到该站点。仓库是私有的，Release 附件只有仓库成员
+能下载，对外分发继续走 `cosbox.benng.cc`。
+
+### 发版步骤
+
+```bash
+# 1. 先把四处版本号改成同一个 x.y.z（见上）
+# 2. 提交后打 tag 并推送
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+到 Actions 页面确认工作流成功，Releases 页面会出现对应版本。失败时在该次
+run 页面点「Re-run all jobs」重试即可（同名附件会被覆盖）。Windows 与 Android
+都成功才会创建 Release；任一构建失败都不会发布。
+
+预发布后缀（如 `v0.1.0-beta.1`）会被校验拒绝：Windows 的 MSI/WiX 不接受
+这种版本号。
+
+### 必需的仓库 Secrets
+
+Settings → Secrets and variables → Actions → New repository secret：
+
+| Secret                               | 必需 | 说明                                                                  |
+| ------------------------------------ | ---- | --------------------------------------------------------------------- |
+| `TAURI_SIGNING_PRIVATE_KEY`          | 是   | `src-tauri/.keys/cosbox.key` 的**文件内容**（多行文本）                |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 否   | 密钥密码；当前是空密码密钥，**不要创建**此 secret（不设置即为空字符串） |
+| `ANDROID_KEYSTORE_BASE64`            | 是   | `cosbox-release.keystore` 的 base64                                   |
+| `ANDROID_KEYSTORE_PASSWORD`          | 是   | keystore 密码                                                         |
+| `ANDROID_KEY_ALIAS`                  | 是   | 通常是 `cosbox`                                                       |
+| `ANDROID_KEY_PASSWORD`               | 是   | key 密码（与 keystore 密码相同则填同一个值）                          |
+
+把文件转成 base64（任选一种）：
+
+```bash
+# Git Bash
+base64 -w0 src-tauri/gen/android/app/cosbox-release.keystore
+cat src-tauri/.keys/cosbox.key
+```
+
+```powershell
+# PowerShell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("src-tauri/gen/android/app/cosbox-release.keystore"))
+Get-Content src-tauri/.keys/cosbox.key -Raw
+```
+
+Android 的 `versionName` / `versionCode` 由 Tauri 在构建时按 `tauri.conf.json`
+的版本自动写入（`versionCode = major*1000000 + minor*1000 + patch`），无需手改
+`tauri.properties`。
+
 ## 已知坑
 
 - `/llm-proxy` 只在 `npm run dev` / `preview` 生效；打包版由

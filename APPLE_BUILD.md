@@ -23,8 +23,9 @@ CosBox 现在能在 Windows 上打 Windows 包、打 Android 包（见 [PACKAGIN
 ## 2. GitHub Actions 触发规则（没用过的人先读这节）
 
 **核心事实：不存在"自动就开始构建"这回事。** GitHub Actions 只执行仓库里
-`.github/workflows/*.yml` 声明的工作流；**这个仓库目前根本没有 `.github/` 目录**，
-所以今天一次构建都没跑过、一分钟额度都没消耗。要不要跑、什么时候跑，完全由你写进
+`.github/workflows/*.yml` 声明的工作流。当前仓库只有
+`.github/workflows/release.yml`（打 `v*` tag 时构建 Windows + Android 并创建
+Release），**还没有 Apple 工作流**；Apple 构建要不要跑、什么时候跑，完全由你写进
 YAML 的 `on:` 决定。
 
 常见触发方式：
