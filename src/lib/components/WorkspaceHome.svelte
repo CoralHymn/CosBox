@@ -33,7 +33,7 @@
 <div class="home">
 	<header class="home-head">
 		<div class="home-brand">
-			<span class="brand-mark">C</span>
+			<span class="brand-mark" aria-hidden="true"></span>
 			<span>CosBox</span>
 		</div>
 		<p class="home-sub">状态驱动的 AI 角色扮演客户端 —— 选择一个工作区开始</p>

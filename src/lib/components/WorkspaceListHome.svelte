@@ -46,7 +46,7 @@
 <div class="ws-home">
 	<div class="ws-home-head">
 		<div class="ws-home-title">
-			<span class="brand-mark">C</span>
+			<span class="brand-mark" aria-hidden="true"></span>
 			<span>CosBox</span>
 		</div>
 		<button

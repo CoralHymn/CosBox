@@ -74,7 +74,7 @@
      data-tauri-drag-region 区域可拖动窗口；按钮不带该属性，点击正常响应。 -->
 <div class="titlebar" data-tauri-drag-region>
 	<div class="titlebar-brand" data-tauri-drag-region>
-		<span class="brand-mark">C</span>
+		<span class="brand-mark" aria-hidden="true"></span>
 		<span>CosBox</span>
 	</div>
 	<button

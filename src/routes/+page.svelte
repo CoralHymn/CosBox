@@ -1838,7 +1838,7 @@
 	{#if entered && !tauriDesktop && !isMobile}
 		<header class="header">
 			<div class="brand">
-				<span class="brand-mark">C</span>
+				<span class="brand-mark" aria-hidden="true"></span>
 				<span>CosBox</span>
 			</div>
 			<div class="header-spacer"></div>
