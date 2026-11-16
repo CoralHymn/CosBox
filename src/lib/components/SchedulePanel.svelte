@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Rewind, X } from '@lucide/svelte';
 	import {
 		DAY_NAMES,
 		formatMinutesOfDay,
@@ -119,7 +120,9 @@
 			{formatWorldTime(schedule.time)}
 		</p>
 		<div class="row-actions">
-			<button class="btn" onclick={() => onAdvance(-60)}>⏪ -1h</button>
+			<button class="btn" onclick={() => onAdvance(-60)}>
+				<Rewind size={14} /> -1h
+			</button>
 			<button class="btn" onclick={() => onAdvance(15)}>+15m</button>
 			<button class="btn" onclick={() => onAdvance(60)}>+1h</button>
 			<button class="btn" onclick={() => onAdvance(1440)}>+1d</button>
@@ -179,8 +182,9 @@
 					<button
 						class="btn btn-danger btn-small"
 						onclick={() => removeEntry(entry.id)}
-						aria-label="删除条目">✕</button
-					>
+						aria-label="删除条目">
+						<X size={13} />
+					</button>
 				</div>
 			{/each}
 		{/if}

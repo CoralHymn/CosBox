@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
 	import type { WorldInfoEntry } from '../core/types';
 	import { newId } from '../utils/id';
 
@@ -86,8 +87,9 @@
 				<button
 					class="btn btn-danger btn-small"
 					onclick={() => onRemove(entry.id)}
-					aria-label="删除条目">✕</button
-				>
+					aria-label="删除条目">
+					<X size={13} />
+				</button>
 			</div>
 			<textarea
 				class="textarea"

@@ -1,5 +1,19 @@
 <script lang="ts">
+	import { ImagePlus, X } from '@lucide/svelte';
+	import { AVATAR_ICON_NAMES, type AvatarIconName } from '../workspace/types';
 	import type { WorkspaceAvatar } from '../workspace/types';
+	import { AVATAR_ICONS, avatarIconForGlyph } from './avatar-icons';
+
+	/** 旧版 emoji 预设头像统一转换成图标形态。 */
+	function normalizeAvatar(value: WorkspaceAvatar | null): WorkspaceAvatar | null {
+		if (value?.kind === 'glyph') {
+			const icon = avatarIconForGlyph(value.glyph);
+			if (icon !== null) {
+				return { kind: 'icon', color: value.color, icon };
+			}
+		}
+		return value;
+	}
 
 	interface Props {
 		/** 工作区名（默认首字与标题展示）。 */
@@ -26,13 +40,13 @@
 		'#38bdf8',
 		'#f97316'
 	];
-	/** 常用首字/表情候选（也可手动输入）。 */
-	const GLYPH_PRESETS = ['🐱', '🦊', '🌙', '🔥', '🎭', '🌸', '⚔️', '🤖'];
+	/** 常用首字/图标候选（也可手动输入）。 */
+	const GLYPH_PRESETS = AVATAR_ICON_NAMES;
 
 	/** 编辑草稿；null 表示「恢复默认」（保存时传 undefined）。
 	 * 组件由宿主 `{#if}` 条件挂载，每次打开都是新实例，取初始值即可。 */
 	// svelte-ignore state_referenced_locally
-	let draft = $state<WorkspaceAvatar | null>(avatar ?? null);
+	let draft = $state<WorkspaceAvatar | null>(normalizeAvatar(avatar ?? null));
 	/** 图片读取/超限等本地错误提示。 */
 	let uploadError = $state('');
 	let fileInput = $state<HTMLInputElement | null>(null);
@@ -42,11 +56,19 @@
 		draft !== null && draft.kind === 'glyph' ? draft.glyph : ([...name][0] ?? '工')
 	);
 	const draftColor = $derived(
-		draft !== null && draft.kind === 'glyph' ? draft.color : SWATCH_COLORS[0]!
+		draft !== null && draft.kind !== 'image' ? draft.color : SWATCH_COLORS[0]!
 	);
+	const DraftIcon = $derived(draft !== null && draft.kind === 'icon' ? AVATAR_ICONS[draft.icon] : null);
 
 	function pickColor(color: string): void {
-		draft = { kind: 'glyph', color, glyph: draftGlyph };
+		draft =
+			draft !== null && draft.kind === 'icon'
+				? { kind: 'icon', color, icon: draft.icon }
+				: { kind: 'glyph', color, glyph: draftGlyph };
+	}
+
+	function pickIcon(icon: AvatarIconName): void {
+		draft = { kind: 'icon', color: draftColor, icon };
 	}
 
 	function pickGlyph(glyph: string): void {
@@ -103,7 +125,9 @@
 		{:else}
 			<div class="ae-head">
 				<span class="ae-title">编辑「{name}」的头像</span>
-				<button class="btn btn-small" aria-label="关闭" onclick={onClose}>✕</button>
+				<button class="btn btn-small" aria-label="关闭" onclick={onClose}>
+					<X size={15} />
+				</button>
 			</div>
 		{/if}
 
@@ -112,6 +136,10 @@
 				<span class="ae-preview ae-preview-default">{[...name][0] ?? '工'}</span>
 			{:else if draft.kind === 'image'}
 				<span class="ae-preview"><img src={draft.image} alt="头像预览" /></span>
+			{:else if draft.kind === 'icon'}
+				<span class="ae-preview" style={`background:${draft.color}`}>
+					{#if DraftIcon !== null}<DraftIcon size={40} />{/if}
+				</span>
 			{:else}
 				<span class="ae-preview" style={`background:${draft.color}`}>{draft.glyph}</span>
 			{/if}
@@ -130,7 +158,7 @@
 			{/each}
 		</div>
 
-		<span class="ae-label">首字 / 表情</span>
+		<span class="ae-label">首字 / 图标</span>
 		<div class="ae-chars">
 			<button
 				class="ae-char"
@@ -140,18 +168,22 @@
 				aria-label="使用名称首字"
 				onclick={() => pickGlyph([...name][0] ?? '工')}>{[...name][0] ?? '工'}</button
 			>
-			{#each GLYPH_PRESETS as glyph (glyph)}
+			{#each GLYPH_PRESETS as icon (icon)}
+				{@const PresetIcon = AVATAR_ICONS[icon]}
 				<button
 					class="ae-char"
-					class:active={draft !== null && draft.kind === 'glyph' && draft.glyph === glyph}
-					onclick={() => pickGlyph(glyph)}>{glyph}</button
+					class:active={draft !== null && draft.kind === 'icon' && draft.icon === icon}
+					aria-label={`使用图标 ${icon}`}
+					onclick={() => pickIcon(icon)}
 				>
+					<PresetIcon size={18} />
+				</button>
 			{/each}
 			<input
 				class="input ae-glyph-input"
 				placeholder="自定义"
 				maxlength={4}
-				aria-label="自定义首字或表情"
+				aria-label="自定义首字或图标"
 				onchange={(event) => {
 					const value = (event.currentTarget as HTMLInputElement).value.trim();
 					if (value !== '') {
@@ -161,7 +193,9 @@
 			/>
 		</div>
 
-		<button class="ae-upload" onclick={() => fileInput?.click()}>🖼 上传自定义图片…</button>
+		<button class="ae-upload" onclick={() => fileInput?.click()}>
+			<ImagePlus size={15} /> 上传自定义图片…
+		</button>
 		<input
 			bind:this={fileInput}
 			type="file"
@@ -307,6 +341,9 @@
 		color: var(--text);
 		font-size: 16px;
 		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
 	.ae-char.active {
 		border-color: var(--accent);
@@ -323,6 +360,10 @@
 		color: var(--text-dim);
 		font-size: 13px;
 		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
 	}
 	.ae-upload:hover {
 		color: var(--text);

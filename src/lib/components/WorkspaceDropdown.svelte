@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Copy, Pencil, X } from '@lucide/svelte';
 	import type { WorkspaceMeta } from '../workspace/types';
 	import WorkspaceAvatar from './WorkspaceAvatar.svelte';
 
@@ -107,7 +108,7 @@
 					}}
 				>
 					<WorkspaceAvatar {meta} size={34} />
-					<span class="wsdd-avatar-edit">✎</span>
+					<span class="wsdd-avatar-edit"><Pencil size={12} /></span>
 				</button>
 				<div class="wsdd-main">
 					<div class="wsdd-name">
@@ -130,7 +131,7 @@
 							onclick={(event) => {
 								event.stopPropagation();
 								onDuplicate(meta.id);
-							}}>⧉</button
+							}}><Copy size={12} /></button
 						>
 						<button
 							class="wsdd-mini wsdd-mini-danger"
@@ -140,7 +141,7 @@
 							onclick={(event) => {
 								event.stopPropagation();
 								onDelete(meta.id);
-							}}>✕</button
+							}}><X size={12} /></button
 						>
 					</div>
 				{/if}
@@ -246,7 +247,6 @@
 		border-radius: 22%;
 		background: rgba(0, 0, 0, 0.55);
 		color: #fff;
-		font-size: 12px;
 		display: none;
 		align-items: center;
 		justify-content: center;
@@ -296,8 +296,10 @@
 		border: 1px solid var(--border);
 		background: var(--panel);
 		color: var(--text-dim);
-		font-size: 11px;
 		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
 	.wsdd-mini:hover {
 		color: var(--text);

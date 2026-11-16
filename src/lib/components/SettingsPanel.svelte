@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
 	import { findModelInfo } from '../llm/model-info';
 	import {
 		bindingValue,
@@ -888,8 +889,9 @@
 						<button
 							class="btn btn-danger btn-small"
 							onclick={() => deleteService(service)}
-							aria-label={`删除服务 ${service.label}`}>✕</button
-						>
+							aria-label={`删除服务 ${service.label}`}>
+							<X size={13} />
+						</button>
 					</div>
 				</div>
 			{:else}
@@ -1004,8 +1006,9 @@
 							<button
 								class="btn btn-danger btn-small"
 								onclick={() => removeEditorModel(index)}
-								aria-label="移除该模型">✕</button
-							>
+								aria-label="移除该模型">
+								<X size={13} />
+							</button>
 						</div>
 					{/each}
 					<div class="model-row" style="margin-top: 6px;">

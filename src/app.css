@@ -311,9 +311,10 @@ button:disabled {
 	background: none;
 	color: var(--text-dim);
 	cursor: pointer;
-	font-size: 11px;
 	line-height: 1;
 	padding: 2px;
+	display: inline-flex;
+	align-items: center;
 }
 
 .chip-x:hover {
@@ -458,7 +459,8 @@ button:disabled {
 	transform: translateY(-50%);
 	pointer-events: none;
 	color: var(--text-faint);
-	font-size: 11px;
+	display: flex;
+	align-items: center;
 }
 
 .combobox-popup {
@@ -1085,6 +1087,8 @@ button:disabled {
 	border: none;
 	color: inherit;
 	opacity: 0.6;
+	display: inline-flex;
+	align-items: center;
 }
 
 /* ---------- 杂项 ---------- */
@@ -1118,9 +1122,10 @@ button:disabled {
 .drag-handle {
 	cursor: grab;
 	color: var(--text-faint);
-	font-size: 14px;
 	user-select: none;
 	flex: none;
+	display: inline-flex;
+	align-items: center;
 }
 
 .drag-handle:active {
@@ -1162,8 +1167,9 @@ button:disabled {
 }
 
 .chevron {
-	display: inline-block;
-	font-size: 11px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	color: var(--text-dim);
 	transition: transform 120ms;
 }
@@ -1241,7 +1247,7 @@ button:disabled {
 		display: inline-flex;
 	}
 
-	/* 移动端无左侧导航：内容独占一列（功能标签收进聊天页「⋯」抽屉）；
+	/* 移动端无左侧导航：内容独占一列（功能标签收进聊天页「功能菜单」抽屉）；
 	   min-width:0 防止网格项自动最小尺寸把 1fr 轨道撑出横向滚动。 */
 	.body {
 		grid-template-columns: 1fr;
@@ -1497,9 +1503,10 @@ button:disabled {
 	border: none;
 	background: none;
 	color: var(--text);
-	font-size: 20px;
-	letter-spacing: 1px;
 	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .mobile-feature-toggle:active {
@@ -1542,8 +1549,9 @@ button:disabled {
 }
 
 .mobile-home-tab-ico {
-	font-size: 19px;
-	line-height: 1.2;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 }
 
 /* 首屏「设置」tab：分区菜单 */

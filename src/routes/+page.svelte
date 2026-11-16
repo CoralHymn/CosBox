@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { ChevronLeft, ChevronRight, Ellipsis, MessageCircle, Settings } from '@lucide/svelte';
 	import type {
 		ChatMessageView,
 		ConfigPatch,
@@ -159,7 +160,7 @@
 	let isMobile = $state(false);
 	/** 移动端首屏底部标签：会话列表 / 设置菜单 / 全屏设置详情。 */
 	let mobileHomeTab = $state<'chat' | 'settings' | 'settings-detail'>('chat');
-	/** 移动端聊天页右上角「⋯」功能抽屉是否打开。 */
+	/** 移动端聊天页右上角「功能菜单」抽屉是否打开。 */
 	let mobileFeatureOpen = $state(false);
 	/** 正在编辑头像的工作区（null = 未打开编辑器）。 */
 	let avatarEditing = $state<WorkspaceMeta | null>(null);
@@ -319,7 +320,7 @@
 		}
 		let depth = 0;
 		if (entered) {
-			// 工作区聊天沉浸页是一层；「⋯」里打开的功能全屏页再叠一层。
+			// 工作区聊天沉浸页是一层；「功能菜单」里打开的功能全屏页再叠一层。
 			depth = tab === 'chat' ? 1 : 2;
 		} else if (mobileHomeTab === 'settings') {
 			depth = 1;
@@ -1853,7 +1854,7 @@
 		</header>
 	{/if}
 	{#if entered && isMobile}
-		<!-- 移动端聊天沉浸页顶栏：返回（回会话列表/回对话）+ 工作区名 + 状态副标题 + 「⋯」 -->
+		<!-- 移动端聊天沉浸页顶栏：返回（回会话列表/回对话）+ 工作区名 + 状态副标题 + 功能菜单 -->
 		<header class="mobile-chat-head">
 			<button
 				class="mobile-back"
@@ -1864,7 +1865,7 @@
 					} else {
 						tab = 'chat';
 					}
-				}}>‹</button
+				}}><ChevronLeft size={20} /></button
 			>
 			<button
 				class="mobile-chat-title"
@@ -1884,7 +1885,7 @@
 				class="mobile-feature-toggle"
 				aria-label="功能菜单"
 				title="功能菜单"
-				onclick={() => (mobileFeatureOpen = true)}>⋯</button
+				onclick={() => (mobileFeatureOpen = true)}><Ellipsis size={20} /></button
 			>
 		</header>
 	{/if}
@@ -1944,7 +1945,7 @@
 									<button
 										class="mobile-back"
 										aria-label="返回设置菜单"
-										onclick={() => (mobileHomeTab = 'settings')}>‹</button
+										onclick={() => (mobileHomeTab = 'settings')}><ChevronLeft size={20} /></button
 									>
 									<span class="mobile-screen-title">设置</span>
 								</div>
@@ -1978,7 +1979,7 @@
 									>
 										<span class="mobile-settings-label">{section.label}</span>
 										<span class="mobile-settings-desc">{section.desc}</span>
-										<span class="mobile-settings-caret">›</span>
+										<span class="mobile-settings-caret"><ChevronRight size={14} /></span>
 									</button>
 								{/each}
 							</div>
@@ -1998,14 +1999,14 @@
 									class:active={mobileHomeTab === 'chat'}
 									onclick={() => (mobileHomeTab = 'chat')}
 								>
-									<span class="mobile-home-tab-ico">💬</span>对话
+									<span class="mobile-home-tab-ico"><MessageCircle size={18} /></span>对话
 								</button>
 								<button
 									class="mobile-home-tab"
 									class:active={mobileHomeTab === 'settings'}
 									onclick={() => (mobileHomeTab = 'settings')}
 								>
-									<span class="mobile-home-tab-ico">⚙️</span>设置
+									<span class="mobile-home-tab-ico"><Settings size={18} /></span>设置
 								</button>
 							</nav>
 						{/if}

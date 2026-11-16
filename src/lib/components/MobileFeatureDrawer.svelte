@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
 	import type { WorkspaceMeta } from '../workspace/types';
 	import type { TabId } from '../stores/ui.svelte';
 	import Icon from './Icon.svelte';
@@ -63,7 +64,9 @@
 	<div class="feature-drawer-head">
 		<WorkspaceAvatar meta={workspace} size={30} />
 		<span class="feature-drawer-name">{workspace.name}</span>
-		<button class="feature-drawer-close" aria-label="关闭功能菜单" onclick={onClose}>✕</button>
+		<button class="feature-drawer-close" aria-label="关闭功能菜单" onclick={onClose}>
+			<X size={16} />
+		</button>
 	</div>
 	<div class="feature-drawer-body">
 		{#each groups as group (group.label)}
@@ -124,9 +127,11 @@
 		border: none;
 		background: none;
 		color: var(--text-dim);
-		font-size: 15px;
 		cursor: pointer;
 		padding: 4px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
 	.feature-drawer-body {
 		flex: 1;

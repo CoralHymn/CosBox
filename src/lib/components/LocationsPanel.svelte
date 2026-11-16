@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronRight, GripVertical, X } from '@lucide/svelte';
 	import type { ConfigPatch, LocationDef, LocationState, StatePatch } from '../core/types';
 	import type {
 		GeneratedItem,
@@ -288,7 +289,9 @@
 			{#each groups as group (group.category)}
 				<div class="group">
 					<button class="group-header" onclick={() => toggle(group.category)}>
-						<span class="chevron" class:collapsed={collapsed[group.category]}>▸</span>
+						<span class="chevron" class:collapsed={collapsed[group.category]}>
+							<ChevronRight size={12} />
+						</span>
 						<span class="group-name">{group.category === '' ? '未分类' : group.category}</span>
 						<span class="muted">{group.items.length} 处</span>
 					</button>
@@ -309,7 +312,7 @@
 								ondragend={() => (dragId = null)}
 							>
 								{#if sortingEnabled}
-									<span class="drag-handle" title="拖拽排序">⠿</span>
+									<span class="drag-handle" title="拖拽排序"><GripVertical size={14} /></span>
 								{/if}
 								<input
 									class="input"
@@ -335,8 +338,9 @@
 								<button
 									class="btn btn-danger btn-small"
 									onclick={() => removePlace(row.id)}
-									aria-label="删除地点">✕</button
-								>
+									aria-label="删除地点">
+									<X size={13} />
+								</button>
 							</div>
 						{/each}
 					{/if}

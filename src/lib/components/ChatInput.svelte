@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { LoaderCircle, Search, Square } from '@lucide/svelte';
 	import type { ClothingItem, LocationDef } from '../core/types';
 	import { buildAutocompleteSuggestions } from '../utils/autocomplete';
 
@@ -142,16 +143,32 @@
 			aria-pressed={search}
 			aria-label="网络搜索"
 		>
-			{searching ? '…' : '🔍'}
+			{#if searching}
+				<span class="spin"><LoaderCircle size={16} /></span>
+			{:else}
+				<Search size={16} />
+			{/if}
 		</button>
 	{/if}
 	{#if busy}
-		<button class="btn btn-primary btn-stop" onclick={onStop} aria-label="停止生成" title="停止生成"
-			>⏹ 停止</button
-		>
+		<button class="btn btn-primary btn-stop" onclick={onStop} aria-label="停止生成" title="停止生成">
+			<Square size={12} fill="currentColor" strokeWidth={0} /> 停止
+		</button>
 	{:else}
-		<button class="btn btn-primary" onclick={submit} disabled={disabled || text.trim() === ''}
-			>发送</button
-		>
+		<button class="btn btn-primary" onclick={submit} disabled={disabled || text.trim() === ''}>
+			发送
+		</button>
 	{/if}
 </div>
+
+<style>
+	.spin {
+		display: inline-flex;
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+</style>

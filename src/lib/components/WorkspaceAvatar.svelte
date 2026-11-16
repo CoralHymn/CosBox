@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { WorkspaceMeta } from '../workspace/types';
+	import { AVATAR_ICONS, avatarIconForGlyph } from './avatar-icons';
 
 	interface Props {
 		meta: Pick<WorkspaceMeta, 'name' | 'avatar'>;
@@ -36,6 +37,14 @@
 		meta.avatar?.kind === 'glyph' ? meta.avatar.color : fallbackColor(meta.name)
 	);
 	const image = $derived(meta.avatar?.kind === 'image' ? meta.avatar.image : null);
+	const storedIcon = $derived(
+		meta.avatar?.kind === 'icon'
+			? meta.avatar.icon
+			: meta.avatar?.kind === 'glyph'
+				? avatarIconForGlyph(meta.avatar.glyph)
+				: null
+	);
+	const AvatarIcon = $derived(storedIcon !== null ? AVATAR_ICONS[storedIcon] : null);
 </script>
 
 <span
@@ -44,6 +53,8 @@
 >
 	{#if image !== null}
 		<img src={image} alt="" />
+	{:else if AvatarIcon !== null}
+		<AvatarIcon size={Math.round(size * 0.5)} />
 	{:else}
 		{glyph}
 	{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronRight, GripVertical, X } from '@lucide/svelte';
 	import { findWardrobeItem } from '../context/state-summary';
 	import { CLOTHING_KINDS } from '../core/state';
 	import type {
@@ -284,7 +285,9 @@
 			{#each groups as group (group.category)}
 				<div class="group">
 					<button class="group-header" onclick={() => toggle(group.category)}>
-						<span class="chevron" class:collapsed={collapsed[group.category]}>▸</span>
+						<span class="chevron" class:collapsed={collapsed[group.category]}>
+							<ChevronRight size={12} />
+						</span>
 						<span class="group-name">{group.category === '' ? '未分类' : group.category}</span>
 						<span class="muted">{group.items.length} 件</span>
 					</button>
@@ -306,7 +309,9 @@
 								ondragend={() => (dragId = null)}
 							>
 								{#if sortingEnabled}
-									<span class="drag-handle" title="拖拽排序" style="margin-top: 9px;">⠿</span>
+									<span class="drag-handle" title="拖拽排序" style="margin-top: 9px;">
+										<GripVertical size={14} />
+									</span>
 								{/if}
 								<div style="width: 90px; flex: none;">
 									<input
@@ -348,8 +353,9 @@
 								<button
 									class="btn btn-danger btn-small"
 									onclick={() => removeItem(row.id)}
-									aria-label="删除衣物">✕</button
-								>
+									aria-label="删除衣物">
+									<X size={13} />
+								</button>
 							</div>
 						{/each}
 					{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronDown } from '@lucide/svelte';
 	interface Props {
 		/** 当前模型 id（受控：由父级持有并同步回写）。 */
 		value: string;
@@ -107,7 +108,7 @@
 		onkeydown={onKeydown}
 		onblur={onBlur}
 	/>
-	<span class="combobox-caret" aria-hidden="true">▾</span>
+	<span class="combobox-caret" aria-hidden="true"><ChevronDown size={13} /></span>
 	{#if open && filtered.length > 0}
 		<div id="llm-model-listbox" class="combobox-popup" role="listbox">
 			{#each filtered as candidate, i (candidate)}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
 	import { wardrobeItemsForSlot } from '../context/state-summary';
 	import type { ClothingItem } from '../core/types';
 
@@ -62,15 +63,17 @@
 					<button
 						class="chip-x"
 						aria-label={`移除配饰 ${name}`}
-						onclick={() => removeItem(name)}>✕</button
+						onclick={() => removeItem(name)}
 					>
+						<X size={11} />
+					</button>
 				</span>
 			{/each}
 		</div>
 	{/if}
 	<div class="accessory-actions">
 		<select id={selectId} class="select" bind:value={selected} onchange={addCandidate}>
-			<option value="">＋ 从衣柜添加…</option>
+			<option value="">从衣柜添加…</option>
 			{#each candidates as item (item.id)}
 				<option value={item.name}
 					>{item.category === '' ? item.name : `${item.category} > ${item.name}`}</option

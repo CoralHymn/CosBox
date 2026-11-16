@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
 	import { MEMORY_CATEGORIES, type ExtractedMemory, type MemoryEntry } from '../memory/types';
 
 	interface Props {
@@ -317,8 +318,9 @@
 				<button
 					class="btn btn-danger btn-small"
 					onclick={() => removeEntry(entry)}
-					aria-label="删除记忆">✕</button
-				>
+					aria-label="删除记忆">
+					<X size={13} />
+				</button>
 			</div>
 			<textarea
 				class="textarea"

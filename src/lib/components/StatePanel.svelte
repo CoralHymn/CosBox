@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
 	import type { AttributeValue, CharacterState, OutfitSlot, StatePatch } from '../core/types';
 	import AccessoryPicker from './AccessoryPicker.svelte';
 	import OutfitSlotPicker from './OutfitSlotPicker.svelte';
@@ -127,8 +128,9 @@
 				<button
 					class="btn btn-danger btn-small"
 					onclick={() => removeAttributeRow(index)}
-					aria-label="删除属性">✕</button
-				>
+					aria-label="删除属性">
+					<X size={13} />
+				</button>
 			</div>
 		{/each}
 		<button class="btn btn-small" onclick={addAttributeRow}>＋ 添加属性</button>
