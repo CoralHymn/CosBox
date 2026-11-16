@@ -92,8 +92,8 @@
 	let modelContextWindow = $state<number | undefined>(undefined);
 	let autoCompact = $state(true);
 	let compactThreshold = $state(0.8);
-	let stream = $state(false);
-	let allowAiStateTools = $state(false);
+	let stream = $state(true);
+	let allowAiStateTools = $state(true);
 	let llmStateConfirm = $state(false);
 	let textToolFallback = $state(true);
 	let memoryEnabled = $state(true);
@@ -308,14 +308,14 @@
 		void persistTheme();
 	}
 
-	/** 恢复默认主题（颜色 + 移除背景图）。 */
+	/** 恢复默认主题（默认配色 + 默认官方背景）。 */
 	function resetTheme(): void {
 		themePresetId = DEFAULT_THEME_CONFIG.presetId;
 		themeColors = {};
-		officialBackgroundId = '';
-		themeBackground = '';
-		themeOpacity = 1;
-		themeBlur = 0;
+		officialBackgroundId = DEFAULT_THEME_CONFIG.officialBackgroundId;
+		themeBackground = DEFAULT_THEME_CONFIG.backgroundImage;
+		themeOpacity = DEFAULT_THEME_CONFIG.backgroundOpacity;
+		themeBlur = DEFAULT_THEME_CONFIG.backgroundBlur;
 		void persistTheme();
 	}
 

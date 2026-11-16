@@ -230,12 +230,12 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
 	}
 ];
 
-/** 默认主题配置：The Verge 酸薄荷 + 无背景图。 */
+/** 默认主题配置：The Verge 酸薄荷 + 低多边形星球背景（首次使用即启用）。 */
 export const DEFAULT_THEME_CONFIG: ThemeConfig = {
 	presetId: 'verge',
 	colors: {},
 	backgroundImage: '',
-	officialBackgroundId: '',
+	officialBackgroundId: 'lowpoly-planet',
 	backgroundOpacity: 1,
 	backgroundBlur: 0
 };

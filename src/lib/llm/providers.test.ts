@@ -206,9 +206,15 @@ describe('normalizeLlmConfig', () => {
 		expect(normalizeLlmConfig({}).compactThreshold).toBe(0.8);
 	});
 
-	it('保留 stream，缺省回退 false', () => {
+	it('保留 stream，缺省回退 true', () => {
 		expect(normalizeLlmConfig({ stream: true }).stream).toBe(true);
-		expect(normalizeLlmConfig({}).stream).toBe(false);
+		expect(normalizeLlmConfig({}).stream).toBe(true);
+		expect(normalizeLlmConfig({ stream: false }).stream).toBe(false);
+	});
+
+	it('允许 AI 自主修改状态缺省开启', () => {
+		expect(normalizeLlmConfig({}).allowAiStateTools).toBe(true);
+		expect(normalizeLlmConfig({ allowAiStateTools: false }).allowAiStateTools).toBe(false);
 	});
 
 	it('保留模型服务列表与三角色绑定，缺省时为空', () => {

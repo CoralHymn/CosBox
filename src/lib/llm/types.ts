@@ -55,9 +55,9 @@ export interface LlmConfig {
 	autoCompact?: boolean;
 	/** 压缩触发阈值：估计用量（含输出预算）占上下文窗口的比例（缺省 0.8）。 */
 	compactThreshold?: number;
-	/** 流式输出：边生成边显示（真实端点按 SSE 解析；demo 保持一次性返回）。 */
+	/** 流式输出：边生成边显示（真实端点按 SSE 解析；demo 保持一次性返回）。缺省视为开启。 */
 	stream?: boolean;
-	/** 是否允许 AI 在对话中调用状态工具（改地点/时间/穿着/属性）。缺省视为关闭。 */
+	/** 是否允许 AI 在对话中调用状态工具（改地点/时间/穿着/属性）。缺省视为开启。 */
 	allowAiStateTools?: boolean;
 	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
 	llmStateConfirm?: boolean;
@@ -208,8 +208,8 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	maxTokens: 4096,
 	autoCompact: true,
 	compactThreshold: DEFAULT_COMPACT_THRESHOLD,
-	stream: false,
-	allowAiStateTools: false,
+	stream: true,
+	allowAiStateTools: true,
 	llmStateConfirm: false,
 	textToolFallback: true,
 	memoryEnabled: true,

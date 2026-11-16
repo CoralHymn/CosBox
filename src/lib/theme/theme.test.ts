@@ -52,6 +52,13 @@ describe('THEME_PRESETS', () => {
 		expect(findThemePreset('verge')?.colors).toEqual(DEFAULT_THEME_COLORS);
 		expect(DEFAULT_THEME_CONFIG.presetId).toBe('verge');
 	});
+
+	it('首次使用默认启用低多边形星球背景', () => {
+		expect(DEFAULT_THEME_CONFIG.officialBackgroundId).toBe('lowpoly-planet');
+		expect(findOfficialBackground(DEFAULT_THEME_CONFIG.officialBackgroundId)?.label).toBe(
+			'低多边形星球'
+		);
+	});
 });
 
 describe('findThemePreset', () => {
@@ -158,7 +165,11 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 	});
 
 	it('无背景图时不输出背景图变量', () => {
-		const vars = resolveThemeCss({ ...DEFAULT_THEME_CONFIG, colors: { bg: '#000000' } });
+		const vars = resolveThemeCss({
+			...DEFAULT_THEME_CONFIG,
+			officialBackgroundId: '',
+			colors: { bg: '#000000' }
+		});
 		expect(vars['--bg-app-header']).toBeUndefined();
 		expect(vars['--bg-app-panel']).toBeUndefined();
 		expect(vars['--bg-app-surface']).toBeUndefined();
@@ -205,7 +216,9 @@ describe('resolveThemeCss / applyThemeToDocument', () => {
 				officialBackgroundId: 'hourglass'
 			})
 		).toBe('/backgrounds/hourglass.webp');
-		expect(getEffectiveBackgroundUrl({ ...DEFAULT_THEME_CONFIG })).toBe('');
+		expect(getEffectiveBackgroundUrl({ ...DEFAULT_THEME_CONFIG })).toBe(
+			'/backgrounds/lowpoly-planet.webp'
+		);
 		// 未知官方 id 回退为空，不输出背景图层变量
 		expect(
 			getEffectiveBackgroundUrl({ ...DEFAULT_THEME_CONFIG, officialBackgroundId: 'ghost' })
