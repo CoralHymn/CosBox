@@ -11,7 +11,7 @@
 		disabled?: boolean;
 		/** 提供时显示「重新生成」按钮（assistant 消息）：回溯到该回复之前重新生成。 */
 		onRetry?: (id: string) => void;
-		/** 提供时显示「LLM 状态确认」按钮（assistant 消息）：手动触发状态判断并补执行工具。 */
+		/** 提供时显示「状态补执行」按钮（assistant 消息）：由决策模型判断并补执行工具。 */
 		onConfirmState?: (id: string) => void;
 		/** 提供时在气泡下方显示分支切换 < >（存在与当前分支在该消息处岔开的备选分支）。 */
 		branchNav?: {
@@ -384,8 +384,8 @@
 				{#if canConfirm && onConfirmState !== undefined}
 					<button
 						class="icon-btn"
-						title="LLM 状态确认：让 AI 判断本轮是否需要更新状态并补执行工具"
-						aria-label="LLM 状态确认"
+						title="决策模型判断本轮是否需要更新状态，需要则补执行工具"
+						aria-label="决策模型状态补执行"
 						onclick={() => onConfirmState(message.id)}
 					>
 						<svg

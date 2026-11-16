@@ -2,9 +2,6 @@ import type { MessageRole, MessageSegment, WorldTime } from '../core/types';
 import { DEFAULT_WEB_SEARCH_CONFIG, type WebSearchConfig } from '../search/types';
 import { DEFAULT_COMPACT_THRESHOLD } from './compaction';
 
-/** 模型服务角色：不同用途走不同模型，便于控制成本与 token 分配。 */
-export type ModelRole = 'chat' | 'judge' | 'generator';
-
 /** 一个服务商连接下的单个模型条目（可多选多个）。 */
 export interface ModelEntry {
 	id: string;
@@ -14,6 +11,32 @@ export interface ModelEntry {
 	/** 单次回复输出预算（max_tokens）；缺省回退全局配置。 */
 	maxTokens?: number;
 }
+
+/**
+ * 决策模型配置：状态同步判断交给专业决策模型（TypeSafe Jev / System One），
+ * 不再消耗 LLM token。只返回校准概率，不生成文本。
+ */
+export interface DecisionModelConfig {
+	provider: 'jev';
+	/** System One 端点基址，如 https://api.typesafe.ai。 */
+	baseUrl: string;
+	/** 端点不允许浏览器 CORS 直连时经内置软件通道转发。 */
+	useProxy?: boolean;
+	apiKey: string;
+	/** 决策模型 id，如 jev-latest。 */
+	model: string;
+	/** 「需要同步状态」的判定阈值（0-1）；概率达到阈值即补执行。 */
+	threshold: number;
+}
+
+export const DEFAULT_DECISION_MODEL_CONFIG: DecisionModelConfig = {
+	provider: 'jev',
+	baseUrl: 'https://api.typesafe.ai',
+	useProxy: false,
+	apiKey: '',
+	model: 'jev-latest',
+	threshold: 0.5
+};
 
 /**
  * 一个可复用、已保存的模型服务（一套 provider + key 连接，下面挂多个可选模型）。
@@ -59,8 +82,13 @@ export interface LlmConfig {
 	stream?: boolean;
 	/** 是否允许 AI 在对话中调用状态工具（改地点/时间/穿着/属性）。缺省视为开启。 */
 	allowAiStateTools?: boolean;
-	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
-	llmStateConfirm?: boolean;
+	/**
+	 * 决策模型补执行：主回复未调用工具时，由专业决策模型（Jev）判断是否需要补执行；
+	 * 决策模型只做判断，真正执行仍由智能体调用状态工具完成。
+	 */
+	decisionConfirm?: boolean;
+	/** 决策模型连接配置（不随工作区导出或远程同步）。 */
+	decisionModel?: DecisionModelConfig;
 	/**
 	 * 文本形式工具调用双通道：结构化 tool_calls 缺失时，允许解析文本形式调用兜底
 	 * （仅限补调重试/状态确认路径提示模型，主流程保持严格 JSON）。缺失视为开启；
@@ -75,18 +103,10 @@ export interface LlmConfig {
 	memoryAutoExtract?: boolean;
 	/** 已保存的模型服务列表（含 API Key，仅本地）。 */
 	modelServices?: ModelService[];
-	/** 对话角色使用的模型服务 id；缺省回退主配置。 */
-	chatModelId?: string;
-	/** 对话角色在该服务下使用的模型条目 id；缺省用第一条。 */
-	chatModelEntryId?: string;
-	/** LLM 状态判断角色使用的模型服务 id。 */
-	judgeModelId?: string;
-	/** LLM 状态判断角色在该服务下使用的模型条目 id。 */
-	judgeModelEntryId?: string;
-	/** AI 生成（地点/衣柜/日程/记忆提取）角色使用的模型服务 id。 */
-	generatorModelId?: string;
-	/** AI 生成角色在该服务下使用的模型条目 id。 */
-	generatorModelEntryId?: string;
+	/** 智能体使用的模型服务 id；缺省回退主配置。对话与生成共用。 */
+	agentModelId?: string;
+	/** 智能体在该服务下使用的模型条目 id；缺省用第一条。 */
+	agentModelEntryId?: string;
 	/** 网页搜索配置（发送消息时可带搜索注入结果）。 */
 	webSearch: WebSearchConfig;
 }
@@ -210,18 +230,15 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 	compactThreshold: DEFAULT_COMPACT_THRESHOLD,
 	stream: true,
 	allowAiStateTools: true,
-	llmStateConfirm: false,
+	decisionConfirm: false,
+	decisionModel: { ...DEFAULT_DECISION_MODEL_CONFIG },
 	textToolFallback: true,
 	memoryEnabled: true,
 	memoryInjectLimit: 5,
 	memoryAutoExtract: false,
 	modelServices: [],
-	chatModelId: '',
-	chatModelEntryId: '',
-	judgeModelId: '',
-	judgeModelEntryId: '',
-	generatorModelId: '',
-	generatorModelEntryId: '',
+	agentModelId: '',
+	agentModelEntryId: '',
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
 

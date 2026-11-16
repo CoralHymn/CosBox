@@ -22,7 +22,7 @@ import {
 	type StateToolContext,
 	type StateToolDefinition
 } from './state-tools';
-import { runStateConfirmation, runStateJudge, type JudgeDebugView } from './state-judge';
+import { runStateConfirmation, runStateDecision, type DecisionDebugView } from './state-decision';
 import { formatWorldTimeLabel, sanitizeAssistantText } from './message-time';
 import { extractTextToolCalls, stripTextToolCalls, TEXT_TOOL_FALLBACK_HINT } from './text-tools';
 import { buildRequestBody } from './openai-client';
@@ -131,10 +131,8 @@ export interface GenerateReplyOptions {
 	 * 调用兜底；关闭后主循环/补调/状态确认一律只认结构化 tool_calls。
 	 */
 	textToolFallback?: boolean;
-	/** LLM 状态确认：主回复未调用工具时，由独立 LLM 判断是否需要调用并补执行。 */
-	enableStateJudge?: boolean;
-	/** LLM 状态确认使用的模型配置；缺省回退主对话配置（可指定便宜模型省 token）。 */
-	judgeConfig?: LlmConfig;
+	/** 决策模型补执行：主回复未调用工具时，由专业决策模型判断是否需要调用并补执行。 */
+	enableDecisionConfirm?: boolean;
 }
 
 /** 默认最大工具轮数：超过后停止并以提示文本收尾。 */
@@ -185,8 +183,8 @@ export class ChatService {
 		thinking: string | undefined;
 		/** 端点的 finish_reason（stop / length 等）；正文为空时为「输出预算耗尽」排查提供依据。 */
 		finishReason: string | undefined;
-		/** LLM 状态判断的调试视图（未启用或未触发时为 null）。 */
-		judgeDebug: JudgeDebugView | null;
+		/** 决策模型判断的调试视图（未启用或未触发时为 null）。 */
+		decisionDebug: DecisionDebugView | null;
 		/** 工具调用轮次（按顺序；每轮含叙事文本与工具反馈，最终回复在 reply）。 */
 		rounds: ReplyRound[];
 		/** 最终回复的思考/正文交替顺序（interleaved thinking），供气泡按序分段展示。 */
@@ -194,7 +192,7 @@ export class ChatService {
 	}> {
 		let usage: TokenUsage | undefined;
 		let compaction: CompactionState | null = options.compaction?.state ?? null;
-		let judgeDebug: JudgeDebugView | null = null;
+		let decisionDebug: DecisionDebugView | null = null;
 
 		// 1) 按当前压缩状态组装「本次发送的历史」；无状态 = 完整历史。
 		let sendHistory = this.buildSendHistory(input.conversation, compaction);
@@ -393,10 +391,10 @@ export class ChatService {
 						}
 					}
 					if (result.toolCalls.length === 0) {
-						if (options.enableStateJudge === true && executedTools.length === 0) {
+						if (options.enableDecisionConfirm === true && executedTools.length === 0) {
 							options.onPhase?.('正在检查状态是否需要同步…');
-							options.onMetric?.('judge.triggered');
-							const judge = await this.maybeRunStateJudge(
+							options.onMetric?.('decision.triggered');
+							const decision = await this.maybeRunDecisionConfirm(
 								input,
 								config,
 								options,
@@ -405,9 +403,9 @@ export class ChatService {
 								executedTools.length > 0,
 								{ onPhase: options.onPhase, onMetric: options.onMetric }
 							);
-							executedTools.push(...judge.executed);
-							rounds.push(...judge.rounds);
-							judgeDebug = judge.debug;
+							executedTools.push(...decision.executed);
+							rounds.push(...decision.rounds);
+							decisionDebug = decision.debug;
 						}
 						const finalReply = sanitizeAssistantText(result.content ?? '');
 						if (result.finishReason === 'length') {
@@ -427,7 +425,7 @@ export class ChatService {
 							compaction,
 							thinking: preferThinking(result.thinking, firstResultThinking),
 							finishReason: result.finishReason,
-							judgeDebug,
+							decisionDebug,
 							rounds,
 							replySegments: ensureFirstThinkingInSegments(result.segments, firstResultThinking)
 						};
@@ -502,7 +500,7 @@ export class ChatService {
 					compaction,
 					thinking: undefined,
 					finishReason: undefined,
-					judgeDebug: null,
+					decisionDebug: null,
 					rounds,
 					replySegments: undefined
 				};
@@ -532,10 +530,10 @@ export class ChatService {
 			}
 		}
 		debug = { ...debug, lastResponse: buildLastResponse(result) };
-		if (options.enableStateJudge === true && executedTools.length === 0) {
+		if (options.enableDecisionConfirm === true && executedTools.length === 0) {
 			options.onPhase?.('正在检查状态是否需要同步…');
-			options.onMetric?.('judge.triggered');
-			const judge = await this.maybeRunStateJudge(
+			options.onMetric?.('decision.triggered');
+			const decision = await this.maybeRunDecisionConfirm(
 				input,
 				config,
 				options,
@@ -544,9 +542,9 @@ export class ChatService {
 				executedTools.length > 0,
 				{ onPhase: options.onPhase, onMetric: options.onMetric }
 			);
-			executedTools.push(...judge.executed);
-			rounds.push(...judge.rounds);
-			judgeDebug = judge.debug;
+			executedTools.push(...decision.executed);
+			rounds.push(...decision.rounds);
+			decisionDebug = decision.debug;
 		}
 		const plainReply = sanitizeAssistantText(result.content ?? '');
 		if (result.finishReason === 'length') {
@@ -565,7 +563,7 @@ export class ChatService {
 			compaction,
 			thinking: preferThinking(result.thinking, firstResultThinking),
 			finishReason: result.finishReason,
-			judgeDebug,
+			decisionDebug,
 			rounds,
 			replySegments: ensureFirstThinkingInSegments(result.segments, firstResultThinking)
 		};
@@ -1058,10 +1056,10 @@ export class ChatService {
 	}
 
 	/**
-	 * LLM 状态确认：主回复未调用工具时，由独立 LLM 判断剧情是否需要更新状态；
+	 * 决策模型补执行：主回复未调用工具时，由专业决策模型（Jev）判断剧情是否需要更新状态；
 	 * 需要则运行确认工具循环补执行，并把工具反馈作为轮次返回（由上层持久化）。
 	 */
-	private async maybeRunStateJudge(
+	private async maybeRunDecisionConfirm(
 		input: ContextPipelineInput,
 		config: LlmConfig,
 		options: GenerateReplyOptions,
@@ -1072,12 +1070,12 @@ export class ChatService {
 	): Promise<{
 		executed: ExecutedToolCall[];
 		rounds: ReplyRound[];
-		debug: JudgeDebugView | null;
+		debug: DecisionDebugView | null;
 	}> {
 		if (
-			options.enableStateJudge !== true ||
+			options.enableDecisionConfirm !== true ||
 			// 原生 AI 在本请求中已执行过工具（哪怕只是第一段调用了工具）：
-			// 后续任何输出都绝不再让 LLM 判断介入，避免二次执行/吞句。
+			// 后续任何输出都绝不再让决策模型介入，避免二次执行/吞句。
 			nativeToolsExecuted ||
 			options.toolContext === undefined ||
 			options.tools === undefined ||
@@ -1106,7 +1104,7 @@ export class ChatService {
 			state: input.state,
 			lastUser,
 			lastAssistant: currentAssistant,
-			config: options.judgeConfig ?? config,
+			config,
 			tools: options.tools,
 			toolContext: options.toolContext,
 			signal,
@@ -1120,7 +1118,7 @@ export class ChatService {
 	}
 
 	/**
-	 * 手动 LLM 状态确认：对指定一轮对话运行状态判断（不重新生成回复）。
+	 * 手动决策补执行：对指定一轮对话交给决策模型判断（不重新生成回复）。
 	 * 需要时由确认阶段执行状态工具，并返回执行反馈与完整调试视图；
 	 * 未开启工具 / 客户端不支持工具时直接返回空结果。
 	 */
@@ -1143,24 +1141,23 @@ export class ChatService {
 	}): Promise<{
 		executed: ExecutedToolCall[];
 		rounds: ReplyRound[];
-		debug: JudgeDebugView | null;
+		debug: DecisionDebugView | null;
 	}> {
 		if (input.tools.length === 0 || this.client.chatWithTools === undefined) {
 			return { executed: [], rounds: [], debug: null };
 		}
-		const judge = await runStateJudge({
+		const decision = await runStateDecision({
 			state: input.state,
 			lastUser: input.lastUser,
 			lastAssistant: input.lastAssistant,
-			client: this.client,
-			config: input.config,
+			config: input.config.decisionModel,
 			signal: input.signal
 		});
-		if (!judge.needsTool) {
-			input.onMetric?.('judge.no_change');
-			return { executed: [], rounds: [], debug: judge.debug };
+		if (!decision.needsTool) {
+			input.onMetric?.('decision.no_change');
+			return { executed: [], rounds: [], debug: decision.debug };
 		}
-		input.onMetric?.('judge.needs_tool');
+		input.onMetric?.('decision.needs_tool');
 		input.onPhase?.('正在同步状态…');
 		const confirmation = await runStateConfirmation({
 			state: input.state,
@@ -1176,8 +1173,8 @@ export class ChatService {
 			onMetric: input.onMetric,
 			textToolFallback: input.textToolFallback !== false
 		});
-		const debug: JudgeDebugView = {
-			...judge.debug,
+		const debug: DecisionDebugView = {
+			...decision.debug,
 			confirmation: {
 				messages: confirmation.messages,
 				toolCalls: confirmation.toolCalls,

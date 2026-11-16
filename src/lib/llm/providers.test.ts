@@ -217,7 +217,7 @@ describe('normalizeLlmConfig', () => {
 		expect(normalizeLlmConfig({ allowAiStateTools: false }).allowAiStateTools).toBe(false);
 	});
 
-	it('保留模型服务列表与三角色绑定，缺省时为空', () => {
+	it('保留模型服务列表与智能体绑定，缺省时为空', () => {
 		const service = {
 			id: 's1',
 			label: '服务',
@@ -230,22 +230,32 @@ describe('normalizeLlmConfig', () => {
 		};
 		const result = normalizeLlmConfig({
 			modelServices: [service],
-			chatModelId: 's1',
-			chatModelEntryId: 'm1',
-			judgeModelId: 's1',
-			judgeModelEntryId: 'm1',
-			generatorModelId: 's1',
-			generatorModelEntryId: 'm1'
+			agentModelId: 's1',
+			agentModelEntryId: 'm1'
 		});
 		expect(result.modelServices).toEqual([service]);
-		expect(result.chatModelId).toBe('s1');
-		expect(result.chatModelEntryId).toBe('m1');
-		expect(result.judgeModelId).toBe('s1');
-		expect(result.generatorModelId).toBe('s1');
+		expect(result.agentModelId).toBe('s1');
+		expect(result.agentModelEntryId).toBe('m1');
 		const empty = normalizeLlmConfig({});
 		expect(empty.modelServices).toEqual([]);
-		expect(empty.chatModelId).toBe('');
-		expect(empty.chatModelEntryId).toBe('');
+		expect(empty.agentModelId).toBe('');
+		expect(empty.agentModelEntryId).toBe('');
+	});
+
+	it('旧存档三角色绑定迁移为智能体', () => {
+		const result = normalizeLlmConfig({
+			chatModelId: 's1',
+			chatModelEntryId: 'm1',
+			judgeModelId: 'j',
+			generatorModelId: 'g'
+		});
+		expect(result.agentModelId).toBe('s1');
+		expect(result.agentModelEntryId).toBe('m1');
+	});
+
+	it('llmStateConfirm 迁移为决策模型补执行开关', () => {
+		expect(normalizeLlmConfig({ llmStateConfirm: true }).decisionConfirm).toBe(true);
+		expect(normalizeLlmConfig({}).decisionConfirm).toBe(false);
 	});
 
 	it('useProxy 缺省为关闭，旧式 /llm-proxy 相对地址自动升级', () => {

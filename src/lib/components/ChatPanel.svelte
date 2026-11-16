@@ -14,7 +14,7 @@
 		type PromptPreviewResult
 	} from '../llm/chat-service';
 	import type { CompactionState } from '../llm/compaction';
-	import type { JudgeDebugView } from '../llm/state-judge';
+	import type { DecisionDebugView } from '../llm/state-decision';
 	import type { LlmConfig, TokenUsage } from '../llm/types';
 	import ChatInput from './ChatInput.svelte';
 	import ContextPanel from './ContextPanel.svelte';
@@ -45,8 +45,8 @@
 		searching: boolean;
 		developerMode: boolean;
 		debugPrompt: DebugPromptView | null;
-		/** 最近一次 LLM 状态判断的调试视图（开发者模式查看）。 */
-		judgeDebug?: JudgeDebugView | null;
+		/** 最近一次决策模型判断的调试视图（开发者模式查看）。 */
+		decisionDebug?: DecisionDebugView | null;
 		/** 输入预览：返回「当前输入框内容点击发送会发送给 AI 什么」。 */
 		onPreview: (draft: string) => PromptPreviewResult;
 		onSend: (content: string, options: { search: boolean }) => void;
@@ -66,11 +66,11 @@
 		snapshots: SnapshotNode[];
 		/** 当前 head 快照 id。 */
 		headId: string | null;
-		/** 是否允许 AI 状态工具：决定「LLM 状态确认」按钮是否可用。 */
+		/** 是否允许 AI 状态工具：决定「状态补执行」按钮是否可用。 */
 		allowStateTools: boolean;
 		/** 重新生成：回溯到该 assistant 消息之前重新发送。 */
 		onRetry: (id: string) => void;
-		/** 手动触发 LLM 状态确认（判断 + 补执行工具）。 */
+		/** 手动触发决策模型状态补执行（判断 + 补执行工具）。 */
 		onConfirmState: (id: string) => void;
 		/** 切换到指定分支 tip。 */
 		onSwitchBranch: (tipId: string) => void;
@@ -95,7 +95,7 @@
 		searching,
 		developerMode,
 		debugPrompt,
-		judgeDebug,
+		decisionDebug,
 		onPreview,
 		onSend,
 		onEditMessage,
@@ -119,7 +119,7 @@
 	let modal = $state<
 		| { title: string; view: DebugPromptView; note?: string }
 		| { title: string; notice: string }
-		| { title: string; judge: JudgeDebugView }
+		| { title: string; decision: DecisionDebugView }
 		| null
 	>(null);
 	let copyStatus = $state('');
@@ -261,10 +261,10 @@
 		}
 	}
 
-	/** 打开「LLM 状态判断」调试视图。 */
-	function openJudgeDebug(): void {
-		if (judgeDebug != null) {
-			modal = { title: '最近一次 LLM 状态判断', judge: judgeDebug };
+	/** 打开「决策模型判断」调试视图。 */
+	function openDecisionDebug(): void {
+		if (decisionDebug != null) {
+			modal = { title: '最近一次决策模型判断', decision: decisionDebug };
 		}
 	}
 
@@ -339,8 +339,10 @@
 						开发者：查看最近一次完整提示词
 					</button>
 				{/if}
-				{#if judgeDebug !== null}
-					<button class="btn btn-small" onclick={openJudgeDebug}> 开发者：查看上次状态判断 </button>
+				{#if decisionDebug !== null}
+					<button class="btn btn-small" onclick={openDecisionDebug}>
+						开发者：查看上次状态决策
+					</button>
 				{/if}
 				{#if recentLog.trim() !== ''}
 					<button class="btn btn-small" onclick={onExportLog}>
@@ -373,28 +375,43 @@
 							</div>
 						</div>
 						<div class="prompt-modal-body">
-							{#if 'judge' in modal}
+							{#if 'decision' in modal}
 								<p class="muted" style="margin: 0 0 4px;">
-									判断结果：{modal.judge.needsTool ? 'True（需要调用工具）' : 'False（无需变更）'}
+									判断结果：{modal.decision.needsTool ? '需要补执行' : '无需变更'}
 								</p>
-								<p class="muted" style="margin: 0 0 4px;">原始输出：</p>
-								<pre>{modal.judge.output}</pre>
-								<p class="muted" style="margin: 10px 0 4px;">发送给判断 LLM 的系统提示词：</p>
-								<pre>{modal.judge.systemPrompt}</pre>
-								<p class="muted" style="margin: 10px 0 4px;">发送给判断 LLM 的消息：</p>
-								{#each modal.judge.messages as message, i (i)}
-									<p class="muted" style="margin: 6px 0 2px;">[{message.role}]</p>
-									<pre>{message.content}</pre>
-								{/each}
-								{#if modal.judge.confirmation !== undefined}
+								<p class="muted" style="margin: 0 0 4px;">
+									来源：{modal.decision.source === 'jev'
+										? 'Jev 决策模型'
+										: modal.decision.source === 'unconfigured'
+											? '未配置（保守补执行）'
+											: '请求失败（保守补执行）'}
+									{#if modal.decision.probability !== null}
+										· 概率 {Math.round(modal.decision.probability * 100)}%
+									{/if}
+									· 阈值 {Math.round(modal.decision.threshold * 100)}%
+								</p>
+								{#if modal.decision.error !== undefined}
+									<p class="muted" style="margin: 0 0 4px;">{modal.decision.error}</p>
+								{/if}
+								<p class="muted" style="margin: 10px 0 4px;">System One 端点：</p>
+								<pre>{modal.decision.request.url}</pre>
+								<p class="muted" style="margin: 10px 0 4px;">发送给决策模型的问题：</p>
+								<pre>{JSON.stringify(modal.decision.request.body, null, 2)}</pre>
+								<p class="muted" style="margin: 10px 0 4px;">状态与最近一轮对话：</p>
+								<pre>{modal.decision.state}</pre>
+								{#if modal.decision.response !== undefined}
+									<p class="muted" style="margin: 10px 0 4px;">决策模型响应：</p>
+									<pre>{JSON.stringify(modal.decision.response, null, 2)}</pre>
+								{/if}
+								{#if modal.decision.confirmation !== undefined}
 									<p class="muted" style="margin: 12px 0 4px;">确认阶段的工具调用：</p>
-									<pre>{JSON.stringify(modal.judge.confirmation.toolCalls, null, 2)}</pre>
+									<pre>{JSON.stringify(modal.decision.confirmation.toolCalls, null, 2)}</pre>
 									<p class="muted" style="margin: 10px 0 4px;">工具执行结果：</p>
-									{#each modal.judge.confirmation.executed as tool (tool.id)}
+									{#each modal.decision.confirmation.executed as tool (tool.id)}
 										<pre>[{tool.name}] {tool.output}</pre>
 									{/each}
 									<p class="muted" style="margin: 10px 0 4px;">确认阶段完整消息（含工具反馈）：</p>
-									{#each modal.judge.confirmation.messages as message, i (i)}
+									{#each modal.decision.confirmation.messages as message, i (i)}
 										<p class="muted" style="margin: 6px 0 2px;">[{message.role}]</p>
 										<pre>{message.content}</pre>
 									{/each}

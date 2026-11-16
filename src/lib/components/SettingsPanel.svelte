@@ -3,17 +3,18 @@
 	import { findModelInfo } from '../llm/model-info';
 	import {
 		bindingValue,
-		MODEL_ROLE_LABELS,
+		AGENT_MODEL_LABEL,
 		type ModelEntryDraft,
 		normalizeModelService,
 		parseBindingValue
 	} from '../llm/model-services';
 	import type { FetchedModel } from '../llm/model-service';
 	import { CUSTOM_PROVIDER_ID, findProviderPreset, LLM_PROVIDER_PRESETS } from '../llm/providers';
+	import { normalizeDecisionConfig } from '../llm/state-decision';
 	import {
+		DEFAULT_DECISION_MODEL_CONFIG,
 		DEFAULT_LLM_CONFIG,
 		type LlmConfig,
-		type ModelRole,
 		type ModelService
 	} from '../llm/types';
 	import type { WebSearchProvider } from '../search/types';
@@ -94,7 +95,7 @@
 	let compactThreshold = $state(0.8);
 	let stream = $state(true);
 	let allowAiStateTools = $state(true);
-	let llmStateConfirm = $state(false);
+	let decisionConfirm = $state(false);
 	let textToolFallback = $state(true);
 	let memoryEnabled = $state(true);
 	let memoryInjectLimit = $state(5);
@@ -123,14 +124,16 @@
 	/** 「获取模型列表」拉取到的模型 id 与上下文窗口。 */
 	let availableModels = $state<string[]>([]);
 	let modelContexts = $state<Record<string, number>>({});
-	/** 已保存的模型服务列表与三角色绑定（角色 → 服务 id）。 */
+	/** 已保存的模型服务列表与智能体绑定（服务 id + 模型条目 id）。 */
 	let services = $state<ModelService[]>([]);
-	let chatModelId = $state('');
-	let chatModelEntryId = $state('');
-	let judgeModelId = $state('');
-	let judgeModelEntryId = $state('');
-	let generatorModelId = $state('');
-	let generatorModelEntryId = $state('');
+	let agentModelId = $state('');
+	let agentModelEntryId = $state('');
+	/** 决策模型（TypeSafe Jev / System One）连接草稿。 */
+	let decisionBaseUrl = $state(DEFAULT_DECISION_MODEL_CONFIG.baseUrl);
+	let decisionApiKey = $state('');
+	let decisionModel = $state(DEFAULT_DECISION_MODEL_CONFIG.model);
+	let decisionUseProxy = $state(false);
+	let decisionThreshold = $state(DEFAULT_DECISION_MODEL_CONFIG.threshold);
 	/** 服务编辑草稿（复用 provider/baseUrl/apiKey/model 等字段）。 */
 	let serviceEditorOpen = $state(false);
 	let editingServiceId = $state<string | null>(null);
@@ -178,7 +181,7 @@
 	const modelCandidates = $derived(
 		availableModels.length > 0 ? availableModels : (currentPreset?.models ?? [])
 	);
-	/** 角色分配下拉的扁平选项：每个服务下的每个模型一条（值 = 服务id::模型id）。 */
+	/** 智能体分配下拉的扁平选项：每个服务下的每个模型一条（值 = 服务id::模型id）。 */
 	const roleOptions = $derived(
 		services.flatMap((service) =>
 			(service.models ?? []).map((entry) => ({
@@ -205,18 +208,20 @@
 		compactThreshold = config.compactThreshold ?? 0.8;
 		stream = config.stream === true;
 		allowAiStateTools = config.allowAiStateTools === true;
-		llmStateConfirm = config.llmStateConfirm === true;
+		decisionConfirm = config.decisionConfirm === true;
 		textToolFallback = config.textToolFallback !== false;
 		memoryEnabled = config.memoryEnabled !== false;
 		memoryInjectLimit = config.memoryInjectLimit ?? 5;
 		memoryAutoExtract = config.memoryAutoExtract === true;
 		services = (config.modelServices ?? []).map((service) => ({ ...service }));
-		chatModelId = config.chatModelId ?? '';
-		chatModelEntryId = config.chatModelEntryId ?? '';
-		judgeModelId = config.judgeModelId ?? '';
-		judgeModelEntryId = config.judgeModelEntryId ?? '';
-		generatorModelId = config.generatorModelId ?? '';
-		generatorModelEntryId = config.generatorModelEntryId ?? '';
+		agentModelId = config.agentModelId ?? '';
+		agentModelEntryId = config.agentModelEntryId ?? '';
+		const decision = normalizeDecisionConfig(config.decisionModel);
+		decisionBaseUrl = decision.baseUrl;
+		decisionApiKey = decision.apiKey;
+		decisionModel = decision.model;
+		decisionUseProxy = decision.useProxy === true;
+		decisionThreshold = decision.threshold;
 		searchEnabled = config.webSearch.enabled;
 		searchProvider = config.webSearch.provider;
 		searchApiKey = config.webSearch.apiKey;
@@ -360,18 +365,21 @@
 			compactThreshold,
 			stream,
 			allowAiStateTools,
-			llmStateConfirm,
+			decisionConfirm,
+			decisionModel: normalizeDecisionConfig({
+				baseUrl: decisionBaseUrl,
+				apiKey: decisionApiKey,
+				model: decisionModel,
+				useProxy: decisionUseProxy,
+				threshold: decisionThreshold
+			}),
 			textToolFallback,
 			memoryEnabled,
 			memoryInjectLimit,
 			memoryAutoExtract,
 			modelServices: services.map((service) => ({ ...service })),
-			chatModelId,
-			chatModelEntryId,
-			judgeModelId,
-			judgeModelEntryId,
-			generatorModelId,
-			generatorModelEntryId,
+			agentModelId,
+			agentModelEntryId,
 			webSearch: {
 				enabled: searchEnabled,
 				provider: searchProvider,
@@ -569,7 +577,7 @@
 		availableModels = [];
 	}
 
-	/** 保存（新增或更新）一个模型服务；首个服务自动绑定全部角色。 */
+	/** 保存（新增或更新）一个模型服务；首个服务自动绑定智能体。 */
 	async function saveService(): Promise<void> {
 		if (savingService || editorModels.length === 0) {
 			return;
@@ -593,24 +601,19 @@
 			if (editingServiceId === null) {
 				services = [...services, normalized];
 				if (services.length === 1) {
-					chatModelId = normalized.id;
-					chatModelEntryId = normalized.models[0]?.id ?? '';
-					judgeModelId = normalized.id;
-					judgeModelEntryId = normalized.models[0]?.id ?? '';
-					generatorModelId = normalized.id;
-					generatorModelEntryId = normalized.models[0]?.id ?? '';
+					agentModelId = normalized.id;
+					agentModelEntryId = normalized.models[0]?.id ?? '';
 				}
 			} else {
 				services = services.map((service) => (service.id === normalized.id ? normalized : service));
-				// 编辑已有服务：若角色绑定的是该服务但条目已不存在，回退第一条。
+				// 编辑已有服务：若智能体绑定的是该服务但条目已不存在，回退第一条。
 				const firstEntryId = normalized.models[0]?.id ?? '';
-				const rebind = (serviceId: string, entryId: string): string =>
-					serviceId === normalized.id && !normalized.models.some((entry) => entry.id === entryId)
-						? firstEntryId
-						: entryId;
-				chatModelEntryId = rebind(chatModelId, chatModelEntryId);
-				judgeModelEntryId = rebind(judgeModelId, judgeModelEntryId);
-				generatorModelEntryId = rebind(generatorModelId, generatorModelEntryId);
+				if (
+					agentModelId === normalized.id &&
+					!normalized.models.some((entry) => entry.id === agentModelEntryId)
+				) {
+					agentModelEntryId = firstEntryId;
+				}
 			}
 			await persistModelConfig();
 			serviceEditorOpen = false;
@@ -620,7 +623,7 @@
 		}
 	}
 
-	/** 删除服务；若某个角色正指向它，改绑到剩余第一条服务。 */
+	/** 删除服务；若智能体正指向它，改绑到剩余第一条服务。 */
 	async function deleteService(service: ModelService): Promise<void> {
 		if (
 			!window.confirm(
@@ -631,19 +634,9 @@
 		}
 		const remaining = services.filter((item) => item.id !== service.id);
 		services = remaining;
-		const fallback = remaining[0]?.id ?? '';
-		const fallbackEntryId = remaining[0]?.models[0]?.id ?? '';
-		if (chatModelId === service.id) {
-			chatModelId = fallback;
-			chatModelEntryId = fallbackEntryId;
-		}
-		if (judgeModelId === service.id) {
-			judgeModelId = fallback;
-			judgeModelEntryId = fallbackEntryId;
-		}
-		if (generatorModelId === service.id) {
-			generatorModelId = fallback;
-			generatorModelEntryId = fallbackEntryId;
+		if (agentModelId === service.id) {
+			agentModelId = remaining[0]?.id ?? '';
+			agentModelEntryId = remaining[0]?.models[0]?.id ?? '';
 		}
 		if (editingServiceId === service.id) {
 			serviceEditorOpen = false;
@@ -652,61 +645,23 @@
 		void persistModelConfig();
 	}
 
-	/** 角色绑定：下拉值为 `服务id::模型条目id`。 */
-	function setRole(role: ModelRole, value: string): void {
+	/** 智能体绑定：下拉值为 `服务id::模型条目id`。 */
+	function setAgentModel(value: string): void {
 		const parsed = parseBindingValue(value);
 		if (parsed === null) {
 			return;
 		}
-		if (role === 'chat') {
-			chatModelId = parsed.serviceId;
-			chatModelEntryId = parsed.entryId;
-		} else if (role === 'judge') {
-			judgeModelId = parsed.serviceId;
-			judgeModelEntryId = parsed.entryId;
-		} else {
-			generatorModelId = parsed.serviceId;
-			generatorModelEntryId = parsed.entryId;
-		}
+		agentModelId = parsed.serviceId;
+		agentModelEntryId = parsed.entryId;
 		void persistModelConfig();
 	}
 
-	/** 某服务被哪些角色使用（徽标展示）。 */
-	function rolesForService(serviceId: string): ModelRole[] {
-		const roles: ModelRole[] = [];
-		if (chatModelId === serviceId) {
-			roles.push('chat');
-		}
-		if (judgeModelId === serviceId) {
-			roles.push('judge');
-		}
-		if (generatorModelId === serviceId) {
-			roles.push('generator');
-		}
-		return roles;
-	}
-
-	/** 全部角色（分配区遍历用）。 */
-	const ALL_ROLES: ModelRole[] = ['chat', 'judge', 'generator'];
-
-	/** 角色当前绑定下拉值（`服务id::模型条目id`）。 */
-	function roleId(role: ModelRole): string {
-		let serviceId = '';
-		let entryId = '';
-		if (role === 'chat') {
-			serviceId = chatModelId;
-			entryId = chatModelEntryId;
-		} else if (role === 'judge') {
-			serviceId = judgeModelId;
-			entryId = judgeModelEntryId;
-		} else {
-			serviceId = generatorModelId;
-			entryId = generatorModelEntryId;
-		}
-		if (serviceId === '' || entryId === '') {
+	/** 智能体当前绑定下拉值（`服务id::模型条目id`）。 */
+	function agentBindingValue(): string {
+		if (agentModelId === '' || agentModelEntryId === '') {
 			return '';
 		}
-		return bindingValue(serviceId, entryId);
+		return bindingValue(agentModelId, agentModelEntryId);
 	}
 
 	/** 服务商展示名。 */
@@ -829,31 +784,29 @@
 	<div class="card">
 		<h3 class="card-title">模型服务管理</h3>
 		<p class="muted" style="margin: 0 0 12px;">
-			把「服务商 + Key」保存为一个连接，下面挂多个可选模型（Key 只填一次）； 再为三类任务分配「服务
-			+ 模型」： 对话用强模型、状态判断与生成用便宜模型，便于控制 token 与消费。API Key
-			仅保存在本地， 不会随工作区导出或同步到服务器。
+			把「服务商 + Key」保存为一个连接，下面挂多个可选模型（Key
+			只填一次）；再为「智能体」分配一个服务 + 模型，对话与地点/衣柜/日程生成共用同一模型。API Key
+			仅保存在本地，不会随工作区导出或同步到服务器。
 		</p>
 
 		<div class="field">
 			<span class="muted" style="display: block; margin-bottom: 4px;">
-				任务角色分配（快速切换模型 = 换绑「服务 / 模型」）
+				{AGENT_MODEL_LABEL}（对话与生成共用）
 			</span>
 			<div class="row-actions" style="flex-wrap: wrap; gap: 8px;">
-				{#each ALL_ROLES as role (role)}
-					<div class="field" style="flex: 1; min-width: 180px;">
-						<label for={`role-${role}`} class="muted">{MODEL_ROLE_LABELS[role]}</label>
-						<select
-							id={`role-${role}`}
-							class="select"
-							value={roleId(role)}
-							onchange={(event) => setRole(role, (event.currentTarget as HTMLSelectElement).value)}
-						>
-							{#each roleOptions as option (option.value)}
-								<option value={option.value}>{option.label}</option>
-							{/each}
-						</select>
-					</div>
-				{/each}
+				<div class="field" style="flex: 1; min-width: 180px;">
+					<label for="role-agent" class="muted">{AGENT_MODEL_LABEL}</label>
+					<select
+						id="role-agent"
+						class="select"
+						value={agentBindingValue()}
+						onchange={(event) => setAgentModel((event.currentTarget as HTMLSelectElement).value)}
+					>
+						{#each roleOptions as option (option.value)}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
+				</div>
 			</div>
 		</div>
 
@@ -864,9 +817,9 @@
 					<div style="flex: 1; min-width: 0;">
 						<div class="row-actions" style="gap: 6px;">
 							<span class="service-name">{service.label}</span>
-							{#each rolesForService(service.id) as role (role)}
-								<span class="role-badge">{MODEL_ROLE_LABELS[role]}</span>
-							{/each}
+							{#if agentModelId === service.id}
+								<span class="role-badge">{AGENT_MODEL_LABEL}</span>
+							{/if}
 						</div>
 						<p class="muted" style="margin: 3px 0 0; font-size: 12px;">
 							{providerLabelFor(service)} · 共 {service.models.length} 个模型
@@ -889,7 +842,8 @@
 						<button
 							class="btn btn-danger btn-small"
 							onclick={() => deleteService(service)}
-							aria-label={`删除服务 ${service.label}`}>
+							aria-label={`删除服务 ${service.label}`}
+						>
 							<X size={13} />
 						</button>
 					</div>
@@ -1006,7 +960,8 @@
 							<button
 								class="btn btn-danger btn-small"
 								onclick={() => removeEditorModel(index)}
-								aria-label="移除该模型">
+								aria-label="移除该模型"
+							>
 								<X size={13} />
 							</button>
 						</div>
@@ -1146,6 +1101,73 @@
 	</div>
 
 	<div class="card">
+		<h3 class="card-title">决策模型</h3>
+		<p class="muted" style="margin: 0 0 10px;">
+			状态同步判断交给专业决策模型 TypeSafe Jev（System One）：只返回校准概率，不生成文本，也不消耗
+			LLM token。密钥只保存在本地。
+		</p>
+		<div class="field">
+			<label for="decision-base-url">System One 端点</label>
+			<input
+				id="decision-base-url"
+				class="input"
+				bind:value={decisionBaseUrl}
+				placeholder={DEFAULT_DECISION_MODEL_CONFIG.baseUrl}
+			/>
+		</div>
+		<div class="row-actions" style="margin-bottom: 10px;">
+			<input
+				id="decision-use-proxy"
+				class="checkbox"
+				type="checkbox"
+				bind:checked={decisionUseProxy}
+			/>
+			<label for="decision-use-proxy" class="muted"
+				>通过内置软件通道转发（浏览器直连被 CORS 拦截时勾选）</label
+			>
+		</div>
+		<div class="grid-2">
+			<div class="field">
+				<label for="decision-api-key">API Key</label>
+				<input
+					id="decision-api-key"
+					class="input"
+					type="password"
+					bind:value={decisionApiKey}
+					placeholder="ts_..."
+				/>
+			</div>
+			<div class="field">
+				<label for="decision-model">模型</label>
+				<input
+					id="decision-model"
+					class="input"
+					bind:value={decisionModel}
+					placeholder={DEFAULT_DECISION_MODEL_CONFIG.model}
+				/>
+			</div>
+		</div>
+		<div class="field">
+			<label for="decision-threshold">补执行阈值：{Math.round(decisionThreshold * 100)}%</label>
+			<input
+				id="decision-threshold"
+				type="range"
+				min="0.1"
+				max="0.9"
+				step="0.05"
+				bind:value={decisionThreshold}
+				style="width: 100%;"
+			/>
+			<p class="muted" style="margin-top: 2px;">
+				决策模型判定「需要同步」的概率达到阈值时，才进入状态补执行。
+			</p>
+		</div>
+		<p class="muted" style="margin: 0;">
+			在 console.typesafe.ai 创建 Key；未配置 Key 或请求失败时按保守策略补执行，不会吞掉状态变更。
+		</p>
+	</div>
+
+	<div class="card">
 		<h3 class="card-title">网络搜索</h3>
 		<p class="muted" style="margin: 0 0 10px;">
 			发送消息时可附带实时搜索结果注入上下文（Tavily / Serper / Brave）。
@@ -1208,14 +1230,14 @@
 		</div>
 		<div class="row-actions" style="margin-bottom: 10px;">
 			<input
-				id="llm-state-confirm"
+				id="decision-confirm"
 				class="checkbox"
 				type="checkbox"
-				bind:checked={llmStateConfirm}
+				bind:checked={decisionConfirm}
 				disabled={!allowAiStateTools}
 			/>
-			<label for="llm-state-confirm" class="muted"
-				>使用 LLM 状态确认（AI 未调用工具时，由另一个 LLM 判断并补执行）</label
+			<label for="decision-confirm" class="muted"
+				>决策模型补执行（AI 未调用工具时，由 Jev 判断并补执行状态变更）</label
 			>
 		</div>
 		<div class="row-actions" style="margin-bottom: 10px;">
@@ -1233,6 +1255,7 @@
 		<p class="muted" style="margin: 0;">
 			开启后，AI
 			可在剧情中自行调用工具更新状态并生成快照，你可以在版本页回溯；关闭则保持纯文本回复。
+			需要补执行时由决策模型判断，执行仍由智能体完成。
 		</p>
 	</div>
 

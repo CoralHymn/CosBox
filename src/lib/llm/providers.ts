@@ -1,4 +1,9 @@
-import { DEFAULT_LLM_CONFIG, type LlmConfig } from './types';
+import {
+	DEFAULT_DECISION_MODEL_CONFIG,
+	DEFAULT_LLM_CONFIG,
+	type DecisionModelConfig,
+	type LlmConfig
+} from './types';
 import type { WebSearchConfig } from '../search/types';
 
 /** 主流模型服务商预设。 */
@@ -372,12 +377,19 @@ export interface LlmConfigPatch {
 	compactThreshold?: number;
 	stream?: boolean;
 	allowAiStateTools?: boolean;
+	/** 决策模型补执行开关（旧存档字段 llmStateConfirm 自动迁移）。 */
+	decisionConfirm?: boolean;
+	/** 旧版 LLM 状态确认开关。 */
 	llmStateConfirm?: boolean;
+	decisionModel?: Partial<DecisionModelConfig>;
 	textToolFallback?: boolean;
 	memoryEnabled?: boolean;
 	memoryInjectLimit?: number;
 	memoryAutoExtract?: boolean;
 	modelServices?: LlmConfig['modelServices'];
+	agentModelId?: string;
+	agentModelEntryId?: string;
+	/** 旧版三角色绑定字段：读取时迁移到智能体。 */
 	chatModelId?: string;
 	chatModelEntryId?: string;
 	judgeModelId?: string;
@@ -401,6 +413,18 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		maxResults: savedSearch?.maxResults ?? defaults.webSearch.maxResults
 	};
 	const endpoint = upgradeLegacyProxyBaseUrl(partial.baseUrl ?? defaults.baseUrl, partial.useProxy);
+	const decisionDefaults = DEFAULT_DECISION_MODEL_CONFIG;
+	const savedDecision = partial.decisionModel;
+	const decisionModel: DecisionModelConfig = {
+		provider: 'jev',
+		baseUrl:
+			(savedDecision?.baseUrl ?? decisionDefaults.baseUrl).trim().replace(/\/+$/, '') ||
+			decisionDefaults.baseUrl,
+		useProxy: savedDecision?.useProxy ?? decisionDefaults.useProxy,
+		apiKey: savedDecision?.apiKey ?? decisionDefaults.apiKey,
+		model: savedDecision?.model?.trim() || decisionDefaults.model,
+		threshold: clampUnit(savedDecision?.threshold ?? decisionDefaults.threshold)
+	};
 	return {
 		provider: partial.provider ?? defaults.provider,
 		providerId: partial.providerId ?? CUSTOM_PROVIDER_ID,
@@ -413,20 +437,25 @@ export function normalizeLlmConfig(partial: LlmConfigPatch): LlmConfig {
 		modelContextWindow: partial.modelContextWindow ?? defaults.modelContextWindow,
 		autoCompact: partial.autoCompact ?? defaults.autoCompact ?? true,
 		compactThreshold: partial.compactThreshold ?? defaults.compactThreshold ?? 0.8,
-		stream: partial.stream ?? defaults.stream ?? false,
-		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? false,
-		llmStateConfirm: partial.llmStateConfirm ?? defaults.llmStateConfirm ?? false,
+		stream: partial.stream ?? defaults.stream ?? true,
+		allowAiStateTools: partial.allowAiStateTools ?? defaults.allowAiStateTools ?? true,
+		decisionConfirm: partial.decisionConfirm ?? partial.llmStateConfirm ?? false,
+		decisionModel,
 		textToolFallback: partial.textToolFallback ?? defaults.textToolFallback ?? true,
 		memoryEnabled: partial.memoryEnabled ?? defaults.memoryEnabled ?? true,
 		memoryInjectLimit: partial.memoryInjectLimit ?? defaults.memoryInjectLimit ?? 5,
 		memoryAutoExtract: partial.memoryAutoExtract ?? defaults.memoryAutoExtract ?? false,
 		modelServices: Array.isArray(partial.modelServices) ? [...partial.modelServices] : [],
-		chatModelId: partial.chatModelId ?? '',
-		chatModelEntryId: partial.chatModelEntryId ?? '',
-		judgeModelId: partial.judgeModelId ?? '',
-		judgeModelEntryId: partial.judgeModelEntryId ?? '',
-		generatorModelId: partial.generatorModelId ?? '',
-		generatorModelEntryId: partial.generatorModelEntryId ?? '',
+		agentModelId: partial.agentModelId ?? partial.chatModelId ?? '',
+		agentModelEntryId: partial.agentModelEntryId ?? partial.chatModelEntryId ?? '',
 		webSearch: search
 	};
+}
+
+/** 决策阈值规范到 0-1；非法值回退默认。 */
+function clampUnit(value: number): number {
+	if (!Number.isFinite(value)) {
+		return DEFAULT_DECISION_MODEL_CONFIG.threshold;
+	}
+	return Math.min(1, Math.max(0, value));
 }

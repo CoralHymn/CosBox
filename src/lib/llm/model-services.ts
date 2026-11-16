@@ -1,13 +1,9 @@
 import { newId } from '../utils/id';
 import { CUSTOM_PROVIDER_ID, upgradeLegacyProxyBaseUrl } from './providers';
-import type { LlmConfig, ModelEntry, ModelRole, ModelService } from './types';
+import type { LlmConfig, ModelEntry, ModelService } from './types';
 
 /** 模型服务角色的中文标签（设置页分配区展示）。 */
-export const MODEL_ROLE_LABELS: Record<ModelRole, string> = {
-	chat: '对话模型',
-	judge: '状态判断模型',
-	generator: '生成模型'
-};
+export const AGENT_MODEL_LABEL = '智能体';
 
 /** 模型条目草稿：编辑表单里的一行模型。 */
 export interface ModelEntryDraft {
@@ -94,28 +90,6 @@ export function normalizeModelService(draft: ModelServiceDraft): ModelService {
 	};
 }
 
-/** 取某个角色绑定的模型服务 id。 */
-export function modelServiceIdForRole(config: LlmConfig, role: ModelRole): string {
-	if (role === 'chat') {
-		return config.chatModelId ?? '';
-	}
-	if (role === 'judge') {
-		return config.judgeModelId ?? '';
-	}
-	return config.generatorModelId ?? '';
-}
-
-/** 取某个角色在服务下绑定的模型条目 id。 */
-export function modelEntryIdForRole(config: LlmConfig, role: ModelRole): string {
-	if (role === 'chat') {
-		return config.chatModelEntryId ?? '';
-	}
-	if (role === 'judge') {
-		return config.judgeModelEntryId ?? '';
-	}
-	return config.generatorModelEntryId ?? '';
-}
-
 /** 在服务下按 id 查模型条目；缺省返回第一条。 */
 export function findModelEntry(service: ModelService, entryId: string): ModelEntry | undefined {
 	const entries = service.models ?? [];
@@ -129,16 +103,16 @@ export function findModelService(config: LlmConfig, id: string): ModelService | 
 }
 
 /**
- * 按角色解析出真正用于请求的配置：
- * 角色绑定的服务存在时，用该服务 provider/key 与绑定的模型条目（model/窗口/maxTokens）覆盖主配置；
+ * 解析智能体真正用于请求的配置：
+ * 绑定的服务存在时，用该服务 provider/key 与绑定的模型条目（model/窗口/maxTokens）覆盖主配置；
  * 未绑定或服务缺失时回退主配置（老存档兼容）。
  */
-export function resolveServiceConfig(config: LlmConfig, role: ModelRole): LlmConfig {
-	const service = findModelService(config, modelServiceIdForRole(config, role));
+export function resolveServiceConfig(config: LlmConfig): LlmConfig {
+	const service = findModelService(config, config.agentModelId ?? '');
 	if (service === undefined) {
 		return config;
 	}
-	const entry = findModelEntry(service, modelEntryIdForRole(config, role));
+	const entry = findModelEntry(service, config.agentModelEntryId ?? '');
 	if (entry === undefined) {
 		return config;
 	}
@@ -157,7 +131,7 @@ export function resolveServiceConfig(config: LlmConfig, role: ModelRole): LlmCon
 
 /**
  * 迁移/自愈：老存档没有 modelServices 时，用主配置生成一条「默认模型」服务，
- * 三个角色都指向它；角色 id 缺失时回退到第一条服务。返回新配置对象。
+ * 智能体指向它；绑定 id 缺失时回退到第一条服务。返回新配置对象。
  */
 export function ensureModelServiceBindings(config: LlmConfig): LlmConfig {
 	const services = [...(config.modelServices ?? [])];
@@ -232,18 +206,12 @@ export function ensureModelServiceBindings(config: LlmConfig): LlmConfig {
 		}
 		return service?.models[0]?.id ?? firstEntryId;
 	};
-	const chatService = resolveId(config.chatModelId);
-	const judgeService = resolveId(config.judgeModelId);
-	const generatorService = resolveId(config.generatorModelId);
+	const agentService = resolveId(config.agentModelId);
 	return {
 		...config,
 		modelServices: migratedServices,
-		chatModelId: chatService,
-		chatModelEntryId: resolveEntryId(chatService, config.chatModelEntryId),
-		judgeModelId: judgeService,
-		judgeModelEntryId: resolveEntryId(judgeService, config.judgeModelEntryId),
-		generatorModelId: generatorService,
-		generatorModelEntryId: resolveEntryId(generatorService, config.generatorModelEntryId)
+		agentModelId: agentService,
+		agentModelEntryId: resolveEntryId(agentService, config.agentModelEntryId)
 	};
 }
 

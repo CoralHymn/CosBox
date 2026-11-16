@@ -31,7 +31,8 @@ OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、智
 百度千帆、腾讯混元、零一万物、MiniMax、SiliconFlow、Mistral、xAI Grok、Groq、Cerebras、
 OpenRouter、OpenCode GO、OpenCode Zen、Command Code GOAT、Together AI、Ollama、LiteLLM Proxy、vLLM、Azure OpenAI。
 选一个预设就自动填好兼容端点和常用模型候选；每个服务能挂多个模型，Key 只填一次，
-按「对话 / 状态判断 / 生成」三个角色分别绑定；也可以选「自定义」填任意 OpenAI-compatible 端点。
+统一绑定为「智能体」（对话与地点/衣柜/日程生成共用）；也可以选「自定义」填任意 OpenAI-compatible 端点。
+状态同步判断交给 TypeSafe Jev 决策模型（System One），只返回校准概率，不消耗 LLM token。
 内置演示（离线）同样能增删模型，误删后在「添加模型服务」里选回它即可直接保存。
 
 有些端点不允许浏览器 CORS 直连（如 opencode.ai：OPTIONS 预检直接 404，直连会 `Failed to fetch`）。
@@ -51,24 +52,24 @@ macOS / iOS 包无法在 Windows 构建，GitHub Actions 方案见 [APPLE_BUILD.
 
 ## 脚本
 
-| 命令                        | 说明                                          |
-| --------------------------- | --------------------------------------------- |
-| `npm run dev`               | 开发服务器（含首屏预热，见 vite.config.ts）   |
-| `npm run build` / `preview` | 构建 / 预览产物                               |
-| `npm run check`             | svelte-check 类型与诊断                       |
-| `npm run lint` / `format`   | ESLint / Prettier                             |
-| `npm run format:check`      | Prettier 检查                                 |
-| `npm test` / `test:watch`   | Vitest 单元测试                               |
-| `npm run test:coverage`     | 覆盖率（核心层语句/行/函数 100%，分支 ≥90%）  |
-| `npm run test:server`       | 同步服务器单测（node --test，多工作区分槽）   |
-| `npm run test:e2e`          | Playwright 端到端测试                         |
-| `npm run tauri dev`         | Tauri 桌面开发壳（Windows）                   |
-| `npm run tauri build`       | 打包 Windows 安装包（NSIS / MSI，带更新签名） |
-| `npm run tauri android dev` | Android 开发（需 adb 连接真机/模拟器）        |
-| `npm run tauri android build` | Android 发布构建（APK / AAB）               |
-| `dev.bat`                   | Windows 下快捷启动开发服务器                  |
-| `pack.bat`                  | 版本一致性检查 + 桌面打包（需签名密钥）       |
-| `check-version.bat`         | 校验四处版本号一致（package.json / Cargo.toml / tauri.conf.json / updater.ts） |
+| 命令                          | 说明                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `npm run dev`                 | 开发服务器（含首屏预热，见 vite.config.ts）                                    |
+| `npm run build` / `preview`   | 构建 / 预览产物                                                                |
+| `npm run check`               | svelte-check 类型与诊断                                                        |
+| `npm run lint` / `format`     | ESLint / Prettier                                                              |
+| `npm run format:check`        | Prettier 检查                                                                  |
+| `npm test` / `test:watch`     | Vitest 单元测试                                                                |
+| `npm run test:coverage`       | 覆盖率（核心层语句/行/函数 100%，分支 ≥90%）                                   |
+| `npm run test:server`         | 同步服务器单测（node --test，多工作区分槽）                                    |
+| `npm run test:e2e`            | Playwright 端到端测试                                                          |
+| `npm run tauri dev`           | Tauri 桌面开发壳（Windows）                                                    |
+| `npm run tauri build`         | 打包 Windows 安装包（NSIS / MSI，带更新签名）                                  |
+| `npm run tauri android dev`   | Android 开发（需 adb 连接真机/模拟器）                                         |
+| `npm run tauri android build` | Android 发布构建（APK / AAB）                                                  |
+| `dev.bat`                     | Windows 下快捷启动开发服务器                                                   |
+| `pack.bat`                    | 版本一致性检查 + 桌面打包（需签名密钥）                                        |
+| `check-version.bat`           | 校验四处版本号一致（package.json / Cargo.toml / tauri.conf.json / updater.ts） |
 
 ## 功能总览
 
@@ -85,7 +86,9 @@ macOS / iOS 包无法在 Windows 构建，GitHub Actions 方案见 [APPLE_BUILD.
 
 - 提示词独立标签页：系统提示词（回复规则 / 破甲词）、人物提示词、用户提示词、世界观提示词、
   风格提示词五段分开编辑，按顺序组装进系统消息；原「设置 → 角色档案 → 系统提示」已迁移到该页。
-- 模型服务管理：多服务多模型、Key 只填一次、对话/状态判断/生成三角色绑定、模型列表拉取与连接测试。
+- 模型服务管理：多服务多模型、Key 只填一次、智能体统一绑定、模型列表拉取与连接测试；
+  状态补执行由 TypeSafe Jev 决策模型判断。
+- 默认开启流式输出、AI 自主状态工具与「低多边形星球」官方背景。
 - Context Pipeline：状态摘要（穿着按槽位带标签、空槽位显式标注「未穿」）、World Info 关键词命中、
   长期记忆召回、阈值触发 LLM 摘要压缩（最近 20 条原样保留）、网络搜索注入。
 - 流式输出：思考过程实时展示（`reasoning_content`，默认收起可展开）、生成可打断（发送/停止同按钮）、

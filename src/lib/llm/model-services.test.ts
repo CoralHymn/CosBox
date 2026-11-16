@@ -4,8 +4,6 @@ import {
 	ensureModelServiceBindings,
 	findModelEntry,
 	findModelService,
-	modelEntryIdForRole,
-	modelServiceIdForRole,
 	normalizeModelEntry,
 	normalizeModelService,
 	parseBindingValue,
@@ -169,10 +167,10 @@ describe('resolveServiceConfig', () => {
 					]
 				})
 			],
-			judgeModelId: 'cheap',
-			judgeModelEntryId: 'k3'
+			agentModelId: 'cheap',
+			agentModelEntryId: 'k3'
 		};
-		const resolved = resolveServiceConfig(config, 'judge');
+		const resolved = resolveServiceConfig(config);
 		expect(resolved.providerId).toBe('moonshot');
 		expect(resolved.baseUrl).toBe('https://api.moonshot.cn/v1');
 		expect(resolved.apiKey).toBe('cheap-key');
@@ -196,10 +194,10 @@ describe('resolveServiceConfig', () => {
 					models: [{ id: 'm', model: 'kimi-k2.6' }]
 				})
 			],
-			chatModelId: 'go',
-			chatModelEntryId: 'm'
+			agentModelId: 'go',
+			agentModelEntryId: 'm'
 		};
-		const resolved = resolveServiceConfig(config, 'chat');
+		const resolved = resolveServiceConfig(config);
 		expect(resolved.baseUrl).toBe('https://opencode.ai/zen/go/v1');
 		expect(resolved.useProxy).toBe(true);
 	});
@@ -216,35 +214,32 @@ describe('resolveServiceConfig', () => {
 					models: [{ id: 'only', model: 'm' }]
 				})
 			],
-			chatModelId: 's',
-			chatModelEntryId: ''
+			agentModelId: 's',
+			agentModelEntryId: ''
 		};
-		const resolved = resolveServiceConfig(config, 'chat');
+		const resolved = resolveServiceConfig(config);
 		expect(resolved.model).toBe('m');
 		expect(resolved.modelContextWindow).toBe(256_000);
 		expect(resolved.maxTokens).toBe(4096);
 	});
 
-	it('角色未绑定或服务/条目缺失时回退主配置', () => {
-		const unbound = resolveServiceConfig(BASE, 'generator');
+	it('智能体未绑定或服务/条目缺失时回退主配置', () => {
+		const unbound = resolveServiceConfig(BASE);
 		expect(unbound.model).toBe(BASE.model);
 		expect(unbound.apiKey).toBe(BASE.apiKey);
-		const missing = resolveServiceConfig({ ...BASE, chatModelId: 'missing' }, 'chat');
+		const missing = resolveServiceConfig({ ...BASE, agentModelId: 'missing' });
 		expect(missing.model).toBe(BASE.model);
-		const noEntry = resolveServiceConfig(
-			{
-				...BASE,
-				modelServices: [service({ models: [] })],
-				chatModelId: 's1'
-			},
-			'chat'
-		);
+		const noEntry = resolveServiceConfig({
+			...BASE,
+			modelServices: [service({ models: [] })],
+			agentModelId: 's1'
+		});
 		expect(noEntry.model).toBe(BASE.model);
 	});
 });
 
 describe('ensureModelServiceBindings', () => {
-	it('老存档无服务时生成「默认模型」并绑定三个角色与条目', () => {
+	it('老存档无服务时生成「默认模型」并绑定智能体与条目', () => {
 		const migrated = ensureModelServiceBindings(BASE);
 		expect(migrated.modelServices).toHaveLength(1);
 		const service = migrated.modelServices![0]!;
@@ -253,10 +248,8 @@ describe('ensureModelServiceBindings', () => {
 		expect(service.providerId).toBe('deepseek');
 		expect(service.apiKey).toBe('main-key');
 		expect(service.models[0]!.model).toBe('deepseek-v4-flash');
-		expect(migrated.chatModelId).toBe('default');
-		expect(migrated.chatModelEntryId).toBe(service.models[0]!.id);
-		expect(migrated.judgeModelId).toBe('default');
-		expect(migrated.generatorModelId).toBe('default');
+		expect(migrated.agentModelId).toBe('default');
+		expect(migrated.agentModelEntryId).toBe(service.models[0]!.id);
 	});
 
 	it('已存服务的旧式 /llm-proxy 相对地址在自愈时升级', () => {
@@ -267,7 +260,7 @@ describe('ensureModelServiceBindings', () => {
 		const migrated = ensureModelServiceBindings({
 			...BASE,
 			modelServices: [legacy],
-			chatModelId: 's1'
+			agentModelId: 's1'
 		});
 		const upgraded = migrated.modelServices![0]!;
 		expect(upgraded.baseUrl).toBe('https://opencode.ai/zen/go/v1');
@@ -289,43 +282,25 @@ describe('ensureModelServiceBindings', () => {
 		const migrated = ensureModelServiceBindings({
 			...BASE,
 			modelServices: [legacy],
-			chatModelId: 's1'
+			agentModelId: 's1'
 		});
 		expect(migrated.modelServices![0]!.models).toHaveLength(1);
 		expect(migrated.modelServices![0]!.models[0]!.model).toBe('deepseek-v4-pro');
-		expect(migrated.chatModelEntryId).toBe(migrated.modelServices![0]!.models[0]!.id);
+		expect(migrated.agentModelEntryId).toBe(migrated.modelServices![0]!.models[0]!.id);
 	});
 
 	it('角色条目 id 缺失或不存在时回退该服务第一条', () => {
 		const migrated = ensureModelServiceBindings({
 			...BASE,
 			modelServices: [service()],
-			chatModelId: 's1',
-			chatModelEntryId: 'missing'
+			agentModelId: 's1',
+			agentModelEntryId: 'missing'
 		});
-		expect(migrated.chatModelEntryId).toBe('m1');
+		expect(migrated.agentModelEntryId).toBe('m1');
 	});
 });
 
 describe('helpers', () => {
-	it('modelServiceIdForRole / modelEntryIdForRole 按角色返回绑定 id', () => {
-		const config = {
-			...BASE,
-			chatModelId: 'c',
-			chatModelEntryId: 'cm',
-			judgeModelId: 'j',
-			judgeModelEntryId: 'jm',
-			generatorModelId: 'g',
-			generatorModelEntryId: 'gm'
-		};
-		expect(modelServiceIdForRole(config, 'chat')).toBe('c');
-		expect(modelEntryIdForRole(config, 'chat')).toBe('cm');
-		expect(modelServiceIdForRole(config, 'judge')).toBe('j');
-		expect(modelEntryIdForRole(config, 'judge')).toBe('jm');
-		expect(modelServiceIdForRole(config, 'generator')).toBe('g');
-		expect(modelEntryIdForRole(config, 'generator')).toBe('gm');
-	});
-
 	it('findModelService / findModelEntry 查找与首条回退', () => {
 		const modelService = service();
 		const config = { ...BASE, modelServices: [modelService] };

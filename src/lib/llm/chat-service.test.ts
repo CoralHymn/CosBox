@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { addMinutes, applyStateDelta, createInitialState } from '../core/state';
 import type { ChatMessageView, StatePatch } from '../core/types';
 import type { ContextPipelineInput } from '../context/pipeline';
@@ -12,7 +12,12 @@ import {
 	type CompactionOptions
 } from './chat-service';
 import { STATE_TOOLS, type StateToolContext } from './state-tools';
-import type { ChatMessage, LlmClient, LlmConfig } from './types';
+import {
+	DEFAULT_DECISION_MODEL_CONFIG,
+	type ChatMessage,
+	type LlmClient,
+	type LlmConfig
+} from './types';
 
 const config: LlmConfig = {
 	provider: 'demo',
@@ -22,8 +27,30 @@ const config: LlmConfig = {
 	model: 'demo',
 	temperature: 1,
 	maxTokens: 100,
+	decisionModel: { ...DEFAULT_DECISION_MODEL_CONFIG, apiKey: 'ts-test' },
 	webSearch: { ...DEFAULT_WEB_SEARCH_CONFIG }
 };
+
+/** 模拟 Jev 的 System One 响应，返回可检查请求的 fetch mock。 */
+function mockJev(noul: number): ReturnType<typeof vi.fn> {
+	const fetchMock = vi.fn(
+		async () =>
+			new Response(
+				JSON.stringify({
+					model: 'jev-1.14.0',
+					answers: { state_change: { type: 'noul', noul } },
+					usage: { input_tokens: 120, output_tokens: 12 }
+				}),
+				{ status: 200, headers: { 'Content-Type': 'application/json' } }
+			)
+	);
+	vi.stubGlobal('fetch', fetchMock);
+	return fetchMock;
+}
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 describe('ChatService', () => {
 	it('组装系统消息并调用客户端，返回回复与上下文包', async () => {
@@ -776,7 +803,7 @@ describe('ChatService', () => {
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
 	});
 
-	it('LLM 状态确认：判断为 True 时补执行工具并回写反馈', async () => {
+	it('决策模型概率达标时补执行工具并回写反馈', async () => {
 		const chatWithTools = vi
 			.fn()
 			.mockResolvedValueOnce({ content: '（笑）嗯。', toolCalls: [] })
@@ -785,11 +812,11 @@ describe('ChatService', () => {
 				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
 			})
 			.mockResolvedValueOnce({ content: '已完成。', toolCalls: [] });
-		const chat = vi.fn().mockResolvedValueOnce({ content: 'True', toolCalls: [] });
-		const client: LlmClient = { chat, chatWithTools };
+		const fetchMock = mockJev(0.9);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const ctx = makeToolContext();
 		const service = new ChatService(client);
-		const { reply, executedTools, rounds, judgeDebug } = await service.generateReply(
+		const { reply, executedTools, rounds, decisionDebug } = await service.generateReply(
 			{
 				state: createInitialState(),
 				conversation: [
@@ -799,38 +826,42 @@ describe('ChatService', () => {
 				worldInfo: []
 			},
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableDecisionConfirm: true }
 		);
-		expect(judgeDebug?.needsTool).toBe(true);
-		expect(judgeDebug?.output).toBe('True');
-		expect(judgeDebug?.confirmation?.executed.map((tool) => tool.name)).toEqual(['advance_time']);
+		expect(decisionDebug?.needsTool).toBe(true);
+		expect(decisionDebug?.probability).toBe(0.9);
+		expect(decisionDebug?.confirmation?.executed.map((tool) => tool.name)).toEqual([
+			'advance_time'
+		]);
 		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
 		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 9, minute: 0 });
 		expect(rounds[0]!.tools[0]!.output).toContain('时间推进到 周一 09:00');
 		expect(reply).toBe('（笑）嗯。');
-		// 判断 LLM 收到的是系统提示 + 最近对话载荷
-		const judgeMessages = chat.mock.calls[0]![0] as ChatMessage[];
-		expect(judgeMessages[0]!.content).toContain('json 格式');
-		expect(judgeMessages[0]!.content).toContain('{"needsTool": true}');
+		// 决策模型收到的是当前状态 + 最近一轮对话载荷
+		const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string) as {
+			state: string;
+		};
+		expect(body.state).toContain('【最近用户发言】');
+		expect(body.state).toContain('过了一段时间');
 	});
 
-	it('LLM 状态确认：判断为 False 时不执行工具', async () => {
+	it('决策模型概率低于阈值时不执行工具', async () => {
 		const chatWithTools = vi.fn().mockResolvedValueOnce({ content: '嗯嗯。', toolCalls: [] });
-		const chat = vi.fn().mockResolvedValueOnce({ content: 'False', toolCalls: [] });
-		const client: LlmClient = { chat, chatWithTools };
+		mockJev(0.1);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const service = new ChatService(client);
-		const { executedTools, judgeDebug } = await service.generateReply(
+		const { executedTools, decisionDebug } = await service.generateReply(
 			{
 				state: createInitialState(),
 				conversation: [{ id: '1', role: 'user', content: '你好', timestamp: 1 }],
 				worldInfo: []
 			},
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableStateJudge: true }
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableDecisionConfirm: true }
 		);
 		expect(executedTools).toEqual([]);
-		expect(judgeDebug?.needsTool).toBe(false);
-		expect(judgeDebug?.confirmation).toBeUndefined();
+		expect(decisionDebug?.needsTool).toBe(false);
+		expect(decisionDebug?.confirmation).toBeUndefined();
 		expect(chatWithTools).toHaveBeenCalledTimes(1);
 	});
 
@@ -919,17 +950,17 @@ describe('ChatService', () => {
 		expect(reply).toBe('我们走。');
 	});
 
-	it('LLM 状态确认：确认模型只输出文本形式调用时经双通道执行', async () => {
+	it('决策模型判定需要后，智能体只输出文本形式调用时经双通道执行', async () => {
 		const chatWithTools = vi
 			.fn()
 			.mockResolvedValueOnce({ content: '（到了）嗯，就是这里。', toolCalls: [] })
 			.mockResolvedValueOnce({ content: '完成。goto_location(name=厕所)', toolCalls: [] })
 			.mockResolvedValueOnce({ content: '完成', toolCalls: [] });
-		const chat = vi.fn().mockResolvedValueOnce({ content: 'True', toolCalls: [] });
-		const client: LlmClient = { chat, chatWithTools };
+		mockJev(0.9);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const ctx = makeToolContext();
 		const service = new ChatService(client);
-		const { executedTools, judgeDebug } = await service.generateReply(
+		const { executedTools, decisionDebug } = await service.generateReply(
 			{
 				state: createInitialState(),
 				conversation: [
@@ -939,23 +970,24 @@ describe('ChatService', () => {
 				worldInfo: []
 			},
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableDecisionConfirm: true }
 		);
-		expect(judgeDebug?.needsTool).toBe(true);
+		expect(decisionDebug?.needsTool).toBe(true);
 		expect(executedTools.map((tool) => tool.name)).toEqual(['goto_location']);
 		expect(ctx.getState().location.name).toBe('厕所');
 	});
 
-	it('LLM 状态确认：judgeConfig 指定的独立模型配置被用于判断请求', async () => {
+	it('决策模型配置用于 Jev 请求', async () => {
 		const chatWithTools = vi.fn().mockResolvedValueOnce({ content: '嗯嗯。', toolCalls: [] });
-		const chat = vi.fn().mockResolvedValueOnce({ content: 'False', toolCalls: [] });
-		const client: LlmClient = { chat, chatWithTools };
+		const fetchMock = mockJev(0.1);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const service = new ChatService(client);
-		const judgeConfig = {
-			...config,
-			model: 'cheap-judge',
-			maxTokens: 64,
-			apiKey: 'judge-key'
+		const decisionModel = {
+			...DEFAULT_DECISION_MODEL_CONFIG,
+			baseUrl: 'https://decision.example.com',
+			apiKey: 'ts-custom',
+			model: 'jev-custom',
+			threshold: 0.7
 		};
 		await service.generateReply(
 			{
@@ -963,21 +995,21 @@ describe('ChatService', () => {
 				conversation: [{ id: '1', role: 'user', content: '你好', timestamp: 1 }],
 				worldInfo: []
 			},
-			config,
+			{ ...config, decisionModel },
 			{
 				tools: [...STATE_TOOLS],
 				toolContext: makeToolContext(),
-				enableStateJudge: true,
-				judgeConfig
+				enableDecisionConfirm: true
 			}
 		);
-		const [, judgeConfigArg] = chat.mock.calls[0]! as [ChatMessage[], typeof config];
-		expect(judgeConfigArg.model).toBe('cheap-judge');
-		expect(judgeConfigArg.maxTokens).toBe(64);
-		expect(judgeConfigArg.apiKey).toBe('judge-key');
+		const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+		expect(url).toBe('https://decision.example.com/v1/systemone');
+		expect((init.headers as Record<string, string>).Authorization).toBe('Bearer ts-custom');
+		const body = JSON.parse(init.body as string) as { model: string };
+		expect(body.model).toBe('jev-custom');
 	});
 
-	it('LLM 状态确认：判断输入使用本次回复而非上一条历史回复', async () => {
+	it('决策输入使用本次回复而非上一条历史回复', async () => {
 		const chatWithTools = vi
 			.fn()
 			.mockResolvedValueOnce({ content: '（点点头）好的。', toolCalls: [] })
@@ -986,12 +1018,8 @@ describe('ChatService', () => {
 				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
 			})
 			.mockResolvedValueOnce({ content: '完成', toolCalls: [] });
-		let judgeMessages: ChatMessage[] | undefined;
-		const chat = vi.fn(async (messages: ChatMessage[]) => {
-			judgeMessages = messages;
-			return { content: 'True', toolCalls: [] };
-		});
-		const client: LlmClient = { chat, chatWithTools };
+		const fetchMock = mockJev(0.9);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const service = new ChatService(client);
 		await service.generateReply(
 			{
@@ -1003,14 +1031,16 @@ describe('ChatService', () => {
 				worldInfo: []
 			},
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableStateJudge: true }
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableDecisionConfirm: true }
 		);
-		const payload = judgeMessages?.[1]?.content ?? '';
-		expect(payload).toContain('（点点头）好的。');
-		expect(payload).not.toContain('早前回复');
+		const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string) as {
+			state: string;
+		};
+		expect(body.state).toContain('（点点头）好的。');
+		expect(body.state).not.toContain('早前回复');
 	});
 
-	it('LLM 状态确认：原生 AI 已调用工具后，后续发言不再触发判断（两段都保留）', async () => {
+	it('原生 AI 已调用工具后，后续发言不再触发决策', async () => {
 		const chatWithTools = vi
 			.fn()
 			.mockResolvedValueOnce({
@@ -1018,23 +1048,23 @@ describe('ChatService', () => {
 				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
 			})
 			.mockResolvedValueOnce({ content: '（第二段）时间过去了。', toolCalls: [] });
-		const chat = vi.fn();
-		const client: LlmClient = { chat, chatWithTools };
+		const fetchMock = mockJev(0.9);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const ctx = makeToolContext();
 		const service = new ChatService(client);
-		const { executedTools, rounds, reply, judgeDebug } = await service.generateReply(
+		const { executedTools, rounds, reply, decisionDebug } = await service.generateReply(
 			{ state: createInitialState(), conversation: [], worldInfo: [] },
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableDecisionConfirm: true }
 		);
 		expect(executedTools.map((tool) => tool.name)).toEqual(['advance_time']);
 		expect(rounds[0]!.content).toBe('（第一段）先推进时间。');
 		expect(reply).toBe('（第二段）时间过去了。');
-		expect(judgeDebug).toBeNull();
-		expect(chat).not.toHaveBeenCalled();
+		expect(decisionDebug).toBeNull();
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it('LLM 状态确认：判断模型因安全理由拒绝时仍补执行（泳衣场景）', async () => {
+	it('决策模型请求失败时仍保守补执行（泳衣场景）', async () => {
 		const chatWithTools = vi
 			.fn()
 			.mockResolvedValueOnce({ content: '（点点头）换好了泳衣。', toolCalls: [] })
@@ -1043,13 +1073,12 @@ describe('ChatService', () => {
 				toolCalls: [{ id: 'c1', name: 'set_outfit', arguments: { slot: 'top', item: '黑色卫衣' } }]
 			})
 			.mockResolvedValueOnce({ content: '已同步。', toolCalls: [] });
-		const chat = vi
-			.fn()
-			.mockResolvedValueOnce({ content: '我无法判断，这涉及隐私', toolCalls: [] });
-		const client: LlmClient = { chat, chatWithTools };
+		const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }));
+		vi.stubGlobal('fetch', fetchMock);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const ctx = makeToolContext();
 		const service = new ChatService(client);
-		const { executedTools, judgeDebug } = await service.generateReply(
+		const { executedTools, decisionDebug } = await service.generateReply(
 			{
 				state: createInitialState(),
 				conversation: [
@@ -1065,14 +1094,14 @@ describe('ChatService', () => {
 				worldInfo: []
 			},
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: ctx, enableStateJudge: true }
+			{ tools: [...STATE_TOOLS], toolContext: ctx, enableDecisionConfirm: true }
 		);
-		expect(judgeDebug?.needsTool).toBe(true);
-		expect(judgeDebug?.output).toBe('我无法判断，这涉及隐私');
+		expect(decisionDebug?.needsTool).toBe(true);
+		expect(decisionDebug?.source).toBe('error');
 		expect(executedTools.map((tool) => tool.name)).toEqual(['set_outfit']);
 	});
 
-	it('LLM 状态确认：主循环已执行工具时不重复判断', async () => {
+	it('主循环已执行工具时不重复决策', async () => {
 		const chatWithTools = vi
 			.fn()
 			.mockResolvedValueOnce({
@@ -1080,28 +1109,25 @@ describe('ChatService', () => {
 				toolCalls: [{ id: 'c1', name: 'goto_location', arguments: { name: '食堂' } }]
 			})
 			.mockResolvedValueOnce({ content: '我们到了。', toolCalls: [] });
-		const chat = vi.fn();
-		const client: LlmClient = { chat, chatWithTools };
+		const fetchMock = mockJev(0.9);
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const service = new ChatService(client);
-		const { executedTools, judgeDebug } = await service.generateReply(
+		const { executedTools, decisionDebug } = await service.generateReply(
 			{
 				state: createInitialState(),
 				conversation: [{ id: '1', role: 'user', content: '去食堂', timestamp: 1 }],
 				worldInfo: []
 			},
 			config,
-			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableStateJudge: true }
+			{ tools: [...STATE_TOOLS], toolContext: makeToolContext(), enableDecisionConfirm: true }
 		);
 		expect(executedTools.map((tool) => tool.name)).toEqual(['goto_location']);
-		expect(judgeDebug).toBeNull();
-		expect(chat).not.toHaveBeenCalled();
+		expect(decisionDebug).toBeNull();
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it('手动状态确认：判断为 True 时补执行工具并返回反馈', async () => {
-		const chat = vi.fn<LlmClient['chat']>(async () => ({
-			content: '{"needsTool": true}',
-			toolCalls: []
-		}));
+	it('手动状态补执行：决策为需要时补执行工具并返回反馈', async () => {
+		const fetchMock = mockJev(0.9);
 		const chatWithTools = vi
 			.fn()
 			.mockResolvedValueOnce({
@@ -1109,7 +1135,7 @@ describe('ChatService', () => {
 				toolCalls: [{ id: 'c1', name: 'advance_time', arguments: { minutes: 60 } }]
 			})
 			.mockResolvedValueOnce({ content: '完成', toolCalls: [] });
-		const client: LlmClient = { chat, chatWithTools };
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const ctx = makeToolContext();
 		const service = new ChatService(client);
 		const result = await service.confirmStateForTurn({
@@ -1123,15 +1149,15 @@ describe('ChatService', () => {
 		expect(result.executed.map((tool) => tool.name)).toEqual(['advance_time']);
 		expect(ctx.getState().schedule.time).toEqual({ day: 0, hour: 9, minute: 0 });
 		expect(result.debug?.needsTool).toBe(true);
+		expect(result.debug?.source).toBe('jev');
 		expect(result.rounds[0]!.tools[0]!.name).toBe('advance_time');
-		// 判断请求走 JSON 模式。
-		expect(chat.mock.calls[0]![4]).toEqual({ jsonMode: true });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it('手动状态确认：判断为 False 时不执行工具', async () => {
-		const chat = vi.fn(async () => ({ content: '{"needsTool": false}', toolCalls: [] }));
+	it('手动状态补执行：决策为不需要时不执行工具', async () => {
+		mockJev(0.1);
 		const chatWithTools = vi.fn();
-		const client: LlmClient = { chat, chatWithTools };
+		const client: LlmClient = { chat: vi.fn(), chatWithTools };
 		const service = new ChatService(client);
 		const result = await service.confirmStateForTurn({
 			state: createInitialState(),
@@ -1146,7 +1172,8 @@ describe('ChatService', () => {
 		expect(chatWithTools).not.toHaveBeenCalled();
 	});
 
-	it('手动状态确认：未提供工具时直接返回空结果', async () => {
+	it('手动状态补执行：未提供工具时直接返回空结果', async () => {
+		const fetchMock = mockJev(0.9);
 		const chat = vi.fn();
 		const service = new ChatService({ chat });
 		const result = await service.confirmStateForTurn({
@@ -1160,6 +1187,7 @@ describe('ChatService', () => {
 		expect(result.executed).toEqual([]);
 		expect(result.debug).toBeNull();
 		expect(chat).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('调试视图携带本次实际请求参数', async () => {

@@ -61,9 +61,9 @@
 	import { findProviderPreset } from '../lib/llm/providers';
 	import { resolveServiceConfig } from '../lib/llm/model-services';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
-	import type { JudgeDebugView } from '../lib/llm/state-judge';
+	import type { DecisionDebugView } from '../lib/llm/state-decision';
 	import { STATE_TOOLS, isToolErrorOutput, type ExecutedToolCall } from '../lib/llm/state-tools';
-	import type { LlmConfig, ModelRole, ToolCall, TokenUsage } from '../lib/llm/types';
+	import type { LlmConfig, ToolCall, TokenUsage } from '../lib/llm/types';
 	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
 	import type { SyncSettings } from '../lib/sync/types';
 	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
@@ -249,18 +249,18 @@
 	let recentLog = $state('');
 	/** 本次发送是否发生过流式输出（决定完成后是否需要补记未流式的正文）。 */
 	let streamedAny = false;
-	/** 最近一次 LLM 状态判断的调试视图（开发者模式查看）。 */
-	let lastJudgeDebug = $state<JudgeDebugView | null>(null);
+	/** 最近一次决策模型判断的调试视图（开发者模式查看）。 */
+	let lastDecisionDebug = $state<DecisionDebugView | null>(null);
 
-	/** 按角色解析出实际请求配置：角色绑定服务优先，未绑定/服务缺失时回退主配置。 */
-	function roleConfig(role: ModelRole): LlmConfig {
-		return resolveServiceConfig(settings.config, role);
+	/** 解析智能体实际请求配置：绑定服务优先，未绑定/服务缺失时回退主配置。 */
+	function agentConfig(): LlmConfig {
+		return resolveServiceConfig(settings.config);
 	}
-	/** 当前实际使用的对话模型配置（上下文用量面板按它展示模型/窗口/费用）。 */
-	const activeChatConfig = $derived(roleConfig('chat'));
+	/** 当前实际使用的智能体配置（上下文用量面板按它展示模型/窗口/费用）。 */
+	const activeChatConfig = $derived(agentConfig());
 
 	const providerLabel = $derived.by(() => {
-		const chat = roleConfig('chat');
+		const chat = agentConfig();
 		if (chat.provider === 'demo') {
 			return '演示模式';
 		}
@@ -417,7 +417,7 @@
 				: { bundle: null, usage: null, compaction: null, keptRecent: 0 };
 		compactState = restored?.compaction ?? null;
 		debugPrompt = null;
-		lastJudgeDebug = null;
+		lastDecisionDebug = null;
 		lastAutoExtractCount = 0;
 		streamingSegments = null;
 		streamingPhase = null;
@@ -646,7 +646,7 @@
 			...promptOptionsFromProfile(),
 			...(searchResults !== undefined ? { searchResults } : {})
 		};
-		const chatConfig = roleConfig('chat');
+		const chatConfig = agentConfig();
 		const service = new ChatService(chatConfig.provider === 'demo' ? demoClient : openAiClient);
 		const contextWindow = resolveContextWindow(chatConfig.modelContextWindow, chatConfig.model);
 		const compactionOptions =
@@ -666,7 +666,7 @@
 			compaction,
 			thinking,
 			finishReason,
-			judgeDebug,
+			decisionDebug,
 			rounds,
 			replySegments,
 			executedTools
@@ -726,14 +726,13 @@
 					update: (patch, metadata) => session.update(patch, metadata),
 					advanceTime: (minutes) => session.advanceTime(minutes)
 				},
-				enableStateJudge: settings.config.llmStateConfirm === true,
-				judgeConfig: roleConfig('judge'),
+				enableDecisionConfirm: settings.config.decisionConfirm === true,
 				...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
 			},
 			controller.signal
 		);
 		debugPrompt = debug;
-		lastJudgeDebug = judgeDebug;
+		lastDecisionDebug = decisionDebug;
 		const keptRecent = bundle.history.filter((message) => message.id !== 'context-summary').length;
 		lastContext = { bundle, usage: usage ?? null, compaction, keptRecent };
 		void persistCurrentContextUsage();
@@ -906,7 +905,7 @@
 		}
 	}
 
-	/** 手动 LLM 状态确认：对指定 assistant 消息的那一轮运行状态判断并补执行工具。 */
+	/** 手动状态补执行：把指定 assistant 消息的那一轮交给决策模型判断并补执行工具。 */
 	async function handleConfirmState(messageId: string): Promise<void> {
 		if (busy || settings.config.allowAiStateTools !== true) {
 			return;
@@ -920,17 +919,17 @@
 			.reverse()
 			.find((message) => message.role === 'user');
 		busy = true;
-		streamingPhase = '正在判断是否需要同步状态…';
+		streamingPhase = '决策模型正在判断状态…';
 		try {
 			// 用该轮发生时的状态（含世界配置覆盖）做判断，避免被后续消息污染。
 			const stateAt = await session.getStateAt(assistant.id);
-			const judgeConfig = roleConfig('judge');
-			const service = new ChatService(judgeConfig.provider === 'demo' ? demoClient : openAiClient);
+			const chatConfig = agentConfig();
+			const service = new ChatService(chatConfig.provider === 'demo' ? demoClient : openAiClient);
 			const { executed, debug } = await service.confirmStateForTurn({
 				state: stateAt,
 				lastUser,
 				lastAssistant: assistant,
-				config: judgeConfig,
+				config: chatConfig,
 				tools: [...STATE_TOOLS],
 				toolContext: {
 					getState: () => session.state,
@@ -943,7 +942,7 @@
 				onMetric: (name) => metrics.record(name),
 				textToolFallback: settings.config.textToolFallback !== false
 			});
-			lastJudgeDebug = debug;
+			lastDecisionDebug = debug;
 			// 工具反馈追加进原 AI 气泡的分段：前端可见，后续上下文展开为系统反馈。
 			if (executed.length > 0) {
 				await session.appendSegments(
@@ -957,9 +956,9 @@
 				);
 			}
 			if (executed.length === 0) {
-				toasts.push('info', 'LLM 状态判断：本轮无需变更状态');
+				toasts.push('info', '决策模型判断：本轮无需变更状态');
 			} else {
-				toasts.success(`LLM 状态判断已同步 ${executed.length} 项变更`);
+				toasts.success(`决策模型已同步 ${executed.length} 项变更`);
 			}
 		} catch (err) {
 			toasts.error(err);
@@ -989,7 +988,7 @@
 		}
 		compacting = true;
 		try {
-			const chatConfig = roleConfig('chat');
+			const chatConfig = agentConfig();
 			const service = new ChatService(chatConfig.provider === 'demo' ? demoClient : openAiClient);
 			const result = await service.compactConversation(session.conversation, chatConfig, {
 				state: compactState,
@@ -1094,7 +1093,7 @@
 		memoryExtracting = true;
 		try {
 			// 记忆由对话模型管理（生成模型仅用于地点/衣柜/日程生成）。
-			const chatConfig = roleConfig('chat');
+			const chatConfig = agentConfig();
 			const client = chatConfig.provider === 'demo' ? demoClient : openAiClient;
 			const result = await extractMemoriesFromConversation({
 				client,
@@ -1169,7 +1168,7 @@
 		memoryExtracting = true;
 		try {
 			// 记忆由对话模型管理（生成模型仅用于地点/衣柜/日程生成）。
-			const chatConfig = roleConfig('chat');
+			const chatConfig = agentConfig();
 			const client = chatConfig.provider === 'demo' ? demoClient : openAiClient;
 			const result = await extractMemoriesFromConversation({
 				client,
@@ -1236,7 +1235,7 @@
 			historyOptions: { maxMessages: Math.max(1, conversation.length) }
 		};
 		const bundle = buildContext(input);
-		const chatConfig = roleConfig('chat');
+		const chatConfig = agentConfig();
 		const notes: string[] = [];
 		if (chatConfig.autoCompact === true) {
 			notes.push('若发送时达到压缩阈值，系统消息前还会插入模型生成的上下文摘要（预览未包含）。');
@@ -1658,7 +1657,7 @@
 
 	/** AI 生成（地点/衣柜/日程）：走当前模型服务 + review_generation 审查循环。 */
 	async function handleAiGenerate(request: GenerationRequest): Promise<GenerationResult> {
-		const genConfig = roleConfig('generator');
+		const genConfig = agentConfig();
 		const service = new GeneratorService(genConfig.provider === 'demo' ? demoClient : openAiClient);
 		return service.generate(request, genConfig);
 	}
@@ -1737,7 +1736,7 @@
 		// 导入整体替换了剧情数据：压缩边界/调试视图/最近日志一并复位。
 		compactState = null;
 		debugPrompt = null;
-		lastJudgeDebug = null;
+		lastDecisionDebug = null;
 		lastAutoExtractCount = 0;
 		recentLog = '';
 		lastContext = { bundle: null, usage: null, compaction: null, keptRecent: 0 };
@@ -2043,7 +2042,7 @@
 					{searching}
 					developerMode={settings.developerMode}
 					{debugPrompt}
-					judgeDebug={lastJudgeDebug}
+					decisionDebug={lastDecisionDebug}
 					onPreview={handlePreview}
 					onSend={handleSend}
 					onEditMessage={handleEditMessage}
