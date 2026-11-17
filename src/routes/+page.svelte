@@ -94,9 +94,20 @@
 	import { WorkspaceScope } from '../lib/db/workspace-scope';
 	import { WorkspaceRegistry } from '../lib/workspace/workspace-registry';
 	import { WorkspaceService } from '../lib/workspace/workspace-service';
+	import {
+		DEMO_CHIPS,
+		DEMO_INTRO_KEY,
+		DEMO_MARKER_KEY,
+		demoChipDone,
+		ensureDemoWorkspace,
+		type DemoDockModel,
+		type DemoMarker
+	} from '../lib/workspace/demo';
 	import type { WorkspaceMeta, WorkspaceAvatar } from '../lib/workspace/types';
 	import AvatarEditor from '../lib/components/AvatarEditor.svelte';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
+	import DemoIntro from '../lib/components/DemoIntro.svelte';
+	import DemoVersionCue from '../lib/components/DemoVersionCue.svelte';
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
 	import LocationsPanel from '../lib/components/LocationsPanel.svelte';
@@ -213,6 +224,20 @@
 
 	/** 注册表与设置已加载：初始界面（工作区选择）可用。 */
 	let booted = $state(false);
+	/** 首访示例工作区 id（null = 本次运行没有示例）。 */
+	let demoId = $state<string | null>(null);
+	/** 开场介绍是否展示。 */
+	let showDemoIntro = $state(false);
+	/** 演示 Dock 最近一次状态反馈。 */
+	let demoNote = $state('');
+	/** 自动演示进行中。 */
+	let demoAutoRunning = $state(false);
+	/** 评委主动跳过演示后不再展示 Dock / 提示。 */
+	let demoDismissed = $state(false);
+	/** 演示时间线已回退。 */
+	let demoRolledBack = $state(false);
+	/** 状态变化脉冲：递增后重播预览高亮。 */
+	let demoPulse = $state(0);
 	/** 已进入某个工作区（主界面显示）；false 时显示工作区选择初始界面。 */
 	let entered = $state(false);
 	/** 正在进入/切换/创建/复制/删除工作区（禁用相关操作，防竞态）。 */
@@ -295,6 +320,47 @@
 
 	const currentWorkspaceMeta = $derived(
 		workspaceList.find((meta) => meta.id === currentWorkspaceId) ?? null
+	);
+
+	/** 当前是否处在示例工作区。 */
+	const isDemoWorkspace = $derived(demoId !== null && currentWorkspaceId === demoId);
+	/** 每一步是否已落库（只认脚本原句）。 */
+	const demoDone = $derived(demoChipDone(session.conversation));
+	const demoDoneCount = $derived(demoDone.filter(Boolean).length);
+	const demoActiveIndex = $derived(demoDone.findIndex((done) => !done));
+	/** 「回到换装前」的目标节点：换装用户消息的上一条。 */
+	const demoOutfitParentId = $derived.by(() => {
+		const outfitNode = [...session.snapshots]
+			.filter(
+				(node) =>
+					node.metadata.type === 'state' && node.metadata.desc.includes('AI 更换穿着')
+			)
+			.sort((a, b) => b.timestamp - a.timestamp)[0];
+		if (outfitNode === undefined) {
+			return null;
+		}
+		const userNode = session.snapshots.find((node) => node.id === outfitNode.parentId);
+		return userNode?.parentId ?? outfitNode.parentId;
+	});
+	/** 演示 Dock 视图模型：不在示例、已跳过或未进入主界面时为 null。 */
+	const demoDockModel: DemoDockModel | null = $derived(
+		isDemoWorkspace && entered && !demoDismissed
+			? {
+					chips: DEMO_CHIPS,
+					done: demoDone,
+					activeIndex: demoActiveIndex,
+					note: demoNote,
+					busy,
+					autoRunning: demoAutoRunning,
+					completed: demoDone.every(Boolean),
+					onPick: (text) => void handleDemoPick(text),
+					onAuto: () => void handleDemoAuto(),
+					onStopAuto: handleDemoStop,
+					onSkip: handleDemoSkip,
+					onVersions: handleDemoVersions,
+					onOwnStory: () => void handleDemoOwnStory()
+				}
+			: null
 	);
 
 	/** 移动端首屏「设置」tab 的分区入口（点击均全屏打开设置面板）。 */
@@ -492,6 +558,36 @@
 			await settings.load();
 			await metrics.load();
 			await syncService.load();
+			// 首访演示：只在没有任何用户数据时播种；老用户不受打扰。
+			// `?demo=off` 是给自动化测试/截图用的显式关闭入口，不影响正常访问。
+			const demoDisabled = new URLSearchParams(window.location.search).get('demo') === 'off';
+			const hadDemoMarker = await kv.get<DemoMarker>(DEMO_MARKER_KEY);
+			const demoWorkspaceId = demoDisabled
+				? null
+				: await ensureDemoWorkspace({
+				workspaces,
+				workspaceService,
+				settings,
+				session,
+						memories: memoryStore,
+						worldInfo,
+						kv
+					});
+			if (demoWorkspaceId !== null) {
+				demoId = demoWorkspaceId;
+				const introSeen = await kv.get<boolean>(DEMO_INTRO_KEY);
+				if (hadDemoMarker === undefined) {
+					entered = true;
+					tab = 'chat';
+					showDemoIntro = introSeen !== true;
+					demoNote = '示例剧本已就位：点下面任意一句，状态会跟着变。';
+				} else if (workspaces.getCurrentId() === demoWorkspaceId) {
+					// 刷新后仍停留在示例里：必须走 switchTo 让仓储 scope 跟上，
+					// 只设 entered 会读到默认工作区的空数据。
+					await handleEnterWorkspace(demoWorkspaceId);
+				}
+				refreshWorkspaceList();
+			}
 			session.subscribe(() => {
 				syncService.notifyChanged();
 				updateWorkspaceSummary();
@@ -1345,6 +1441,112 @@
 		}
 	}
 
+	/** 演示：点一句剧本，走一步并重播状态高亮。 */
+	async function handleDemoPick(text: string): Promise<void> {
+		if (busy || demoAutoRunning) {
+			return;
+		}
+		await handleSend(text, { search: false });
+		demoNote = DEMO_CHIPS.find((chip) => chip.text === text)?.note ?? '';
+		demoPulse += 1;
+	}
+
+	/** 演示：自动跑完剩余剧本，最后切到版本页。 */
+	async function handleDemoAuto(): Promise<void> {
+		if (busy || demoAutoRunning) {
+			return;
+		}
+		demoAutoRunning = true;
+		try {
+			for (let index = 0; index < DEMO_CHIPS.length; index += 1) {
+				if (!demoAutoRunning) {
+					return;
+				}
+				// 上一步可能仍在生成：等空闲再继续，避免按钮被 busy 吞掉。
+				while (busy) {
+					await new Promise((resolve) => setTimeout(resolve, 120));
+					if (!demoAutoRunning) {
+						return;
+					}
+				}
+				const done = demoChipDone(session.conversation);
+				if (done[index]) {
+					continue;
+				}
+				const chip = DEMO_CHIPS[index]!;
+				await handleSend(chip.text, { search: false });
+				demoNote = chip.note;
+				demoPulse += 1;
+				if (!demoAutoRunning) {
+					return;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 850));
+			}
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			if (demoAutoRunning) {
+				handleDemoVersions();
+			}
+		} finally {
+			demoAutoRunning = false;
+		}
+	}
+
+	function handleDemoStop(): void {
+		demoAutoRunning = false;
+	}
+
+	function handleDemoSkip(): void {
+		demoAutoRunning = false;
+		demoDismissed = true;
+	}
+
+	function handleDemoVersions(): void {
+		demoRolledBack = false;
+		tab = 'versions';
+	}
+
+	/** 演示：切到换装前的节点，让聊天与状态一起倒退。 */
+	async function handleDemoRollback(): Promise<void> {
+		const target = demoOutfitParentId;
+		if (target === null || busy) {
+			return;
+		}
+		try {
+			await session.checkout(target);
+			demoRolledBack = true;
+			demoPulse += 1;
+			tab = 'versions';
+			demoNote = `已回到换装前：${formatWorldTime(session.state.schedule.time)} · ${session.state.location.name}`;
+			toasts.success('已回到换装前');
+		} catch (err) {
+			toasts.error(err);
+		}
+	}
+
+	/** 演示：直接开一个空白工作区，转入正常使用。 */
+	async function handleDemoOwnStory(): Promise<void> {
+		demoAutoRunning = false;
+		let name = '我的故事';
+		let index = 2;
+		while (workspaces.getWorkspaces().some((meta) => meta.name === name)) {
+			name = `我的故事 ${index}`;
+			index += 1;
+		}
+		await handleCreateWorkspace(name);
+		demoDismissed = true;
+	}
+
+	function handleDemoIntroStart(): void {
+		showDemoIntro = false;
+		void kv.set(DEMO_INTRO_KEY, true);
+		demoNote = '从第一句开始：先问时间，再看看地点怎么变。';
+	}
+
+	function handleDemoIntroSkip(): void {
+		showDemoIntro = false;
+		void kv.set(DEMO_INTRO_KEY, true);
+	}
+
 	async function handleCheckpoint(desc: string): Promise<void> {
 		try {
 			await session.addCheckpoint(desc);
@@ -1847,6 +2049,9 @@
 </script>
 
 <div class="app" class:titlebar-mode={tauriDesktop}>
+	{#if showDemoIntro}
+		<DemoIntro onStart={handleDemoIntroStart} onSkip={handleDemoIntroSkip} />
+	{/if}
 	<!-- 主题背景图图层：图片与透明度由 JS 直接设置，不走 CSS 变量
 	     （超长 data URL 存 CSS 变量在部分浏览器会解析失败）。 -->
 	<div class="theme-backdrop" aria-hidden="true"></div>
@@ -2090,6 +2295,8 @@
 					onConfirmState={handleConfirmState}
 					onSwitchBranch={handleSwitchBranch}
 					onStop={handleStop}
+					demo={demoDockModel}
+					pulse={demoPulse}
 				/>
 			{:else if tab === 'state'}
 				<StatePanel characterState={session.state} onUpdate={handleStateUpdate} />
@@ -2125,6 +2332,15 @@
 					onImportConfig={handleImportConfig}
 				/>
 			{:else if tab === 'versions'}
+				{#if isDemoWorkspace && !demoDismissed && demoDoneCount > 0}
+					<DemoVersionCue
+						rolledBack={demoRolledBack}
+						canRollback={demoOutfitParentId !== null}
+						onRollback={() => void handleDemoRollback()}
+						onContinue={() => (tab = 'chat')}
+						onOwnStory={() => void handleDemoOwnStory()}
+					/>
+				{/if}
 				<VersionPanel
 					snapshots={session.snapshots}
 					headId={session.headId}

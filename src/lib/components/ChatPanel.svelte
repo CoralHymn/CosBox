@@ -16,6 +16,8 @@
 	import type { CompactionState } from '../llm/compaction';
 	import type { DecisionDebugView } from '../llm/state-decision';
 	import type { LlmConfig, TokenUsage } from '../llm/types';
+	import type { DemoDockModel } from '../workspace/demo';
+	import DemoDock from './DemoDock.svelte';
 	import ChatInput from './ChatInput.svelte';
 	import ContextPanel from './ContextPanel.svelte';
 	import MessageBubble from './MessageBubble.svelte';
@@ -76,6 +78,10 @@
 		onSwitchBranch: (tipId: string) => void;
 		/** 打断生成（busy 时发送按钮变为「停止」）。 */
 		onStop: () => void;
+		/** 首访演示 Dock；null 表示不在演示工作区。 */
+		demo?: DemoDockModel | null;
+		/** 演示状态脉冲：每次状态变化递增，触发预览卡片高亮。 */
+		pulse?: number;
 	}
 
 	let {
@@ -110,7 +116,9 @@
 		onRetry,
 		onConfirmState,
 		onSwitchBranch,
-		onStop
+		onStop,
+		demo = null,
+		pulse = 0
 	}: Props = $props();
 	let listEl = $state<HTMLDivElement | null>(null);
 	/** 输入框当前草稿（供预览）。 */
@@ -468,6 +476,9 @@
 				</div>
 			{/if}
 		{/if}
+		{#if demo !== null}
+			<DemoDock model={demo} />
+		{/if}
 		<ChatInput
 			disabled={busy}
 			{busy}
@@ -481,7 +492,7 @@
 		/>
 	</div>
 	<aside class="side-preview">
-		<StatePreview {characterState} />
+		<StatePreview {characterState} {pulse} />
 		<ContextPanel
 			{config}
 			{context}

@@ -97,10 +97,12 @@ export function buildDemoToolResult(
 	const thinking = demoThinking(messages);
 	const last = messages[messages.length - 1];
 	if (last?.role === 'tool') {
-		const content = buildDemoToolReply(last.content);
+		const system = messages.find((message) => message.role === 'system')?.content ?? '';
+		const content = buildDemoToolReply(last.content, system);
 		return { content, toolCalls: [], usage: demoUsage(messages, content), thinking };
 	}
-	const text = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+	const rawText = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+	const text = userVisibleText(rawText);
 	const toolCalls = pickDemoToolCall(text, tools);
 	if (toolCalls.length > 0) {
 		return { content: null, toolCalls, usage: demoUsage(messages, null), thinking };
@@ -251,7 +253,7 @@ export function demoGeneratedItems(
 /** 演示思考：仅当用户询问「在想什么/思考」时返回确定性内容，便于 e2e 断言。 */
 function demoThinking(messages: ChatMessage[]): string | undefined {
 	const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-	const text = lastUser?.content ?? '';
+	const text = userVisibleText(lastUser?.content ?? '');
 	if (/思考|在想什么|怎么想|考虑/.test(text)) {
 		return `（演示）让我先想想：对方刚说「${truncate(text, 24)}」，我应该结合当前状态回应。`;
 	}
@@ -301,18 +303,19 @@ function pickDemoToolCall(text: string, tools: readonly StateToolSchema[]): Tool
 	return [];
 }
 
-/** 根据工具结果生成确定性的演示收尾文本。 */
-function buildDemoToolReply(output: string): string {
+/** 根据工具结果生成确定性的演示收尾文本；示例场景（校庆）用更具体的台词。 */
+function buildDemoToolReply(output: string, system = ''): string {
+	const scene = system.includes('校庆') || system.includes('展板');
 	if (output.includes('已切换地点')) {
-		return '（演示模式回应）好，那我们过去吧。';
+		return scene ? '好，先去食堂。路上正好说说展板的事。' : '好，那我们过去吧。';
 	}
 	if (output.includes('时间推进')) {
-		return '（演示模式回应）时间过得真快。';
+		return scene ? '时间过得真快。再不走，食堂真要收档了。' : '时间过得真快。';
 	}
 	if (output.includes('更换为')) {
-		return '（演示模式回应）嗯，这套很适合现在。';
+		return scene ? '换了件黑色卫衣，搬展板不怕蹭脏。' : '嗯，这套很适合现在。';
 	}
-	return '（演示模式回应）好的，我知道了。';
+	return '好，我知道了。';
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -335,6 +338,16 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
+/**
+ * 取用户真正说的话：上下文管道会把本轮状态提醒以 `<system-reminder>`
+ * 追加到最后一条用户消息末尾，关键词判断不能读那段提醒，否则任何话
+ * 都会命中「时间 / 地点 / 穿着」分支。
+ */
+function userVisibleText(content: string): string {
+	const cut = content.indexOf('<system-reminder>');
+	return (cut === -1 ? content : content.slice(0, cut)).trim();
+}
+
 /** 从系统消息中提取以 label 开头的行内容。 */
 export function extractLine(systemMessage: string, label: string): string | null {
 	for (const line of systemMessage.split('\n')) {
@@ -352,25 +365,27 @@ export function extractLine(systemMessage: string, label: string): string | null
 export function buildDemoReply(messages: ChatMessage[]): string {
 	const system = messages.find((message) => message.role === 'system')?.content ?? '';
 	const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-	const text = lastUser?.content ?? '';
+	const text = userVisibleText(lastUser?.content ?? '');
 
 	if (system.includes('【网络搜索结果】')) {
 		const title = extractSearchTitle(system);
-		return `（演示模式回应）我查了一下网上的资料：${title ?? '相关内容'}。要我展开讲讲吗？`;
+		return `我查了一下：${title ?? '没找到太具体的内容'}。要展开说说吗？`;
 	}
 	if (/时间|几点|什么时候|几点了/.test(text)) {
-		const time = extractLine(system, '时间：') ?? '现在';
-		return `（演示模式回应）现在${time}。你要来找我吗？`;
+		const rawTime = extractLine(system, '时间：') ?? '现在';
+		// 状态行带「（当前活动）」后缀，口语回应里只保留时间本身。
+		const time = rawTime.replace(/（[^）]*）\s*$/, '').trim() || rawTime;
+		return `我看了一眼时间：${time}。`;
 	}
 	if (/哪里|在哪|位置|地点/.test(text)) {
 		const location = extractLine(system, '地点：') ?? '老地方';
-		return `（演示模式回应）我正在${location}，过来找我吧。`;
+		return `我在${location}，你过来吧。`;
 	}
 	if (/穿|衣服|服装|打扮/.test(text)) {
 		const outfit = extractLine(system, '穿着：') ?? '平时那套';
-		return `（演示模式回应）我今天穿着${outfit}。好看吗？`;
+		return `今天穿的是${outfit}。`;
 	}
-	return `（演示模式回应）嗯，我在听。你说「${truncate(text, 24)}」——接着说吧。`;
+	return `嗯，我在听。你说「${truncate(text, 24)}」——接着说吧。`;
 }
 
 /** 从系统消息中提取第一条网络搜索结果的标题。 */

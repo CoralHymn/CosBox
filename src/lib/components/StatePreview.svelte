@@ -6,15 +6,20 @@
 
 	interface Props {
 		characterState: CharacterState;
+		/** 演示脉冲：每次状态变化递增，重播一次高亮。 */
+		pulse?: number;
 	}
 
-	let { characterState }: Props = $props();
+	let { characterState, pulse = 0 }: Props = $props();
 
 	/** 预览与系统提示使用同一套版本规则，Web 版不显示私密槽位。 */
 	const summaryOptions = stateSummaryOptionsFor(getEditionRules());
 </script>
 
-<div class="state-preview">
+<div class="state-preview" class:pulsing={pulse > 0}>
+	{#key pulse}
+		<span class="pulse-flash" aria-hidden="true"></span>
+	{/key}
 	<p class="card-title">实时状态预览</p>
 	<p class="preview-line">
 		<span class="k">时间</span><span
@@ -40,3 +45,36 @@
 		<span class="k">日程</span><span>{summarizeSchedule(characterState.schedule)}</span>
 	</p>
 </div>
+
+<style>
+	.state-preview {
+		position: relative;
+	}
+	.pulse-flash {
+		position: absolute;
+		inset: -8px -10px;
+		border-radius: 12px;
+		pointer-events: none;
+		animation: state-flash 900ms ease-out both;
+	}
+	@keyframes state-flash {
+		0% {
+			background: rgba(60, 255, 208, 0.16);
+			box-shadow: 0 0 0 1px rgba(60, 255, 208, 0.55);
+			opacity: 0;
+		}
+		22% {
+			opacity: 1;
+		}
+		100% {
+			background: transparent;
+			box-shadow: 0 0 0 1px rgba(60, 255, 208, 0);
+			opacity: 0;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.pulse-flash {
+			animation: none;
+		}
+	}
+</style>

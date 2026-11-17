@@ -94,15 +94,36 @@ describe('buildDemoReply', () => {
 		).toContain('平时那套');
 	});
 
+	it('忽略追加的状态提醒，不把提醒里的关键词当成用户意图', () => {
+		const reply = buildDemoReply([
+			{
+				role: 'system',
+				content: ['时间：周一 08:00', '地点：学校 > 学院正门', '穿着：上衣：白色衬衫'].join(' / ')
+			},
+			{
+				role: 'user',
+				content: [
+					'你好',
+					'',
+					'<system-reminder>',
+					'本消息是状态同步提醒：时间、地点、穿着。',
+					'</system-reminder>'
+				].join(' / ')
+			}
+		]);
+		expect(reply).toContain('我在听');
+		expect(reply).not.toContain('我看了一眼时间');
+	});
+
 	it('默认回应引用用户输入并截断', () => {
 		const reply = buildDemoReply(messages('x'.repeat(40)));
-		expect(reply).toContain('演示模式回应');
+		expect(reply).toContain('我在听');
 		expect(reply).toContain('…');
 	});
 
 	it('无用户消息与空系统消息时仍安全', () => {
-		expect(buildDemoReply([])).toContain('演示模式回应');
-		expect(buildDemoReply([{ role: 'system', content: '' }])).toContain('演示模式回应');
+		expect(buildDemoReply([])).toContain('我在听');
+		expect(buildDemoReply([{ role: 'system', content: '' }])).toContain('我在听');
 	});
 });
 
@@ -110,7 +131,7 @@ describe('DemoLlmClient', () => {
 	it('chat 返回演示回应', async () => {
 		const client = new DemoLlmClient();
 		const result = await client.chat(messages('你好'), DEFAULT_LLM_CONFIG);
-		expect(result.content).toContain('演示模式回应');
+		expect(result.content).toContain('我在听');
 		expect(result.toolCalls).toEqual([]);
 		expect(result.usage).toBeDefined();
 		expect(result.usage!.promptTokens).toBeGreaterThan(0);
@@ -149,7 +170,7 @@ describe('DemoLlmClient', () => {
 		const client = new DemoLlmClient();
 		const controller = new AbortController();
 		const result = await client.chat(messages('hi'), DEFAULT_LLM_CONFIG, controller.signal);
-		expect(result.content).toContain('演示模式回应');
+		expect(result.content).toContain('我在听');
 	});
 
 	it('chatWithTools：用户想去食堂时返回 goto_location 工具调用', async () => {
@@ -184,7 +205,7 @@ describe('DemoLlmClient', () => {
 	it('chatWithTools：工具不在列表中时不触发，回退为普通演示回复', async () => {
 		const result = await buildDemoToolResult(messages('我们去食堂吧'), []);
 		expect(result.toolCalls).toEqual([]);
-		expect(result.content).toContain('演示模式回应');
+		expect(result.content).toContain('我在听');
 	});
 
 	it('chatWithTools：收到工具结果后返回确定性的收尾文本', async () => {
@@ -232,7 +253,7 @@ describe('DemoLlmClient', () => {
 		];
 		const result = await buildDemoToolResult(messages('随便聊聊'), tools);
 		expect(result.toolCalls).toEqual([]);
-		expect(result.content).toContain('演示模式回应');
+		expect(result.content).toContain('我在听');
 	});
 });
 
@@ -373,7 +394,7 @@ describe('AI 生成演示路径', () => {
 	it('生成流程在无审查工具或非生成任务时回退普通演示', async () => {
 		const result = buildDemoToolResult(messages('早上好'), STATE_TOOLS);
 		expect(result.toolCalls).toEqual([]);
-		expect(result.content).toContain('演示模式回应');
+		expect(result.content).toContain('我在听');
 	});
 
 	it('有审查工具但系统消息非生成任务时回退普通演示', async () => {
@@ -384,6 +405,6 @@ describe('AI 生成演示路径', () => {
 		};
 		const result = buildDemoToolResult(messages('早上好'), [tool]);
 		expect(result.toolCalls).toEqual([]);
-		expect(result.content).toContain('演示模式回应');
+		expect(result.content).toContain('我在听');
 	});
 });

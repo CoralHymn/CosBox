@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { enterDefaultWorkspace } from './utils';
+import { APP_URL, enterDefaultWorkspace } from './utils';
 
 /** 示例角色卡 JSON（chara_card_v3 规范）。 */
 const SAMPLE_CARD = JSON.stringify({
@@ -23,12 +23,17 @@ async function addDeepSeekService(page: Page): Promise<void> {
 	await page.getByRole('button', { name: '保存服务' }).click();
 }
 
-test('应用启动先进入工作区选择初始界面，可进入默认工作区', async ({ page }) => {
+test('首访展示作品介绍并直接进入示例剧本', async ({ page }) => {
 	await page.goto('/');
-	// 初始界面：选择工作区 / 新建 / 导入，而非直接进入对话。
+	await expect(page.getByText('一个会记住角色此刻处境的叙事引擎')).toBeVisible();
+	await page.getByRole('button', { name: '开始 3 分钟体验' }).click();
+	await expect(page.getByText('演示剧本')).toBeVisible();
+	await expect(page.getByText('校庆前夜').first()).toBeVisible();
+
+	// 退出示例后仍可从工作区列表进入默认工作区。
+	await page.getByRole('button', { name: '退出到工作区选择' }).click();
 	await expect(page.getByText('选择一个工作区开始')).toBeVisible();
-	await expect(page.getByRole('button', { name: '新建工作区' })).toBeVisible();
-	await expect(page.locator('.ws-enter').filter({ hasText: '默认工作区' })).toBeVisible();
+	await expect(page.locator('.ws-enter').filter({ hasText: '示例：校庆前夜' })).toBeVisible();
 	await enterDefaultWorkspace(page);
 	await expect(page.getByText('CosBox')).toBeVisible();
 	await expect(page.getByRole('banner').getByText('周一 08:00')).toBeVisible();
@@ -37,14 +42,14 @@ test('应用启动先进入工作区选择初始界面，可进入默认工作�
 });
 
 test('发送消息：演示模式回复并追加快照', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	const snapshotsBefore = await page.locator('.chip').filter({ hasText: '快照' }).textContent();
 
 	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
 	await page.getByRole('button', { name: '发送' }).click();
 
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 	await expect(page.locator('.message.user')).toHaveCount(1);
 	await expect(page.locator('.message.assistant')).toHaveCount(1);
 
@@ -54,7 +59,7 @@ test('发送消息：演示模式回复并追加快照', async ({ page }) => {
 });
 
 test('导出最近消息日志：从最近用户发言开始包含回复', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	// 导出日志属于开发者功能：先开启开发者模式
 	await page.getByRole('button', { name: /设置/ }).click();
@@ -64,7 +69,7 @@ test('导出最近消息日志：从最近用户发言开始包含回复', async
 
 	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	const downloadPromise = page.waitForEvent('download');
 	await page.getByRole('button', { name: /导出最近日志/ }).click();
@@ -73,15 +78,15 @@ test('导出最近消息日志：从最近用户发言开始包含回复', async
 	const path = await download.path();
 	const content = readFileSync(path!, 'utf8');
 	expect(content).toContain('[用户] 你好，绫音');
-	expect(content).toContain('[角色] （演示模式回应）');
+	expect(content).toContain('[角色] 嗯，我在听');
 });
 
 test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	const bubble = page.locator('.message.assistant').first();
 	const assistantRow = page.locator('.message-row.assistant').first();
@@ -96,7 +101,7 @@ test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
 	await assistantRow.getByRole('button', { name: '保存' }).click();
 
 	await expect(bubble.getByText('（编辑后）新的回应文本')).toBeVisible();
-	await expect(bubble.getByText(/演示模式回应/)).not.toBeVisible();
+	await expect(bubble.getByText(/我在听/)).not.toBeVisible();
 
 	// 刷新后编辑内容仍保留（快照原地改写）
 	await page.reload();
@@ -107,9 +112,9 @@ test('编辑 assistant 回复正文并原地落库', async ({ page }) => {
 });
 
 test('状态编辑生成快照并在预览中反映', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
-	await page.getByRole('button', { name: /状态/ }).click();
+	await page.getByRole('button', { name: '状态', exact: true }).click();
 	await page.locator('#outfit-top').selectOption('custom');
 	await page.locator('#outfit-top-custom').fill('红色风衣');
 	await page.getByRole('button', { name: '确定' }).click();
@@ -119,14 +124,14 @@ test('状态编辑生成快照并在预览中反映', async ({ page }) => {
 });
 
 test('消息重试：回溯重新生成并可切换分支', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByPlaceholder(/输入消息/).fill('你好，绫音');
 	await page.getByRole('button', { name: '发送' }).click();
 	const reply = page.locator('.message.assistant').first();
 	const userRow = page.locator('.message-row.user').first();
 	const assistantRow = page.locator('.message-row.assistant').first();
-	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
+	await expect(reply.getByText(/我在听/)).toBeVisible();
 
 	// 先把旧回复改成可区分的文本，便于验证分支切换
 	await assistantRow.hover();
@@ -139,7 +144,7 @@ test('消息重试：回溯重新生成并可切换分支', async ({ page }) => 
 	// 重试挂在用户气泡：回溯到该条用户消息并重新生成（演示模式恢复确定性原文）
 	await userRow.hover();
 	await userRow.getByRole('button', { name: '重新生成' }).click();
-	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
+	await expect(reply.getByText(/我在听/)).toBeVisible();
 
 	// 分支切换：< > 悬浮出现在用户气泡下方，可在旧分支与新分支之间往返
 	await userRow.hover();
@@ -148,11 +153,11 @@ test('消息重试：回溯重新生成并可切换分支', async ({ page }) => 
 
 	await userRow.hover();
 	await userRow.getByRole('button', { name: '切换为更新的分支' }).click();
-	await expect(reply.getByText(/演示模式回应/)).toBeVisible();
+	await expect(reply.getByText(/我在听/)).toBeVisible();
 });
 
 test('手动 LLM 状态确认：灯泡按钮补执行状态工具', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	// 灯泡按钮依赖「允许 AI 自主修改状态」开关
 	await page.getByRole('button', { name: /设置/ }).click();
@@ -163,7 +168,7 @@ test('手动 LLM 状态确认：灯泡按钮补执行状态工具', async ({ pag
 	await page.getByPlaceholder(/输入消息/).fill('时间推进，过了一段时间');
 	await page.getByRole('button', { name: '发送' }).click();
 	const bubble = page.locator('.message.assistant').first();
-	await expect(bubble.getByText(/演示模式回应/)).toBeVisible();
+	await expect(bubble.getByText(/时间过得真快/)).toBeVisible();
 
 	const assistantBubble = page.locator('.message.assistant').first();
 	const toolFeedback = assistantBubble.locator('.tool-segment');
@@ -173,22 +178,22 @@ test('手动 LLM 状态确认：灯泡按钮补执行状态工具', async ({ pag
 	// 点击灯泡（AI 气泡下方）：LLM 判断需要变更并补执行 advance_time
 	const assistantRow = page.locator('.message-row.assistant').first();
 	await assistantRow.hover();
-	await assistantRow.getByRole('button', { name: 'LLM 状态确认' }).click();
+	await assistantRow.getByRole('button', { name: '决策模型状态补执行' }).click();
 
 	await expect(toolFeedback).toHaveCount(2);
-	await expect(page.getByText('LLM 状态判断已同步 1 项变更')).toBeVisible();
+	await expect(page.getByText('决策模型已同步 1 项变更')).toBeVisible();
 });
 
 test('版本页切换回退状态与对话', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	// 先产生一条消息与一次状态变更
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
-	await page.getByRole('button', { name: /状态/ }).click();
+	await page.getByRole('button', { name: '状态', exact: true }).click();
 	await page.locator('#outfit-top').selectOption('黑色卫衣');
 
 	await page.getByRole('button', { name: /版本/ }).click();
@@ -207,13 +212,13 @@ test('版本页切换回退状态与对话', async ({ page }) => {
 });
 
 test('版本页删除分支后快照数减少且分支消失', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	// 分支 A：早上好
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	// 切回根，再开分支 B：中午好
 	await page.getByRole('button', { name: /版本/ }).click();
@@ -226,7 +231,7 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 	await page.getByRole('button', { name: /对话/ }).click();
 	await page.getByPlaceholder(/输入消息/).fill('中午好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	await page.getByRole('button', { name: /版本/ }).click();
 	await expect(page.locator('.branch-card')).toHaveCount(2);
@@ -242,12 +247,12 @@ test('版本页删除分支后快照数减少且分支消失', async ({ page }) 
 });
 
 test('版本页批量删除：勾选分支后删除所选分支', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	// 分支 A
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	// 切回根，再开分支 B
 	await page.getByRole('button', { name: /版本/ }).click();
@@ -260,7 +265,7 @@ test('版本页批量删除：勾选分支后删除所选分支', async ({ page 
 	await page.getByRole('button', { name: /对话/ }).click();
 	await page.getByPlaceholder(/输入消息/).fill('中午好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	await page.getByRole('button', { name: /版本/ }).click();
 	await expect(page.locator('.branch-card')).toHaveCount(2);
@@ -277,7 +282,7 @@ test('版本页批量删除：勾选分支后删除所选分支', async ({ page 
 });
 
 test('输入 / 触发快捷命令补全：/goto 补地点、/wear 先补槽位再补衣物', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	const input = page.getByPlaceholder(/输入消息/);
 
@@ -313,7 +318,7 @@ test('输入 / 触发快捷命令补全：/goto 补地点、/wear 先补槽位�
 });
 
 test('日程：时间推进自动生成快照', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /日程/ }).click();
 	await page.getByRole('button', { name: '+15m' }).click();
@@ -321,7 +326,7 @@ test('日程：时间推进自动生成快照', async ({ page }) => {
 });
 
 test('日程：条目编辑属于配置，不生成版本快照', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /日程/ }).click();
 
@@ -340,7 +345,7 @@ test('日程：条目编辑属于配置，不生成版本快照', async ({ page 
 });
 
 test('地点库与衣柜的维护编辑不生成版本快照', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	// 地点：添加地点是配置编辑，不生成快照；设为当前所在地才是剧情状态
@@ -365,7 +370,7 @@ test('地点库与衣柜的维护编辑不生成版本快照', async ({ page }) 
 });
 
 test('地点分类在失焦/回车时才提交，输入过程不实时分组', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /地点/ }).click();
 	await page.locator('#new-place-category').fill('市中心');
@@ -393,7 +398,7 @@ test('地点分类在失焦/回车时才提交，输入过程不实时分组', a
 });
 
 test('导入 SillyTavern V3 角色卡并写入世界书', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /导入导出/ }).click();
 	await page.locator('#import-text').fill(SAMPLE_CARD);
@@ -405,7 +410,7 @@ test('导入 SillyTavern V3 角色卡并写入世界书', async ({ page }) => {
 });
 
 test('设置页选择主流服务商预设自动填充地址与模型', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.getByRole('button', { name: /添加模型服务/ }).click();
@@ -431,7 +436,7 @@ test('设置页选择主流服务商预设自动填充地址与模型', async ({
 });
 
 test('提示词与设置：五段提示词独立编辑，角色名保存不回清', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	// 未启用网络搜索时，对话页不显示搜索按钮
@@ -498,7 +503,7 @@ test('提示词与设置：五段提示词独立编辑，角色名保存不回�
 });
 
 test('设置：主题预设即时生效并持久化，背景图透明度可调', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 
@@ -579,7 +584,7 @@ test('设置：主题预设即时生效并持久化，背景图透明度可调',
 });
 
 test('开启 AI 状态工具后，演示模式按剧情自主切换地点', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.locator('#ai-tools-enabled').check();
@@ -595,7 +600,7 @@ test('开启 AI 状态工具后，演示模式按剧情自主切换地点', asyn
 });
 
 test('开启 AI 状态工具后，演示模式 set_outfit 换装生成快照并反映到状态', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.locator('#ai-tools-enabled').check();
@@ -675,7 +680,7 @@ test('AI 一次回复可包含多段：工具轮次叙事文本与最终回复�
 		}
 	});
 
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await addDeepSeekService(page);
@@ -722,7 +727,7 @@ test('流式输出：开启后按 SSE 逐块渲染，请求携带 stream: true',
 		});
 	});
 
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await addDeepSeekService(page);
@@ -749,7 +754,7 @@ test('流式输出：思考内容实时渲染并保留在气泡思考区', async
 		await route.fulfill({ status: 200, contentType: 'text/event-stream', body: chunks.join('') });
 	});
 
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await addDeepSeekService(page);
@@ -776,7 +781,7 @@ test('打断生成：busy 时发送按钮变「停止」，点击中止请求', 
 		});
 	});
 
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await addDeepSeekService(page);
@@ -799,7 +804,7 @@ test('打断生成：busy 时发送按钮变「停止」，点击中止请求', 
 });
 
 test('启用状态工具后，系统提示注入工具使用说明', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.locator('#ai-tools-enabled').check();
@@ -810,7 +815,7 @@ test('启用状态工具后，系统提示注入工具使用说明', async ({ pa
 	await page.getByRole('button', { name: /对话/ }).click();
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	await page.getByRole('button', { name: '开发者：查看最近一次完整提示词' }).click();
 	const promptBody = page.locator('.prompt-modal-body');
@@ -820,7 +825,7 @@ test('启用状态工具后，系统提示注入工具使用说明', async ({ pa
 });
 
 test('RP 斜杠命令：/goto /wear /time /help 直接修改状态', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	await page.getByPlaceholder(/输入消息/).fill('/goto 食堂');
@@ -842,7 +847,7 @@ test('RP 斜杠命令：/goto /wear /time /help 直接修改状态', async ({ pa
 });
 
 test('/help 帮助文本只在聊天里展示，不进入发送给 AI 的提示词', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	// 开启开发者模式以便查看完整提示词
@@ -859,7 +864,7 @@ test('/help 帮助文本只在聊天里展示，不进入发送给 AI 的提示�
 	// 再发一条普通消息触发 LLM 请求
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	// 完整提示词中不应出现帮助文本
 	await page.getByRole('button', { name: '开发者：查看最近一次完整提示词' }).click();
@@ -870,11 +875,11 @@ test('/help 帮助文本只在聊天里展示，不进入发送给 AI 的提示�
 });
 
 test('AI 思考内容可在对话中展开查看', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByPlaceholder(/输入消息/).fill('你现在在想什么？');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	// 演示思考默认收起，点击「思考过程」展开
 	const thinking = page.locator('.thinking').last();
@@ -885,7 +890,7 @@ test('AI 思考内容可在对话中展开查看', async ({ page }) => {
 });
 
 test('开发者预览：展示输入框内容点击发送将发送给 AI 的完整提示词', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.locator('#dev-mode-enabled').check();
@@ -912,7 +917,7 @@ test('开发者预览：展示输入框内容点击发送将发送给 AI 的完�
 });
 
 test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	// 地点 tab：新增地点并设为当前所在地
@@ -951,7 +956,7 @@ test('地点库与衣柜可维护并反映到状态', async ({ page }) => {
 });
 
 test('AI 地点：按古代世界观生成、勾选后一键导入', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /地点/ }).click();
 	await page.getByRole('button', { name: 'AI地点' }).click();
@@ -978,7 +983,7 @@ test('AI 地点：按古代世界观生成、勾选后一键导入', async ({ pa
 });
 
 test('AI 衣物：性别选项影响生成并批量导入', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /衣柜/ }).click();
 	await page.getByRole('button', { name: 'AI衣物' }).click();
@@ -999,7 +1004,7 @@ test('AI 衣物：性别选项影响生成并批量导入', async ({ page }) => 
 });
 
 test('AI 条目：生成日程并批量导入', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /日程/ }).click();
 	await page.getByRole('button', { name: 'AI条目' }).click();
@@ -1016,7 +1021,7 @@ test('AI 条目：生成日程并批量导入', async ({ page }) => {
 });
 
 test('地点库支持拖拽排序', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /地点/ }).click();
 	const schoolGroup = page
@@ -1037,7 +1042,7 @@ test('地点库支持拖拽排序', async ({ page }) => {
 });
 
 test('衣柜支持拖拽排序', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /衣柜/ }).click();
 	const casualGroup = page
@@ -1056,7 +1061,7 @@ test('衣柜支持拖拽排序', async ({ page }) => {
 });
 
 test('日程表按时间自动排序', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /日程/ }).click();
 
@@ -1100,7 +1105,7 @@ test('日程表按时间自动排序', async ({ page }) => {
 });
 
 test('删除地点/衣柜/日程需确认：取消不删除，确认才删除', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 
 	// 地点：取消确认 → 条目保留
@@ -1142,7 +1147,7 @@ test('删除地点/衣柜/日程需确认：取消不删除，确认才删除', 
 });
 
 test('地点库导出与导入（JSON 模板）', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /地点/ }).click();
 
@@ -1173,7 +1178,7 @@ test('地点库导出与导入（JSON 模板）', async ({ page }) => {
 });
 
 test('衣柜导出与导入（JSON 模板）', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /衣柜/ }).click();
 
@@ -1198,7 +1203,7 @@ test('衣柜导出与导入（JSON 模板）', async ({ page }) => {
 });
 
 test('日程表导出与导入（JSON 模板）', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /日程/ }).click();
 
@@ -1225,12 +1230,12 @@ test('日程表导出与导入（JSON 模板）', async ({ page }) => {
 });
 
 test('工作区导出与导入（.cbox 恢复对话与配置）', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	// 造数据：一条消息 + 一个新地点
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 	await page.getByRole('button', { name: /地点/ }).click();
 	await page.locator('#new-place-name').fill('备份地点');
 	await page.locator('#new-place-desc').fill('来自备份');
@@ -1254,21 +1259,21 @@ test('工作区导出与导入（.cbox 恢复对话与配置）', async ({ page 
 		.last()
 		.click();
 	await page.getByRole('button', { name: /对话/ }).click();
-	await expect(page.getByText(/演示模式回应/)).not.toBeVisible();
+	await expect(page.getByText(/我在听/)).not.toBeVisible();
 
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.locator('input[type="file"][accept=".cbox"]').setInputFiles(path!);
 	await expect(page.getByText('工作区已导入')).toBeVisible();
 	await page.getByRole('button', { name: /对话/ }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 });
 
 test('对话后侧栏显示上下文用量、费用估算与压缩状态', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByPlaceholder(/输入消息/).fill('早上好');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	await expect(page.getByText('上下文用量（估算）')).toBeVisible();
 	await expect(page.getByText('输入 / 已缓存')).toBeVisible();
@@ -1294,7 +1299,7 @@ test('设置：获取模型列表自动填充上下文窗口，连接测试验�
 			})
 		})
 	);
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByRole('button', { name: /设置/ }).click();
 	await page.getByRole('button', { name: /添加模型服务/ }).click();

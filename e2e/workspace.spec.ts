@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { enterDefaultWorkspace } from './utils';
+import { APP_URL, enterDefaultWorkspace } from './utils';
 
 test('新建工作区：初始界面创建并进入，与原工作区数据隔离', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	// 初始界面必须占据整个视口（回归护栏：曾被 .app 双行网格压成顶部 54px 细条）。
 	const homeBox = await page.locator('.home').boundingBox();
 	expect(homeBox).not.toBeNull();
@@ -14,7 +14,7 @@ test('新建工作区：初始界面创建并进入，与原工作区数据隔�
 	// 默认工作区先留一条消息。
 	await page.getByPlaceholder(/输入消息/).fill('只属于默认工作区');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	// 退出回初始界面。
 	await page.getByRole('button', { name: '退出到工作区选择' }).click();
@@ -34,11 +34,11 @@ test('新建工作区：初始界面创建并进入，与原工作区数据隔�
 });
 
 test('导航切换器：在应用内切换工作区，数据互相隔离', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByPlaceholder(/输入消息/).fill('只属于默认工作区');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	// 打开管理弹层 → 新建「第二」→ 自动进入。
 	await page.locator('.nav-workspace-switch').click();
@@ -59,7 +59,7 @@ test('导航切换器：在应用内切换工作区，数据互相隔离', async
 });
 
 test('重命名工作区', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.locator('.nav-workspace-switch').click();
 	const row = page.locator('.ws-row').filter({ hasText: '默认工作区' });
@@ -73,11 +73,11 @@ test('重命名工作区', async ({ page }) => {
 });
 
 test('复制工作区：副本包含原对话并自动切换', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByPlaceholder(/输入消息/).fill('复制前的对话');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	await page.locator('.nav-workspace-switch').click();
 	await page
@@ -90,7 +90,7 @@ test('复制工作区：副本包含原对话并自动切换', async ({ page }) 
 });
 
 test('删除非当前工作区', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	// 新建「待删除」（当前），再切回默认。
 	await page.locator('.nav-workspace-switch').click();
@@ -112,11 +112,11 @@ test('删除非当前工作区', async ({ page }) => {
 });
 
 test('导出 .cbox 并导入为新工作区', async ({ page }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	await enterDefaultWorkspace(page);
 	await page.getByPlaceholder(/输入消息/).fill('导出前的对话');
 	await page.getByRole('button', { name: '发送' }).click();
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 
 	// 设置 → 导出当前工作区（浏览器下载）。
 	await page.getByRole('button', { name: /设置/ }).click();
@@ -132,5 +132,5 @@ test('导出 .cbox 并导入为新工作区', async ({ page }) => {
 	await expect(page.locator('.nav-workspace-name')).toHaveText('默认工作区 2');
 	// 导入后落在对话页，用户消息与回复完整。
 	await expect(page.locator('.message.user').filter({ hasText: '导出前的对话' })).toHaveCount(1);
-	await expect(page.getByText(/演示模式回应/)).toBeVisible();
+	await expect(page.getByText(/我在听/)).toBeVisible();
 });

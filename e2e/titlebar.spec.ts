@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { enterDefaultWorkspace } from './utils';
+import { APP_URL, enterDefaultWorkspace } from './utils';
 
 // 注入 Tauri 桌面环境标识：isTauri() 为 true，UA 不含 Android → 自定义标题栏模式。
 test.beforeEach(async ({ page }) => {
@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
 test('Tauri 桌面：自定义标题栏承载窗口控制/工作区切换/状态信息，内容占满剩余空间', async ({
 	page
 }) => {
-	await page.goto('/');
+	await page.goto(APP_URL);
 	// 标题栏：40px，含工作区切换器、窗口控制。
 	const titlebarBox = await page.locator('.titlebar').boundingBox();
 	expect(titlebarBox).not.toBeNull();
