@@ -1,163 +1,98 @@
 # CosBox
 
-一个真正面向 AI 角色扮演的状态驱动叙事客户端。
+让 Agent 能力真正为「聊天」与互动叙事服务。
 
-我们讲穿着（帽子、上衣、下装、袜子、鞋与配饰）、衣柜、地点、日程、属性变成结构化数据，作为系统提示词注入 LLM。
-Context Pipeline 把状态摘要、世界信息命中、压缩后的对话和长期记忆装进系统提示，LLM 每次都清楚当前剧情状态。
-所有状态变更和对话以增量快照存入 IndexedDB，构成类 Git 的版本图，任意节点可回溯，也能开分支、做 checkout，不需要外部 Git。
+CosBox 是一款开箱即用的 AI 角色扮演客户端，也是一个以“状态机”为核心的互动叙事引擎。
 
-另有 LLM 自动提取的长期记忆（关键词召回、可置顶）、零依赖 Node 的远程同步服务器（按工作区分槽，本地变更约 1.5 秒内推送），以及 Tauri 2 双端打包壳（Windows NSIS/MSI 自动更新、Android APK/AAB）。
+普通的 AI 聊天把一切塞进无休止的上下文追加里，时间全靠模型胡诌，地点全凭脑补，换个衣服或者走个神，下文就彻底遗忘；酒馆（SillyTavern）功能虽然丰富，但繁琐的配置和环境部署把绝大多数人拒之门外。
 
-## 技术栈
+CosBox 的解法是：**把故事看作一个随时间推移演进的状态机。**
+时间、地点、人物穿着、甚至环境属性（例如“展板是否倒下”）都是结构化的硬数据，通过模型工具调用（Tool Call）直接驱动前端界面与状态变更。
 
-- TypeScript（strict，零 `any`）
-- SvelteKit（纯客户端渲染，SSR/Prerender 关闭）+ Svelte 5 Runes（`$state` / `$derived` / `$effect`）
-- Dexie.js（IndexedDB）、nanoid
-- OpenAI-compatible API（内置离线 demo provider，可用 LiteLLM Proxy 等任意兼容端点）
-- Tauri 2（Windows WebView2 / Android WebView 打包壳，`updater` / `http` / `process` 插件）
-- 零依赖 Node.js 同步服务器（`server/`，node --test 可测）
-- Vitest + Playwright
+---
 
-## 快速开始
+## 核心特性
+
+- **结构化状态机与 Agent 联动**：时间流逝、地点转移、衣橱换装与属性变更全部走标准结构化调用。你输入“我们去食堂”，地点即时更新；输入“换上黑色卫衣”，全身着装槽位与衣柜立刻联动响应。
+- **Git 风格的快照版本图（Snapshot Graph）**：每一次对话与状态变更都是一个不可变的快照节点。支持分支切换、就地改写、一键 checkout 回滚，选错剧情分支随时能够重来，无需借助外部 Git。
+- **分层记忆与上下文压缩**：
+  - 临时工作记忆 + 语义关键词唤醒的长期记忆库（支持置顶与重要度评分）。
+  - 基于关键词触发的 World Info（世界观设定百科）。
+  - 达到上下文阈值时自动压缩历史提要，长篇叙事下人设与世界观依然稳定。
+- **开箱即用与绝对隐私**：
+  - 内置离线剧本，免配置、免填 Key，初次打开即可体验完整的状态驱动与分支回滚。
+  - 纯本地运行：基于 IndexedDB（Dexie.js）实现本地多工作区隔离，无中心服务器收集对话或密钥。
+  - 直连主流模型：支持填入任意 OpenAI 兼容格式端点（DeepSeek、Claude、OpenAI、SiliconFlow、Ollama 等），请求直接从本地端发出。
+- **跨平台支持**：统一代码库，支持纯 Web 静态部署，以及基于 Tauri 2 构建的桌面端（Windows）与移动端（Android）。
+
+---
+
+## 快速上手
+
+### 本地开发
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173（首次加载已预热，秒开）
-npm run tauri dev  # Tauri 桌面壳（首次编译约 1–3 分钟）
+npm run dev        # 启动本地开发服务，访问 http://localhost:5173
+npm run tauri dev  # 启动 Tauri 桌面端调试
 ```
 
-默认使用内置演示 LLM（离线可用，回应由状态摘要推导）。「设置」页的模型服务支持 20 多家主流服务商：
-OpenAI、Anthropic Claude、Google Gemini、DeepSeek、Kimi、通义千问、智谱 GLM、GLM Coding Plan、
-百度千帆、腾讯混元、零一万物、MiniMax、SiliconFlow、Mistral、xAI Grok、Groq、Cerebras、
-OpenRouter、OpenCode GO、OpenCode Zen、Command Code GOAT、Together AI、Ollama、LiteLLM Proxy、vLLM、Azure OpenAI。
-选一个预设就自动填好兼容端点和常用模型候选；每个服务能挂多个模型，Key 只填一次，
-统一绑定为「智能体」（对话与地点/衣柜/日程生成共用）；也可以选「自定义」填任意 OpenAI-compatible 端点。
-状态同步判断交给 TypeSafe Jev 决策模型（System One），只返回校准概率，不消耗 LLM token。
-内置演示（离线）同样能增删模型，误删后在「添加模型服务」里选回它即可直接保存。
+首次打开默认加载离线演示剧本，可以直接通过操作气泡体验完整的状态机联动与时间线回滚。
 
-有些端点不允许浏览器 CORS 直连（如 opencode.ai：OPTIONS 预检直接 404，直连会 `Failed to fetch`）。
-这类端点由 `useProxy` 标记（OpenCode GO/Zen 预设已自带，Command Code 这类允许 CORS 的
-保持直连）——baseUrl 仍存真实地址，请求前换成 `/llm-proxy/<host>/<path>`，
-`npm run dev` / `npm run preview` 由 `vite.config.ts` 的中间件按 host 动态转发，
-静态部署需自建同路径反向代理；Tauri 打包版走 `tauri-plugin-http`（Rust 侧发出请求，
-没有 CORS 问题）。只有「自定义」端点会在设置页给出勾选框，预设不显示。
-网络搜索支持 Tavily / Serper / Brave，发送消息时可以把实时结果注入 LLM 上下文。
+### 接入大模型
 
-数据同步：按 [server/README.md](./server/README.md) 部署同步服务器（有一键安装脚本，也支持手动和面板），
-在「设置 → 数据同步」填入服务器地址与密钥即可。打包与签名流程见
-[PACKAGING.md](./PACKAGING.md) 与 [ANDROID_SIGNING.md](./ANDROID_SIGNING.md)；
-推送 `v*` tag 会触发 GitHub Actions 自动构建 Windows + Android 并创建 Release
-（见 PACKAGING.md「GitHub Release 自动发布」）。
-macOS / iOS 包无法在 Windows 构建，GitHub Actions 方案见 [APPLE_BUILD.md](./APPLE_BUILD.md)（待落地）。
+在应用内「设置 → 模型服务」中添加你的 API 端点：
+- 支持 20 余家主流服务商的开箱预设（DeepSeek、Claude、OpenAI、Kimi、GLM、通义千问、OpenRouter、SiliconFlow、Ollama 等）。
+- 也支持选择「自定义」，填入任意 OpenAI 兼容的 BaseURL 与 Key。
+- 浏览器 Web 环境下，跨域受限的端点可在 dev 模式由 Vite 动态代理转发，或在部署环境配置反向代理；Tauri 桌面端走底层原生网络，无跨域限制。
 
-## 脚本
+---
 
-| 命令                          | 说明                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------ |
-| `npm run dev`                 | 开发服务器（含首屏预热，见 vite.config.ts）                                    |
-| `npm run build` / `preview`   | 构建 / 预览产物                                                                |
-| `npm run check`               | svelte-check 类型与诊断                                                        |
-| `npm run lint` / `format`     | ESLint / Prettier                                                              |
-| `npm run format:check`        | Prettier 检查                                                                  |
-| `npm test` / `test:watch`     | Vitest 单元测试                                                                |
-| `npm run test:coverage`       | 覆盖率（核心层语句/行/函数 100%，分支 ≥90%）                                   |
-| `npm run test:server`         | 同步服务器单测（node --test，多工作区分槽）                                    |
-| `npm run test:e2e`            | Playwright 端到端测试                                                          |
-| `npm run tauri dev`           | Tauri 桌面开发壳（Windows）                                                    |
-| `npm run tauri build`         | 打包 Windows 安装包（NSIS / MSI，带更新签名）                                  |
-| `npm run tauri android dev`   | Android 开发（需 adb 连接真机/模拟器）                                         |
-| `npm run tauri android build` | Android 发布构建（APK / AAB）                                                  |
-| `dev.bat`                     | Windows 下快捷启动开发服务器                                                   |
-| `pack.bat`                    | 版本一致性检查 + 桌面打包（需签名密钥）                                        |
-| `check-version.bat`           | 校验四处版本号一致（package.json / Cargo.toml / tauri.conf.json / updater.ts） |
+## 脚本命令
 
-## 功能总览
+| 命令 | 说明 |
+| --- | --- |
+| `npm run dev` | 启动 Web 开发服务器 |
+| `npm run build` | 构建 Web 静态生产产物 |
+| `npm run check` | svelte-check 类型与模板诊断 |
+| `npm run lint` / `format` | ESLint 检查 / Prettier 格式化 |
+| `npm test` | Vitest 核心业务逻辑单元测试 |
+| `npm run test:e2e` | Playwright 端到端自动化测试 |
+| `npm run tauri dev` | 启动 Tauri 桌面开发壳 |
+| `npm run tauri build` | 构建 Windows 安装包（NSIS / MSI） |
+| `npm run tauri android build` | 构建 Android 安装包（APK / AAB） |
 
-### 核心叙事
+---
 
-- 对话界面 + Snapshot 集成：每条消息都是版本图节点；消息可原地改写（git commit --amend 语义）、
-  重试、分支切换、批量删除；分支/快照可视化（新在上、旧在下），checkout 无副作用。
-- 角色状态编辑器 + 实时预览 + 自动 snapshot；配置类编辑（地点库/衣柜/日程）不生成快照、不进版本历史。
-- 地点库与衣柜：支持大类并按分类折叠收纳（如「学校 > 食堂」「常服 > 白色衬衫」）；衣物带类型标签，
-  换装槽位只从匹配类型的衣柜中挑选，不会把衣物错配到不合适的部位；AI 知道全部地点与可选衣物（含穿后描述）。
-- RP 斜杠命令（`/goto` `/wear` `/time` `/checkpoint` `/help`）+ 自动补全弹窗，执行同样落快照。
+## 技术架构
 
-### AI 对话
-
-- 提示词独立标签页：系统提示词（叙事规则）、人物提示词、用户提示词、世界观提示词、
-  风格提示词五段分开编辑，按顺序组装进系统消息；原「设置 → 角色档案 → 系统提示」已迁移到该页。
-- 模型服务管理：多服务多模型、Key 只填一次、智能体统一绑定、模型列表拉取与连接测试；
-  状态补执行由 TypeSafe Jev 决策模型判断。
-- 默认开启流式输出、AI 自主状态工具与「低多边形星球」官方背景。
-- Context Pipeline：状态摘要（穿着按槽位带标签、空槽位显式标注「未穿」）、World Info 关键词命中、
-  长期记忆召回、阈值触发 LLM 摘要压缩（最近 20 条原样保留）、网络搜索注入。
-- 流式输出：思考过程实时展示（`reasoning_content`，默认收起可展开）、生成可打断（发送/停止同按钮）、
-  无数据看门狗与自动重试（思考耗尽 Max Tokens 有明确提示）。
-- Agent 工具循环：`goto_location` / `advance_time` / `set_outfit` / `set_attribute` 结构化调用，
-  每轮工具执行生成快照 + 持久化【工具调用】反馈消息；AI 一轮回复合并为单气泡分段展示。
-- 工具双通道兜底：模型只把调用写进正文/思考而未发出结构化 `tool_calls` 时，从文本/JSON 形态解析并执行。
-- LLM 状态确认：开启后由独立模型二次判断是否需要更新状态（剧情需要优先，不会因为安全顾虑跳过状态更新）。
-- 上下文用量与费用估算（按对话角色模型展示，持久化）；开发者模式可查看完整提示词、预览输入框内容、
-  导出最近会话日志；监控面板记录工具调用/补调重试/文本兜底等运行指标（图表 + 事件流）。
-
-### 世界与数据
-
-- 长期记忆功能区：LLM 自动提取（对话模型、固定消息数触发、防抖批处理）+ 关键词召回评分 + 置顶 +
-  重要度，随上下文有界注入；手动增删改查。
-- AI 生成：地点/衣柜/日程面板都能直接按世界观预设（现代/古代/奇幻，含禁词）生成候选列表，
-  经 `review_generation` 审查循环修正后勾选导入。
-- 分类折叠、拖拽排序（地点库/衣柜）、日程自动排序；地点库/衣柜/日程各支持导出 JSON 模板与导入合并。
-- World Info 世界书（关键词触发、优先级）；SillyTavern V3 角色卡导入导出（往返映射稳定）。
-
-### 多工作区与同步
-
-- 启动进入工作区选择页（可选/新建/导入 .cbox / 重命名/复制/导出/删除），应用内切换器随时可切；
-  `.cbox` v2 含长期记忆与工作区名，兼容 v1；导入校验快照链可重建。
-- 远程数据同步按工作区分槽：本地变更 1.5s 防抖推送、5s 轮询拉取，较新一方胜出；
-  同步数据不含模型配置与 API Key；服务器端 Bearer 密钥、鉴权限流、原子写入、槽位上限。
-- 主题自定义：预设（default/claude/discord/verge）+ 自定义背景图（透明度/磨砂滑块）+ 全套颜色变量；
-  桌面端自定义标题栏（拖拽、工作区切换、窗口控制）；移动端响应式（抽屉导航、安全区域）。
-- 设置页内置开源协议声明弹窗（全部参考开源项目及许可证）。
-
-### 打包
-
-- Tauri 2 双端：Windows（NSIS/MSI，`updater` 自动更新，安装后重启）+ Android（APK/AAB，导出走 MediaStore）。
-- 打包版所有 LLM/搜索请求经 `tauri-plugin-http` 发出，无 WebView CORS 限制。
-- `pack.bat` 一键校验版本一致性并打包；`check-version.bat` 独立校验四处版本号。
-
-## 版本差异
-
-同一套代码按运行环境自动切换显示与提示规则，无需单独构建：
-
-- Web 版（浏览器直接打开）：面向公开访问与全年龄展示，隐藏成人向穿着槽位及对应的衣柜与生成入口；注入模型的系统提示不含相关条目，提示词页显示全年龄说明。
-- 桌面版（Tauri）：保留完整穿着槽位与状态能力。
-- 底层状态数据不做删改：已有数据在 Web 版打开与导出都不受影响，只是不参与展示与系统提示。
-
-## 目录结构
+- **前端架构**：SvelteKit（SPA 模式，纯客户端渲染）+ Svelte 5 Runes (`$state` / `$derived` / `$effect`)，轻量且低开销。
+- **本地存储**：Dexie.js（IndexedDB），按工作区隔离存储状态快照、角色档案与记忆。
+- **应用壳**：Tauri 2，为桌面端与移动端提供原生容器、原生 HTTP 插件与自动更新能力。
+- **可选数据同步**：`server/` 目录下提供了一个轻量级 Node.js 同步服务，支持多端数据分槽同步。
 
 ```text
 src/lib/
-  core/          状态模型、快照版本图、错误体系（纯函数）
-  db/            Dexie schema（多工作区分区）、仓储、WorkspaceScope、作用域 kv
-  manager/       CharacterManager：状态变更唯一入口（内部串行队列）
-  workspace/     工作区注册表与编排服务（切换/创建/复制/删除/导入/收集导出）
-  context/       World Info 触发、状态摘要、长期记忆召回、历史压缩、Context Pipeline
-  memory/        长期记忆：LLM 提取、关键词召回、置顶（纯函数）
-  llm/           OpenAI-compatible 客户端、demo provider、状态工具、agent 循环、状态确认、
-                 文本工具兜底、模型服务管理、AI 生成、token/费用估算、模型列表/连接测试
-  import-export/ chara_card_v3 映射、.cbox 工作区序列化（v2）、单面板配置转移
-  search/        网络搜索客户端（Tavily / Serper / Brave）
-  sync/          远程同步客户端（防抖推送 + 轮询拉取 + 按工作区重载）
-  platform/      打包适配层（Tauri 检测、自动更新、platformFetch、版本显示规则）
-  theme/         主题系统（预设 + 背景图 + 透明度/磨砂）
-  legal/         开源协议声明
-  stores/        Svelte 5 runes 响应式封装（薄层，不含业务逻辑）
-  utils/         纯工具（格式化、分组、斜杠命令解析/执行、ZIP、下载等）
-  components/    UI 组件（显式 props，禁止 rest 透传）
-server/          数据同步服务器（零依赖 Node，多工作区分槽，node --test 可测）
-src-tauri/       Tauri 壳（tauri.conf.json、Rust 入口、gen/android Gradle 工程、更新签名密钥）
+  core/          核心状态模型、快照图与回滚逻辑（纯函数）
+  db/            Dexie schema、多工作区划分与持久化
+  manager/       CharacterManager：状态变更与快照调度入口
+  context/       上下文流水线：状态摘要拼装、记忆召回、历史压缩
+  memory/        长期记忆提取与关键词匹配
+  llm/           OpenAI 兼容客户端、离线演示驱动器、工具调用执行器
+  platform/      运行环境适配（Web 全年龄安全模式 / 桌面端完整模式、Tauri 原生接口）
+  components/    Svelte 5 组件与交互动效
 ```
 
-详见 [ARCHITECTURE.md](./ARCHITECTURE.md)、[DECISIONS.md](./DECISIONS.md)、
-[PACKAGING.md](./PACKAGING.md)、[ANDROID_SIGNING.md](./ANDROID_SIGNING.md)、
-[APPLE_BUILD.md](./APPLE_BUILD.md) 与 [server/README.md](./server/README.md)。
+---
+
+## 运行环境差异
+
+- **Web 版**：面向公开部署与全年龄访问，自动隐藏敏感服饰槽位与相关词条，系统提示词同步收敛。
+- **桌面版（Tauri）**：面向本地私人使用，保留完整的槽位支持与无限制的状态操作。
+- 两者底层快照数据格式一致，导出与工作区数据完全通用。
+
+---
+
+## 许可协议
+
+本项目采用 MIT 许可证。详见 [LICENSE](./LICENSE)。
