@@ -17,8 +17,8 @@ import type { WorkspaceService } from './workspace-service';
 
 /** 演示播种标记（应用级 kv）：记录示例工作区 id，避免重复创建。 */
 export const DEMO_MARKER_KEY = 'demo.scene.v1';
-/** 开场介绍是否已看过（应用级 kv）：只放一次，刷新不再挡路。 */
-export const DEMO_INTRO_KEY = 'demo.intro.v1';
+/** 用户是否明确关闭了预览（应用级 kv）：只有点「不再显示预览」才写。 */
+export const DEMO_HIDDEN_KEY = 'demo.hidden.v1';
 
 export const DEMO_WORKSPACE_NAME = '示例：校庆前夜';
 
@@ -34,6 +34,14 @@ export interface DemoChip {
 	text: string;
 	/** 这一步让什么发生变化（Dock 状态条展示）。 */
 	note: string;
+}
+
+/** 功能导览的一站：聚光到真实界面元素并配一段说明。 */
+export interface DemoTourStep {
+	target: string;
+	kicker: string;
+	title: string;
+	text: string;
 }
 
 /** 演示 Dock 的完整视图模型（由宿主组装，组件只负责展示）。 */
@@ -57,12 +65,18 @@ export interface DemoDockModel {
 
 const DEMO_TIME: WorldTime = { day: 4, hour: 18, minute: 40 };
 
-/** 四个动作恰好覆盖演示模型的四条确定性分支（时间 / 地点 / 换装 / 推进）。 */
+/**
+ * 七步剧本：从「问时间」一路走到展板被风刮倒再修好，
+ * 依次覆盖时间问答、地点、换装、时间推进、属性变化五条演示分支。
+ */
 export const DEMO_CHIPS: readonly DemoChip[] = [
 	{ label: '现在几点？', text: '现在几点了？', note: '回答会引用当前世界时间' },
 	{ label: '去食堂', text: '我们去食堂吧', note: '地点：活动室 → 食堂' },
-	{ label: '换件衣服', text: '换装', note: '上衣：白衬衫 → 黑色卫衣' },
-	{ label: '半小时后', text: '半小时后出发', note: '世界时间 +30 分钟' }
+	{ label: '换件卫衣', text: '换装', note: '上衣：白衬衫 → 黑色卫衣' },
+	{ label: '半小时后', text: '半小时后出发', note: '世界时间 +30 分钟' },
+	{ label: '去主楼大厅', text: '去主楼大厅看看', note: '地点：食堂 → 主楼大厅' },
+	{ label: '风把展板吹倒了', text: '风把展板吹倒了', note: '展板状态：未完成 → 倒塌' },
+	{ label: '一起修好它', text: '一起修好它', note: '展板状态：倒塌 → 已修复' }
 ];
 
 const DEMO_PLACES: LocationDef[] = [
@@ -89,6 +103,18 @@ const DEMO_PLACES: LocationDef[] = [
 		category: '生活区',
 		name: '宿舍楼下',
 		description: '路灯下的快递架和共享单车，晚上风有点凉'
+	},
+	{
+		id: 'demo-main-hall',
+		category: '学校',
+		name: '主楼大厅',
+		description: '校庆主楼的一层大厅，入口装置立了一半，顶灯只开了一排'
+	},
+	{
+		id: 'demo-corridor',
+		category: '学校',
+		name: '玻璃连廊',
+		description: '连接活动室和主楼的连廊，穿堂风很大，能看到操场'
 	}
 ];
 
@@ -144,7 +170,15 @@ const DEMO_SCHEDULE: ScheduleEntry[] = [
 		start: 19 * 60 + 30,
 		end: 21 * 60,
 		title: '校庆布展碰头',
-		locationId: 'demo-library'
+		locationId: 'demo-main-hall'
+	},
+	{
+		id: 'demo-schedule-2',
+		day: 4,
+		start: 21 * 60,
+		end: 21 * 60 + 30,
+		title: '入口装置灯光测试',
+		locationId: 'demo-main-hall'
 	}
 ];
 
@@ -157,7 +191,12 @@ const DEMO_MESSAGES: ReadonlyArray<{ role: 'user' | 'assistant'; content: string
 	{ role: 'user', content: '还差多少？' },
 	{
 		role: 'assistant',
-		content: '就差最后一块。先别管了，食堂七点收档，你吃饭了吗？'
+		content: '就差最后一角。不过你看窗外，风起来了。'
+	},
+	{ role: 'user', content: '会下雨吗？' },
+	{
+		role: 'assistant',
+		content: '预报说九点。先吃饭，回来再收尾——展板可经不起一场风。'
 	}
 ];
 
@@ -178,13 +217,21 @@ const DEMO_MEMORIES = [
 		keywords: ['食堂', '吃饭', '林夏'],
 		importance: 3,
 		pinned: false
+	},
+	{
+		content: '备用胶带在活动室第三个纸箱里，只剩半卷',
+		category: '物品',
+		keywords: ['胶带', '纸箱', '备用'],
+		importance: 3,
+		pinned: false
 	}
 ] as const;
 
 const DEMO_WORLD_INFO = [
 	{
 		keys: ['校庆', '展板', '展陈'],
-		content: '三天后是校庆。展陈组负责主楼大厅的入口装置，需要在明晚前完成。',
+		content:
+			'三天后是校庆。展陈组负责主楼大厅的入口装置，需要在明晚前完成；周五夜里预报有大风。',
 		enabled: true,
 		priority: 6,
 		comment: '示例场景背景'
@@ -281,7 +328,9 @@ async function seedDemoContent(deps: DemoSeedDeps): Promise<void> {
 				energy: 72,
 				affection: 60,
 				trust: 55,
-				money: 80
+				money: 80,
+				展板状态: '未完成',
+				展板进度: 40
 			}
 		},
 		{ desc: '示例开场：周五傍晚的活动室' }

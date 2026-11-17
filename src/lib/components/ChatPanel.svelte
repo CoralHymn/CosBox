@@ -296,7 +296,7 @@
 	}
 </script>
 
-<div class="chat-layout">
+<div class="chat-layout" data-demo-tour="chat">
 	<div class="chat-panel">
 		{#if conversation.length === 0 && streamingSegments === null}
 			<div class="empty-chat">

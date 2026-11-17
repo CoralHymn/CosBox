@@ -69,14 +69,14 @@
 				</button>
 			{:else}
 				<button class="auto" onclick={model.onAuto} disabled={model.busy}>
-					<span class="play" aria-hidden="true">▶</span>自动演示（约 20 秒）
+					<span class="play" aria-hidden="true">▶</span>自动演示（约 35 秒）
 				</button>
 			{/if}
 			<span class="tip">点一句试试，状态会跟着变</span>
 		</div>
 	{:else}
 		<div class="finish">
-			<p class="finish-title">四步走完，时间线上已经留下 8 个节点</p>
+			<p class="finish-title">剧本走完，时间线上已经留下了每一步</p>
 			<div class="actions">
 				<button class="primary" onclick={model.onVersions}>
 					<span>看时间线 / 回到换装前</span>

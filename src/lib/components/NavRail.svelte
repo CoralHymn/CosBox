@@ -41,7 +41,7 @@
 	];
 </script>
 
-<nav class="nav-rail">
+<nav class="nav-rail" data-demo-tour="nav">
 	{#each tabs as tab (tab.id)}
 		<button class="nav-item" class:active={tab.id === active} onclick={() => onSelect(tab.id)}>
 			<span class="nav-icon"><Icon name={tab.icon} size={15} /></span>

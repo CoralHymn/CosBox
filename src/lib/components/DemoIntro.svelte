@@ -65,7 +65,7 @@
 			rgba(10, 10, 12, 0.92);
 		backdrop-filter: blur(14px);
 		animation: intro-in 420ms ease-out both;
-		overflow: hidden;
+		overflow-y: auto;
 	}
 
 	.grid {
@@ -114,6 +114,9 @@
 		box-shadow:
 			0 30px 90px rgba(0, 0, 0, 0.6),
 			inset 0 1px 0 rgba(255, 255, 255, 0.06);
+		max-height: calc(100vh - 32px);
+		max-height: calc(100dvh - 32px);
+		overflow-y: auto;
 		animation: card-in 620ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 	}
 
@@ -191,7 +194,7 @@
 		gap: 12px;
 		align-items: center;
 		flex-wrap: wrap;
-		animation: rise 520ms 760ms ease-out both;
+		animation: rise 520ms 420ms ease-out both;
 	}
 
 	.cta {
@@ -251,7 +254,7 @@
 		margin: 18px 0 0;
 		color: var(--text-faint);
 		font-size: 12px;
-		animation: rise 500ms 900ms ease-out both;
+		animation: rise 500ms 560ms ease-out both;
 	}
 
 	@keyframes intro-in {
@@ -337,7 +340,7 @@
 
 	@media (max-width: 620px) {
 		.card {
-			padding: 30px 22px 24px;
+			padding: 26px 20px 22px;
 		}
 		.features li {
 			padding: 10px 12px;

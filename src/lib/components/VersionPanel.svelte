@@ -141,7 +141,7 @@
 	}
 </script>
 
-<div class="panel">
+<div class="panel" data-demo-tour="versions">
 	<h2 class="panel-title">版本与分支</h2>
 	<p class="panel-sub">
 		所有状态变更与对话都以增量快照存储；切换任意节点会重建该时刻的状态与对话，不影响其他分支。

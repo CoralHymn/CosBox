@@ -16,7 +16,7 @@
 	const summaryOptions = stateSummaryOptionsFor(getEditionRules());
 </script>
 
-<div class="state-preview" class:pulsing={pulse > 0}>
+<div class="state-preview" class:pulsing={pulse > 0} data-demo-tour="state">
 	{#key pulse}
 		<span class="pulse-flash" aria-hidden="true"></span>
 	{/key}

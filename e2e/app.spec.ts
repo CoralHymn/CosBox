@@ -27,6 +27,8 @@ test('首访展示作品介绍并直接进入示例剧本', async ({ page }) => 
 	await page.goto('/');
 	await expect(page.getByText('一个会记住角色此刻处境的叙事引擎')).toBeVisible();
 	await page.getByRole('button', { name: '开始 3 分钟体验' }).click();
+	await expect(page.getByRole('dialog', { name: '功能导览' })).toBeVisible();
+	await page.getByRole('button', { name: '跳过导览' }).click();
 	await expect(page.getByText('演示剧本')).toBeVisible();
 	await expect(page.getByText('校庆前夜').first()).toBeVisible();
 

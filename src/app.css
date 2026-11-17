@@ -232,6 +232,20 @@ button:disabled {
 	min-width: 0;
 }
 
+/* 版本页：引导卡在面板上方纵向排列（否则 .content 的 flex 会把两者并排）。 */
+.version-tab {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+.version-tab > .panel {
+	flex: 1 1 auto;
+	height: auto;
+	min-height: 0;
+}
+
 /* ---------- 面板与卡片 ---------- */
 
 .panel {

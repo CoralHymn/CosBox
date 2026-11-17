@@ -103,7 +103,8 @@ export function buildDemoToolResult(
 	}
 	const rawText = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
 	const text = userVisibleText(rawText);
-	const toolCalls = pickDemoToolCall(text, tools);
+	const system = messages.find((message) => message.role === 'system')?.content ?? '';
+	const toolCalls = pickDemoToolCall(text, tools, system);
 	if (toolCalls.length > 0) {
 		return { content: null, toolCalls, usage: demoUsage(messages, null), thinking };
 	}
@@ -288,17 +289,40 @@ export function buildDemoSummary(messages: ChatMessage[]): string {
 }
 
 /** 根据用户文本选择确定性的演示工具调用（仅当该工具在列表中）。 */
-function pickDemoToolCall(text: string, tools: readonly StateToolSchema[]): ToolCall[] {
-	if (/去食堂|食堂/.test(text) && tools.some((tool) => tool.name === 'goto_location')) {
+function pickDemoToolCall(
+	text: string,
+	tools: readonly StateToolSchema[],
+	system = ''
+): ToolCall[] {
+	const has = (name: string): boolean => tools.some((tool) => tool.name === name);
+	const scene = system.includes('校庆') || system.includes('展板');
+	if (scene && /主楼大厅/.test(text) && has('goto_location')) {
+		return [{ id: 'call_demo_hall', name: 'goto_location', arguments: { name: '主楼大厅' } }];
+	}
+	if (/去食堂|食堂/.test(text) && has('goto_location')) {
 		return [{ id: 'call_demo_goto', name: 'goto_location', arguments: { name: '食堂' } }];
 	}
-	if (/运动服|换装/.test(text) && tools.some((tool) => tool.name === 'set_outfit')) {
+	if (/运动服|换装|卫衣/.test(text) && has('set_outfit')) {
 		return [
 			{ id: 'call_demo_outfit', name: 'set_outfit', arguments: { slot: 'top', item: '黑色卫衣' } }
 		];
 	}
-	if (/半小时后|时间推进/.test(text) && tools.some((tool) => tool.name === 'advance_time')) {
+	if (/半小时后|时间推进/.test(text) && has('advance_time')) {
 		return [{ id: 'call_demo_time', name: 'advance_time', arguments: { minutes: 30 } }];
+	}
+	if (scene && /吹倒|倒了/.test(text) && has('set_attribute')) {
+		return [
+			{ id: 'call_demo_blow', name: 'set_attribute', arguments: { key: '展板状态', value: '倒塌' } }
+		];
+	}
+	if (scene && /修好|扶起来|修复/.test(text) && has('set_attribute')) {
+		return [
+			{
+				id: 'call_demo_fix',
+				name: 'set_attribute',
+				arguments: { key: '展板状态', value: '已修复' }
+			}
+		];
 	}
 	return [];
 }
@@ -307,7 +331,19 @@ function pickDemoToolCall(text: string, tools: readonly StateToolSchema[]): Tool
 function buildDemoToolReply(output: string, system = ''): string {
 	const scene = system.includes('校庆') || system.includes('展板');
 	if (output.includes('已切换地点')) {
-		return scene ? '好，先去食堂。路上正好说说展板的事。' : '好，那我们过去吧。';
+		if (scene && output.includes('主楼大厅')) {
+			return '到了。大厅的灯只开了一半，展板就立在入口，影子被拉得很长。';
+		}
+		if (scene && output.includes('食堂')) {
+			return '好，先去食堂。路上正好说说展板的事。';
+		}
+		return '好，那我们过去吧。';
+	}
+	if (scene && output.includes('展板状态 = 倒塌')) {
+		return '风从连廊灌进来，展板整块拍在地上，胶带崩开了一半。';
+	}
+	if (scene && output.includes('展板状态 = 已修复')) {
+		return '最后一圈胶带刚好够。展板重新立住，顶灯也亮了。';
 	}
 	if (output.includes('时间推进')) {
 		return scene ? '时间过得真快。再不走，食堂真要收档了。' : '时间过得真快。';
@@ -370,6 +406,26 @@ export function buildDemoReply(messages: ChatMessage[]): string {
 	if (system.includes('【网络搜索结果】')) {
 		const title = extractSearchTitle(system);
 		return `我查了一下：${title ?? '没找到太具体的内容'}。要展开说说吗？`;
+	}
+	const scene = system.includes('校庆') || system.includes('展板');
+	if (scene) {
+		if (/风|天气|下雨/.test(text)) {
+			return '风比刚才大了。预报说九点有雨，得抓紧。';
+		}
+		if (/展板|进度|怎么样/.test(text)) {
+			const match = /展板状态:([^，,；;]+)/.exec(system);
+			const status = match?.[1]?.trim() ?? '';
+			if (status === '已修复') {
+				return '展板立住了，顶灯也亮起来了。';
+			}
+			if (status === '倒塌') {
+				return '展板倒了，胶带也快没了。得先把它扶起来。';
+			}
+			return '还差最后一角。胶带只剩半卷了。';
+		}
+		if (/累|休息/.test(text)) {
+			return '还好。等这盏灯亮起来，就值了。';
+		}
 	}
 	if (/时间|几点|什么时候|几点了/.test(text)) {
 		const rawTime = extractLine(system, '时间：') ?? '现在';

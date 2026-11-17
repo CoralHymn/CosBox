@@ -5,9 +5,21 @@
 		onRollback: () => void;
 		onContinue: () => void;
 		onOwnStory: () => void;
+		onGoSettings: () => void;
+		onHidePreview: () => void;
 	}
 
-	let { rolledBack, canRollback, onRollback, onContinue, onOwnStory }: Props = $props();
+	const timelineDots = [0, 1, 2, 3, 4, 5, 6, 7];
+
+	let {
+		rolledBack,
+		canRollback,
+		onRollback,
+		onContinue,
+		onOwnStory,
+		onGoSettings,
+		onHidePreview
+	}: Props = $props();
 </script>
 
 <div class="cue" class:rolled-back={rolledBack}>
@@ -30,10 +42,19 @@
 			<button class="ghost" onclick={onContinue}>继续体验</button>
 			<button class="ghost" onclick={onOwnStory}>写我自己的故事</button>
 		</div>
+		<div class="cue-end">
+			<p class="privacy">
+				本演示页没有后端，不收集对话、状态或 Key；数据只存在你的浏览器里。
+			</p>
+			<div class="cue-end-actions">
+				<button class="primary" onclick={onGoSettings}>去设置里填自己的 Key</button>
+				<button class="link" onclick={onHidePreview}>不再显示预览</button>
+			</div>
+		</div>
 	</div>
 	<div class="timeline" aria-hidden="true">
-		{#each Array(8) as _, index (index)}
-			<span style="--i: {index}" class:on={index < 6}></span>
+		{#each timelineDots as dot (dot)}
+			<span style="--i: {dot}" class:on={dot < 6}></span>
 		{/each}
 	</div>
 </div>
@@ -139,6 +160,40 @@
 		border-color: rgba(255, 255, 255, 0.28);
 	}
 
+	.cue-end {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 14px;
+		flex-wrap: wrap;
+		margin-top: 12px;
+		padding-top: 11px;
+		border-top: 1px solid rgba(255, 255, 255, 0.08);
+	}
+	.privacy {
+		margin: 0;
+		color: var(--text-faint);
+		font-size: 11.5px;
+		line-height: 1.5;
+	}
+	.cue-end-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.link {
+		padding: 4px 6px;
+		border: 0;
+		background: transparent;
+		color: var(--text-faint);
+		font-size: 11.5px;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+	.link:hover {
+		color: var(--text-dim);
+	}
+
 	.timeline {
 		position: relative;
 		display: flex;
@@ -215,6 +270,13 @@
 		}
 		.timeline {
 			display: none;
+		}
+		.cue-end {
+			align-items: flex-start;
+		}
+		.cue-end-actions {
+			width: 100%;
+			justify-content: space-between;
 		}
 	}
 

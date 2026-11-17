@@ -96,17 +96,17 @@
 	import { WorkspaceService } from '../lib/workspace/workspace-service';
 	import {
 		DEMO_CHIPS,
-		DEMO_INTRO_KEY,
-		DEMO_MARKER_KEY,
+		DEMO_HIDDEN_KEY,
 		demoChipDone,
 		ensureDemoWorkspace,
 		type DemoDockModel,
-		type DemoMarker
+		type DemoTourStep
 	} from '../lib/workspace/demo';
 	import type { WorkspaceMeta, WorkspaceAvatar } from '../lib/workspace/types';
 	import AvatarEditor from '../lib/components/AvatarEditor.svelte';
 	import ChatPanel from '../lib/components/ChatPanel.svelte';
 	import DemoIntro from '../lib/components/DemoIntro.svelte';
+	import DemoTour from '../lib/components/DemoTour.svelte';
 	import DemoVersionCue from '../lib/components/DemoVersionCue.svelte';
 	import ContextPanel from '../lib/components/ContextPanel.svelte';
 	import ImportExportPanel from '../lib/components/ImportExportPanel.svelte';
@@ -226,8 +226,10 @@
 	let booted = $state(false);
 	/** 首访示例工作区 id（null = 本次运行没有示例）。 */
 	let demoId = $state<string | null>(null);
-	/** 开场介绍是否展示。 */
+	/** 开场介绍是否展示（每次打开都展示，直到用户明确关闭预览）。 */
 	let showDemoIntro = $state(false);
+	/** 功能导览当前站；null = 不在导览。 */
+	let tourIndex = $state<number | null>(null);
 	/** 演示 Dock 最近一次状态反馈。 */
 	let demoNote = $state('');
 	/** 自动演示进行中。 */
@@ -343,6 +345,34 @@
 		return userNode?.parentId ?? outfitNode.parentId;
 	});
 	/** 演示 Dock 视图模型：不在示例、已跳过或未进入主界面时为 null。 */
+	/** 功能导览：聚光到真实界面，逐站缩放介绍。 */
+	const demoTourSteps: DemoTourStep[] = $derived([
+		{
+			target: '[data-demo-tour="chat"]',
+			kicker: '01 / 对话',
+			title: '对话不是聊天框',
+			text: '每次回复前，系统会把状态摘要、世界书命中、长期记忆和压缩后的历史重新组装进系统提示。'
+		},
+		{
+			target: isMobile ? '[data-demo-tour="mobile-state"]' : '[data-demo-tour="state"]',
+			kicker: '02 / 状态',
+			title: '状态是真的状态',
+			text: '时间、地点、穿着、属性是结构化数据，不是台词。所以下一句回复会被它们约束，而不是演着演着忘设定。'
+		},
+		{
+			target: isMobile ? '[data-demo-tour="mobile-menu"]' : '[data-demo-tour="nav"]',
+			kicker: '03 / 世界',
+			title: '一整套世界编辑',
+			text: '地点库、衣柜、日程、世界书、长期记忆都在导航里。任何改动都会进入下一次对话的上下文。'
+		},
+		{
+			target: '[data-demo-tour="versions"]',
+			kicker: '04 / 时间线',
+			title: '每一步都能回去',
+			text: '每条消息与状态变更都是一个节点。切到版本页，聊天和状态会一起回到那一刻。'
+		}
+	]);
+
 	const demoDockModel: DemoDockModel | null = $derived(
 		isDemoWorkspace && entered && !demoDismissed
 			? {
@@ -561,30 +591,26 @@
 			// 首访演示：只在没有任何用户数据时播种；老用户不受打扰。
 			// `?demo=off` 是给自动化测试/截图用的显式关闭入口，不影响正常访问。
 			const demoDisabled = new URLSearchParams(window.location.search).get('demo') === 'off';
-			const hadDemoMarker = await kv.get<DemoMarker>(DEMO_MARKER_KEY);
+			const demoHidden = (await kv.get<boolean>(DEMO_HIDDEN_KEY)) === true;
 			const demoWorkspaceId = demoDisabled
 				? null
 				: await ensureDemoWorkspace({
-				workspaces,
-				workspaceService,
-				settings,
-				session,
+						workspaces,
+						workspaceService,
+						settings,
+						session,
 						memories: memoryStore,
 						worldInfo,
 						kv
 					});
 			if (demoWorkspaceId !== null) {
 				demoId = demoWorkspaceId;
-				const introSeen = await kv.get<boolean>(DEMO_INTRO_KEY);
-				if (hadDemoMarker === undefined) {
-					entered = true;
-					tab = 'chat';
-					showDemoIntro = introSeen !== true;
-					demoNote = '示例剧本已就位：点下面任意一句，状态会跟着变。';
-				} else if (workspaces.getCurrentId() === demoWorkspaceId) {
-					// 刷新后仍停留在示例里：必须走 switchTo 让仓储 scope 跟上，
-					// 只设 entered 会读到默认工作区的空数据。
+				if (!demoHidden) {
+					// 每次打开都回到示例并展示介绍；只有「不再显示预览」才写隐藏标记。
 					await handleEnterWorkspace(demoWorkspaceId);
+					showDemoIntro = true;
+					demoDismissed = false;
+					demoNote = '示例剧本已就位：点下面任意一句，状态会跟着变。';
 				}
 				refreshWorkspaceList();
 			}
@@ -1538,13 +1564,73 @@
 
 	function handleDemoIntroStart(): void {
 		showDemoIntro = false;
-		void kv.set(DEMO_INTRO_KEY, true);
-		demoNote = '从第一句开始：先问时间，再看看地点怎么变。';
+		tourIndex = 0;
 	}
 
 	function handleDemoIntroSkip(): void {
 		showDemoIntro = false;
-		void kv.set(DEMO_INTRO_KEY, true);
+	}
+
+	/** 导览切换站：最后一站需要先把版本页切出来，其余站回到对话。 */
+	function handleTourStep(next: number): void {
+		if (next === demoTourSteps.length - 1) {
+			demoRolledBack = false;
+			tab = 'versions';
+			return;
+		}
+		if (tab === 'versions') {
+			tab = 'chat';
+		}
+	}
+
+	function handleTourNext(): void {
+		if (tourIndex === null) {
+			return;
+		}
+		if (tourIndex >= demoTourSteps.length - 1) {
+			handleTourFinish();
+			return;
+		}
+		const next = tourIndex + 1;
+		tourIndex = next;
+		handleTourStep(next);
+	}
+
+	function handleTourPrev(): void {
+		if (tourIndex === null || tourIndex === 0) {
+			return;
+		}
+		const next = tourIndex - 1;
+		tourIndex = next;
+		handleTourStep(next);
+	}
+
+	function handleTourFinish(): void {
+		tourIndex = null;
+		tab = 'chat';
+		demoRolledBack = false;
+		demoNote = '从第一句开始：先问时间，再看看地点怎么变。';
+	}
+
+	/** 结尾：跳到设置页填自己的 Key；本演示页没有后端，不收集数据。 */
+	async function handleDemoGoSettings(): Promise<void> {
+		demoAutoRunning = false;
+		demoRolledBack = false;
+		tourIndex = null;
+		tab = 'settings';
+		toasts.push('info', '在「模型服务管理」里填自己的 Key；本页不收集数据，Key 只保存在你的浏览器里。');
+	}
+
+	/** 结尾：明确关闭预览，下次打开直接进工作区。 */
+	async function handleDemoHidePreview(): Promise<void> {
+		demoAutoRunning = false;
+		demoDismissed = true;
+		demoRolledBack = false;
+		tourIndex = null;
+		showDemoIntro = false;
+		await kv.set(DEMO_HIDDEN_KEY, true);
+		handleExitToLanding();
+		toasts.success('已关闭预览，下次打开会直接进入工作区');
 	}
 
 	async function handleCheckpoint(desc: string): Promise<void> {
@@ -2052,6 +2138,17 @@
 	{#if showDemoIntro}
 		<DemoIntro onStart={handleDemoIntroStart} onSkip={handleDemoIntroSkip} />
 	{/if}
+	{#if tourIndex !== null && demoTourSteps[tourIndex] !== undefined}
+		{#key tourIndex}
+			<DemoTour
+				steps={demoTourSteps}
+				index={tourIndex}
+				onNext={handleTourNext}
+				onPrev={handleTourPrev}
+				onSkip={handleTourFinish}
+			/>
+		{/key}
+	{/if}
 	<!-- 主题背景图图层：图片与透明度由 JS 直接设置，不走 CSS 变量
 	     （超长 data URL 存 CSS 变量在部分浏览器会解析失败）。 -->
 	<div class="theme-backdrop" aria-hidden="true"></div>
@@ -2105,6 +2202,7 @@
 			>
 			<button
 				class="mobile-chat-title"
+				data-demo-tour="mobile-state"
 				aria-label="实时状态"
 				onclick={() => (mobileStateOpen = !mobileStateOpen)}
 			>
@@ -2119,6 +2217,7 @@
 			{/if}
 			<button
 				class="mobile-feature-toggle"
+				data-demo-tour="mobile-menu"
 				aria-label="功能菜单"
 				title="功能菜单"
 				onclick={() => (mobileFeatureOpen = true)}><Ellipsis size={20} /></button
@@ -2332,24 +2431,28 @@
 					onImportConfig={handleImportConfig}
 				/>
 			{:else if tab === 'versions'}
-				{#if isDemoWorkspace && !demoDismissed && demoDoneCount > 0}
-					<DemoVersionCue
-						rolledBack={demoRolledBack}
-						canRollback={demoOutfitParentId !== null}
-						onRollback={() => void handleDemoRollback()}
-						onContinue={() => (tab = 'chat')}
-						onOwnStory={() => void handleDemoOwnStory()}
+				<div class="version-tab">
+					{#if isDemoWorkspace && !demoDismissed && demoDoneCount > 0}
+						<DemoVersionCue
+							rolledBack={demoRolledBack}
+							canRollback={demoOutfitParentId !== null}
+							onRollback={() => void handleDemoRollback()}
+							onContinue={() => (tab = 'chat')}
+							onOwnStory={() => void handleDemoOwnStory()}
+							onGoSettings={() => void handleDemoGoSettings()}
+							onHidePreview={() => void handleDemoHidePreview()}
+						/>
+					{/if}
+					<VersionPanel
+						snapshots={session.snapshots}
+						headId={session.headId}
+						branches={session.branches}
+						onCheckout={handleCheckout}
+						onAddCheckpoint={handleCheckpoint}
+						onDeleteBranch={handleDeleteBranch}
+						onDeleteBranches={handleDeleteBranches}
 					/>
-				{/if}
-				<VersionPanel
-					snapshots={session.snapshots}
-					headId={session.headId}
-					branches={session.branches}
-					onCheckout={handleCheckout}
-					onAddCheckpoint={handleCheckpoint}
-					onDeleteBranch={handleDeleteBranch}
-					onDeleteBranches={handleDeleteBranches}
-				/>
+				</div>
 			{:else if tab === 'world'}
 				<WorldInfoPanel
 					entries={worldInfo.entries}
