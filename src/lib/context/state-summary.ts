@@ -14,23 +14,48 @@ import type {
 	ScheduleState
 } from '../core/types';
 
+/** 全部穿着槽位（默认顺序与状态面板一致）。 */
+const DEFAULT_OUTFIT_SLOTS: readonly OutfitSlot[] = [
+	'headwear',
+	'top',
+	'underwear',
+	'underpants',
+	'bottom',
+	'socks',
+	'shoes'
+];
+
+const OUTFIT_SLOT_LABELS: Record<OutfitSlot, string> = {
+	headwear: '帽子',
+	top: '上衣',
+	underwear: '内衣',
+	underpants: '内裤',
+	bottom: '下装',
+	socks: '袜子',
+	shoes: '鞋'
+};
+
+/**
+ * 状态摘要的可选合规参数：按版本传入，默认行为与旧版完全一致。
+ * 纯函数：不读取全局状态，只使用调用方显式传入的槽位与衣柜过滤。
+ */
+export interface StateSummaryOptions {
+	/** 摘要中展示的穿着槽位；缺省为全部 7 个槽位。 */
+	slots?: readonly OutfitSlot[];
+	/** 衣柜条目过滤（展示与细节回填共用）；缺省展示全部。 */
+	wardrobeFilter?: (item: ClothingItem) => boolean;
+}
+
 /**
  * 把穿着结构渲染成自然语言（按穿戴顺序）：
  * 如「帽子：未穿；上衣：白色衬衫；内衣：白色棉质内衣；…；配饰：蝴蝶结发带」。
+ * 可通过 options.slots 限定展示槽位（Web 版过滤私密槽位）。
  */
-export function formatOutfit(outfit: OutfitState): string {
-	const slots: ReadonlyArray<[OutfitSlot, string]> = [
-		['headwear', '帽子'],
-		['top', '上衣'],
-		['underwear', '内衣'],
-		['underpants', '内裤'],
-		['bottom', '下装'],
-		['socks', '袜子'],
-		['shoes', '鞋']
-	];
-	const parts = slots.map(([slot, label]) => {
+export function formatOutfit(outfit: OutfitState, options: StateSummaryOptions = {}): string {
+	const slots = options.slots ?? DEFAULT_OUTFIT_SLOTS;
+	const parts = slots.map((slot) => {
 		const value = outfit[slot];
-		return `${label}：${value !== null && value.trim() !== '' ? value : '未穿'}`;
+		return `${OUTFIT_SLOT_LABELS[slot]}：${value !== null && value.trim() !== '' ? value : '未穿'}`;
 	});
 	const accessories = outfit.accessories.filter((item) => item.trim() !== '').join('、');
 	parts.push(`配饰：${accessories === '' ? '未穿' : accessories}`);
@@ -59,11 +84,15 @@ export function formatPlaces(places: LocationDef[]): string {
 }
 
 /** 渲染衣柜（带大类），如「常服 > 白色衬衫：白色棉质衬衫…；运动服 > 黑色卫衣：宽松…」。 */
-export function formatWardrobe(wardrobe: ClothingItem[]): string {
-	if (wardrobe.length === 0) {
+export function formatWardrobe(
+	wardrobe: ClothingItem[],
+	filter?: (item: ClothingItem) => boolean
+): string {
+	const visible = filter === undefined ? wardrobe : wardrobe.filter(filter);
+	if (visible.length === 0) {
 		return '（衣柜为空）';
 	}
-	return wardrobe
+	return visible
 		.map(
 			(item) =>
 				`${item.category ? `${item.category} > ${item.name}` : item.name}：${item.description}`
@@ -80,17 +109,13 @@ export function findWardrobeItem(wardrobe: ClothingItem[], name: string): Clothi
  * 渲染当前穿着各件的衣柜描述（与【衣柜】条目一致），如
  * 「白色衬衫：白色棉质衬衫，领口带细蕾丝；深蓝百褶裙：过膝深蓝百褶裙」。
  * 已穿但衣柜中无同名条目、或条目无描述时不参与；全部无描述时返回空串。
+ * options 可限定槽位与衣柜过滤（Web 版过滤私密槽位）。
  */
-export function formatOutfitDetails(outfit: OutfitState): string {
-	const slots: readonly OutfitSlot[] = [
-		'headwear',
-		'top',
-		'underwear',
-		'underpants',
-		'bottom',
-		'socks',
-		'shoes'
-	];
+export function formatOutfitDetails(
+	outfit: OutfitState,
+	options: StateSummaryOptions = {}
+): string {
+	const slots = options.slots ?? DEFAULT_OUTFIT_SLOTS;
 	const wornNames: string[] = [];
 	for (const slot of slots) {
 		const value = outfit[slot];
@@ -105,7 +130,14 @@ export function formatOutfitDetails(outfit: OutfitState): string {
 	}
 	const parts: string[] = [];
 	for (const name of [...new Set(wornNames)]) {
-		const description = findWardrobeItem(outfit.wardrobe, name)?.description.trim() ?? '';
+		const item = findWardrobeItem(outfit.wardrobe, name);
+		if (item === undefined) {
+			continue;
+		}
+		if (options.wardrobeFilter !== undefined && !options.wardrobeFilter(item)) {
+			continue;
+		}
+		const description = item.description.trim();
 		if (description !== '') {
 			parts.push(`${name}：${description}`);
 		}
@@ -139,9 +171,13 @@ export function summarizeSchedule(schedule: ScheduleState): string {
 /**
  * 生成结构化状态摘要，注入 LLM 系统提示。
  * 覆盖：时间、当前活动、地点、穿着、属性、日程。
+ * options 由调用方按版本传入；缺省保持全量输出。
  */
-export function summarizeState(state: CharacterState): string {
-	const outfitDetails = formatOutfitDetails(state.outfit);
+export function summarizeState(
+	state: CharacterState,
+	options: StateSummaryOptions = {}
+): string {
+	const outfitDetails = formatOutfitDetails(state.outfit, options);
 	const lines = [
 		'【当前状态】',
 		`时间：${formatWorldTime(state.schedule.time)}（${describeCurrentActivity(state.schedule)}）`,
@@ -150,12 +186,12 @@ export function summarizeState(state: CharacterState): string {
 				? `${state.location.category} > ${state.location.name}`
 				: state.location.name
 		}（${state.location.description}）`,
-		`穿着：${formatOutfit(state.outfit)}`,
+		`穿着：${formatOutfit(state.outfit, options)}`,
 		...(outfitDetails !== '' ? [`穿着细节：${outfitDetails}`] : []),
 		`属性：${formatAttributes(state.attributes)}`,
 		`今日日程：${summarizeSchedule(state.schedule)}`,
 		`【已知地点】${formatPlaces(state.places)}`,
-		`【衣柜】${formatWardrobe(state.outfit.wardrobe)}`
+		`【衣柜】${formatWardrobe(state.outfit.wardrobe, options.wardrobeFilter)}`
 	];
 	return lines.join('\n');
 }

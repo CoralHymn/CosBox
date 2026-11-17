@@ -4,6 +4,7 @@ import type {
 	OutfitSlot,
 	StatePatch
 } from '../core/types';
+import { isWardrobeItemHidden, type EditionRules } from '../platform/edition';
 
 /** 一条换装指令：可显式指定槽位，或由衣物类型自动推断。 */
 export interface WearAssignment {
@@ -134,12 +135,16 @@ function parseMinutes(args: string): number {
  * 把斜杠命令应用到当前状态，返回待执行的变更与反馈。
  * 纯函数：不直接修改状态，由调用方通过 CharacterManager 落地（自动生成快照）。
  */
-export function applySlashCommand(state: CharacterState, command: SlashCommand): SlashResult {
+export function applySlashCommand(
+	state: CharacterState,
+	command: SlashCommand,
+	rules?: EditionRules
+): SlashResult {
 	switch (command.kind) {
 		case 'goto':
 			return applyGoto(state, command.query);
 		case 'wear':
-			return applyWear(state, command.assignments);
+			return applyWear(state, command.assignments, rules);
 		case 'time': {
 			if (!Number.isFinite(command.minutes)) {
 				return { message: '', error: '/time 需要分钟数，例如 /time +30 或 /time -15' };
@@ -206,7 +211,11 @@ function findPlace(
 }
 
 /** /wear：解析每条换装指令并合并为一个状态补丁。 */
-function applyWear(state: CharacterState, assignments: WearAssignment[]): SlashResult {
+function applyWear(
+	state: CharacterState,
+	assignments: WearAssignment[],
+	rules?: EditionRules
+): SlashResult {
 	if (assignments.length === 0) {
 		return {
 			message: '',
@@ -216,7 +225,7 @@ function applyWear(state: CharacterState, assignments: WearAssignment[]): SlashR
 	const outfitPatch: Partial<CharacterState['outfit']> = {};
 	const changes: string[] = [];
 	for (const assignment of assignments) {
-		const resolved = resolveWear(state.outfit.wardrobe, assignment);
+		const resolved = resolveWear(state.outfit.wardrobe, assignment, rules);
 		if (resolved.error) {
 			return { message: '', error: resolved.error };
 		}
@@ -229,17 +238,41 @@ function applyWear(state: CharacterState, assignments: WearAssignment[]): SlashR
 	};
 }
 
-/** 解析单条换装指令，校验槽位与衣物类型，防止把内裤套头上。 */
+/** 当前版本可用的槽位（未传规则 = 保持原有全量）。 */
+function availableOutfitSlots(rules?: EditionRules): readonly OutfitSlot[] {
+	return rules === undefined ? OUTFIT_SLOTS : rules.outfitSlots.map((slot) => slot.key);
+}
+
+/** 当前版本可用的槽位中文列表（用于错误提示）。 */
+function availableSlotLabels(rules?: EditionRules): string {
+	return availableOutfitSlots(rules)
+		.map((slot) => SLOT_LABELS[slot])
+		.join('/');
+}
+
+/** 解析单条换装指令，校验槽位与衣物类型，防止衣物错配到不合适的部位。 */
 function resolveWear(
 	wardrobe: ClothingItem[],
-	assignment: WearAssignment
+	assignment: WearAssignment,
+	rules?: EditionRules
 ): { slot: OutfitSlot; item: string | null; error?: string } {
+	const allowedSlots = availableOutfitSlots(rules);
+	const itemVisible = (entry: ClothingItem): boolean =>
+		rules === undefined || !isWardrobeItemHidden(entry, rules);
 	if (assignment.slot === undefined && assignment.raw.includes('=')) {
 		const alias = assignment.raw.slice(0, assignment.raw.indexOf('=')).trim();
 		return {
 			slot: 'top',
 			item: null,
-			error: `未知槽位「${alias}」，可用：帽子/上衣/内衣/内裤/下装/袜子/鞋`
+			error: `未知槽位「${alias}」，可用：${availableSlotLabels(rules)}`
+		};
+	}
+	if (assignment.slot !== undefined && !allowedSlots.includes(assignment.slot)) {
+		const alias = assignment.raw.slice(0, assignment.raw.indexOf('=')).trim();
+		return {
+			slot: 'top',
+			item: null,
+			error: `未知槽位「${alias}」，可用：${availableSlotLabels(rules)}`
 		};
 	}
 	if (assignment.item === null) {
@@ -248,7 +281,7 @@ function resolveWear(
 		}
 		return { slot: assignment.slot, item: null };
 	}
-	const item = wardrobe.find((entry) => entry.name === assignment.item);
+	const item = wardrobe.find((entry) => entry.name === assignment.item && itemVisible(entry));
 	if (item === undefined) {
 		return {
 			slot: 'top',
@@ -258,7 +291,7 @@ function resolveWear(
 	}
 	if (assignment.slot === undefined) {
 		const inferred = inferSlot(item);
-		if (inferred === undefined) {
+		if (inferred === undefined || !allowedSlots.includes(inferred)) {
 			return {
 				slot: 'top',
 				item: null,
@@ -268,7 +301,11 @@ function resolveWear(
 		return { slot: inferred, item: item.name };
 	}
 	const kindSlot = inferSlot(item);
-	if (kindSlot !== undefined && kindSlot !== assignment.slot) {
+	if (
+		kindSlot !== undefined &&
+		kindSlot !== assignment.slot &&
+		allowedSlots.includes(kindSlot)
+	) {
 		return {
 			slot: assignment.slot,
 			item: null,

@@ -2,6 +2,11 @@
 	import { X } from '@lucide/svelte';
 	import { wardrobeItemsForSlot } from '../context/state-summary';
 	import type { ClothingItem } from '../core/types';
+	import {
+		containsHiddenKeyword,
+		getEditionRules,
+		isWardrobeItemHidden
+	} from '../platform/edition';
 
 	interface Props {
 		/** 输入框 id 前缀（同一页面多个 picker 时保持唯一）。 */
@@ -20,8 +25,14 @@
 	let adding = $state(false);
 	let selected = $state('');
 
+	const rules = getEditionRules();
 	const candidates = $derived(
-		wardrobeItemsForSlot(wardrobe, 'accessory').filter((item) => !value.includes(item.name))
+		wardrobeItemsForSlot(wardrobe, 'accessory')
+			.filter((item) => !value.includes(item.name) && !isWardrobeItemHidden(item, rules))
+	);
+	/** 只收起不应展示的名称；底层 value 与提交逻辑保持全量。 */
+	const visibleValue = $derived(
+		value.filter((name) => !containsHiddenKeyword(name, rules))
 	);
 	const selectId = $derived(`${idPrefix}-accessories`);
 	const customId = $derived(`${idPrefix}-accessories-custom`);
@@ -52,12 +63,12 @@
 
 <div class="field">
 	<label for={selectId}>{label}</label>
-	{#if value.length === 0}
+	{#if visibleValue.length === 0}
 		<p class="muted" style="margin: 0 0 6px;">（未佩戴）</p>
 	{/if}
-	{#if value.length > 0}
+	{#if visibleValue.length > 0}
 		<div class="chips" role="list" aria-label={`已佩戴的${label}`}>
-			{#each value as name (name)}
+			{#each visibleValue as name (name)}
 				<span class="chip" role="listitem">
 					{name}
 					<button

@@ -1,4 +1,5 @@
 import type { ClothingItem, LocationDef, OutfitSlot } from '../core/types';
+import { isWardrobeItemHidden, type EditionRules } from '../platform/edition';
 
 /** 一条自动补全建议。 */
 export interface AutocompleteSuggestion {
@@ -47,7 +48,8 @@ const TIME_SUGGESTIONS: readonly AutocompleteSuggestion[] = [
 export function buildAutocompleteSuggestions(
 	text: string,
 	places: readonly LocationDef[],
-	wardrobe: readonly ClothingItem[]
+	wardrobe: readonly ClothingItem[],
+	rules?: EditionRules
 ): AutocompleteSuggestion[] {
 	if (!text.startsWith('/')) {
 		return [];
@@ -64,7 +66,7 @@ export function buildAutocompleteSuggestions(
 		case '/goto':
 			return placeSuggestions(places, last);
 		case '/wear':
-			return wearSuggestions(wardrobe, last);
+			return wearSuggestions(wardrobe, last, rules);
 		case '/time':
 			return TIME_SUGGESTIONS.filter((suggestion) => suggestion.insert.startsWith(last));
 		default:
@@ -89,25 +91,38 @@ function placeSuggestions(
 }
 
 /** /wear 的候选：未出现 = 时补槽位；出现 槽位= 后按类型补衣柜衣物，并附「无（脱掉）」。 */
-function wearSuggestions(wardrobe: readonly ClothingItem[], last: string): AutocompleteSuggestion[] {
+function wearSuggestions(
+	wardrobe: readonly ClothingItem[],
+	last: string,
+	rules?: EditionRules
+): AutocompleteSuggestion[] {
+	const slotOptions =
+		rules === undefined
+			? SLOT_OPTIONS
+			: SLOT_OPTIONS.filter((option) =>
+					rules.outfitSlots.some((slot) => slot.key === option.slot)
+				);
 	const eq = last.indexOf('=');
 	if (eq === -1) {
 		const query = last.trim();
-		return SLOT_OPTIONS.map((option) => ({
-			label: `${option.label}=`,
-			detail: option.slot,
-			insert: `${option.label}=`,
-			keepOpen: true
-		})).filter((suggestion) => suggestion.label.startsWith(query));
+		return slotOptions
+			.map((option) => ({
+				label: `${option.label}=`,
+				detail: option.slot,
+				insert: `${option.label}=`,
+				keepOpen: true
+			}))
+			.filter((suggestion) => suggestion.label.startsWith(query));
 	}
 	const slotLabel = last.slice(0, eq).trim();
-	const slot = SLOT_OPTIONS.find((option) => option.label === slotLabel)?.slot;
+	const slot = slotOptions.find((option) => option.label === slotLabel)?.slot;
 	if (slot === undefined) {
 		return [];
 	}
 	const itemQuery = last.slice(eq + 1).trim();
 	const items = wardrobe
 		.filter((item) => item.kind === slot || item.kind === undefined || item.kind === 'any')
+		.filter((item) => rules === undefined || !isWardrobeItemHidden(item, rules))
 		.map((item) => ({
 			label: item.name,
 			detail: item.category === '' ? undefined : `${item.category} > ${item.name}`,

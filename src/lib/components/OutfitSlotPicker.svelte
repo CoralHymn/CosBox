@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { wardrobeItemsForSlot } from '../context/state-summary';
 	import type { ClothingItem, OutfitSlot } from '../core/types';
+	import { getEditionRules, isWardrobeItemHidden } from '../platform/edition';
 
 	interface Props {
 		/** 输入框 id 前缀（同一页面多个 picker 时保持唯一）。 */
 		idPrefix: string;
 		label: string;
-		/** 槽位类型：候选衣柜条目按此过滤，防止「内裤套头上」这类错配。 */
+		/** 槽位类型：候选衣柜条目按此过滤，防止衣物错配到不合适的部位。 */
 		slot: OutfitSlot;
 		value: string;
 		wardrobe: ClothingItem[];
@@ -17,7 +18,10 @@
 	let customText = $state('');
 	let customMode = $state(false);
 
-	const candidates = $derived(wardrobeItemsForSlot(wardrobe, slot));
+	const rules = getEditionRules();
+	const candidates = $derived(
+		wardrobeItemsForSlot(wardrobe, slot).filter((item) => !isWardrobeItemHidden(item, rules))
+	);
 	const selectedItem = $derived(candidates.find((item) => item.name === value) ?? null);
 	const selectId = $derived(`${idPrefix}-${slot}`);
 	const customId = $derived(`${idPrefix}-${slot}-custom`);

@@ -3,6 +3,7 @@ import type { CharacterState, ChatMessageView, MessageSegment, WorldTime } from 
 import { LlmError } from '../core/errors';
 import { buildContext, type ContextBundle, type ContextPipelineInput } from '../context/pipeline';
 import { excludeFromContext } from '../context/history';
+import type { StateSummaryOptions } from '../context/state-summary';
 import {
 	buildCompactedHistory,
 	buildSummaryRequest,
@@ -133,6 +134,10 @@ export interface GenerateReplyOptions {
 	textToolFallback?: boolean;
 	/** 决策模型补执行：主回复未调用工具时，由专业决策模型判断是否需要调用并补执行。 */
 	enableDecisionConfirm?: boolean;
+	/** 状态摘要的版本化选项（Web 版过滤私密穿着）。 */
+	stateSummaryOptions?: StateSummaryOptions;
+	/** 状态确认提示是否包含私密穿着示例（Web 版关闭）。 */
+	includeSensitiveOutfitHints?: boolean;
 }
 
 /** 默认最大工具轮数：超过后停止并以提示文本收尾。 */
@@ -1112,7 +1117,9 @@ export class ChatService {
 			onMetric: forward?.onMetric,
 			onToolStart: options.onToolStart,
 			onToolResult: options.onToolResult,
-			textToolFallback: options.textToolFallback !== false
+			textToolFallback: options.textToolFallback !== false,
+			stateSummaryOptions: options.stateSummaryOptions,
+			includeSensitiveOutfitHints: options.includeSensitiveOutfitHints
 		});
 		return { executed: result.executed, rounds: result.rounds, debug: result.debug };
 	}
@@ -1138,6 +1145,10 @@ export class ChatService {
 		onToolResult?: (result: ExecutedToolCall) => void;
 		/** 文本形式工具调用双通道（缺省开启）。 */
 		textToolFallback?: boolean;
+		/** 状态摘要的版本化选项（Web 版过滤私密穿着）。 */
+		stateSummaryOptions?: StateSummaryOptions;
+		/** 状态确认提示是否包含私密穿着示例（Web 版关闭）。 */
+		includeSensitiveOutfitHints?: boolean;
 	}): Promise<{
 		executed: ExecutedToolCall[];
 		rounds: ReplyRound[];
@@ -1151,7 +1162,8 @@ export class ChatService {
 			lastUser: input.lastUser,
 			lastAssistant: input.lastAssistant,
 			config: input.config.decisionModel,
-			signal: input.signal
+			signal: input.signal,
+			summaryOptions: input.stateSummaryOptions
 		});
 		if (!decision.needsTool) {
 			input.onMetric?.('decision.no_change');
@@ -1171,7 +1183,9 @@ export class ChatService {
 			onToolStart: input.onToolStart,
 			onToolResult: input.onToolResult,
 			onMetric: input.onMetric,
-			textToolFallback: input.textToolFallback !== false
+			textToolFallback: input.textToolFallback !== false,
+			summaryOptions: input.stateSummaryOptions,
+			includeSensitiveOutfitHints: input.includeSensitiveOutfitHints
 		});
 		const debug: DecisionDebugView = {
 			...decision.debug,

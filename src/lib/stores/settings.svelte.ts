@@ -12,7 +12,7 @@ import type { ScopedKv } from '../db/scoped-kv';
 export interface AppProfile {
 	name: string;
 	/**
-	 * 系统提示词：回复规则 / 破甲词；空值表示使用内置默认模板。
+	 * 系统提示词：回复规则 / 叙事设定；空值表示使用内置默认模板。
 	 * 原「角色档案 → 系统提示」字段迁移到这里，沿用同一持久化键。
 	 */
 	systemPrompt: string | null;

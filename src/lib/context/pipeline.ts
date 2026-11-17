@@ -9,7 +9,7 @@ import {
 	type HistoryOptions,
 	type HistoryResult
 } from './history';
-import { summarizeState } from './state-summary';
+import { summarizeState, type StateSummaryOptions } from './state-summary';
 import { findWorldInfoHits, type WorldInfoHit } from './world-info';
 
 /** 单次请求默认注入的长期记忆条数上限。 */
@@ -17,7 +17,7 @@ export const DEFAULT_MEMORY_INJECT_LIMIT = 5;
 
 /** 可组合的角色扮演提示词段落。 */
 export interface PromptSections {
-	/** 系统提示词：回复规则 / 破甲词；留空时回退到内置默认模板。 */
+	/** 系统提示词：回复规则 / 叙事设定；留空时回退到内置默认模板。 */
 	systemPrompt?: string | null;
 	/** 人物提示词：AI 扮演的角色身份与性格。 */
 	characterPrompt?: string | null;
@@ -48,6 +48,8 @@ export interface ContextPipelineInput extends PromptSections {
 	memories?: ReadonlyArray<MemoryEntry>;
 	/** 单次请求最多注入的记忆条数（默认 5）。 */
 	memoryLimit?: number;
+	/** 状态摘要的版本化选项（Web 版用于过滤私密穿着槽位与衣柜条目）。 */
+	stateSummaryOptions?: StateSummaryOptions;
 }
 
 /** 上下文管道的结构化输出。 */
@@ -200,7 +202,7 @@ export function buildContext(input: ContextPipelineInput): ContextBundle {
 	const name =
 		(input.characterName && input.characterName.trim()) ||
 		(typeof input.state.attributes.name === 'string' ? input.state.attributes.name : '角色');
-	const stateSummary = summarizeState(input.state);
+	const stateSummary = summarizeState(input.state, input.stateSummaryOptions);
 	const historyResult: HistoryResult = prepareHistory(
 		contextConversation,
 		input.historyOptions ?? { maxMessages: 20 }

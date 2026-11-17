@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { ChevronRight, GripVertical, X } from '@lucide/svelte';
 	import { findWardrobeItem } from '../context/state-summary';
-	import { CLOTHING_KINDS } from '../core/state';
 	import type {
 		ClothingItem,
 		ClothingKind,
@@ -10,6 +9,11 @@
 		OutfitState,
 		StatePatch
 	} from '../core/types';
+	import {
+		getEditionRules,
+		isWardrobeItemHidden,
+		type EditionRules
+	} from '../platform/edition';
 	import type {
 		GeneratedItem,
 		GenerationRequest,
@@ -54,15 +58,9 @@
 		description: string;
 	}
 
-	const slots: { key: OutfitSlot; label: string }[] = [
-		{ key: 'headwear', label: '帽子' },
-		{ key: 'top', label: '上衣' },
-		{ key: 'underwear', label: '内衣' },
-		{ key: 'underpants', label: '内裤' },
-		{ key: 'bottom', label: '下装' },
-		{ key: 'socks', label: '袜子' },
-		{ key: 'shoes', label: '鞋' }
-	];
+	/** 展示槽位与可选衣物类型均按运行版本收敛；底层 rows 仍是全量。 */
+	const rules: EditionRules = getEditionRules();
+	const slots = rules.outfitSlots;
 
 	const kindLabels: Record<ClothingKind, string> = {
 		headwear: '帽子',
@@ -89,7 +87,8 @@
 	let importInput = $state<HTMLInputElement | null>(null);
 	let sortingEnabled = $state(false);
 
-	const groups = $derived(groupByCategory(rows));
+	const visibleRows = $derived(rows.filter((row) => !isWardrobeItemHidden(row, rules)));
+	const groups = $derived(groupByCategory(visibleRows));
 	const slotItems = $derived(
 		Object.fromEntries(
 			slots.map(({ key }) => [key, findWardrobeItem(outfit.wardrobe, outfit[key] ?? '')])
@@ -98,7 +97,9 @@
 	const accessoryItems = $derived(
 		outfit.accessories
 			.map((name) => findWardrobeItem(outfit.wardrobe, name))
-			.filter((item): item is ClothingItem => item !== undefined)
+			.filter(
+				(item): item is ClothingItem => item !== undefined && !isWardrobeItemHidden(item, rules)
+			)
 	);
 
 	$effect(() => {
@@ -218,7 +219,7 @@
 	<h2 class="panel-title">衣柜</h2>
 	<p class="panel-sub">
 		衣柜条目带分类与衣物类型（如「常服 > 上衣 >
-		白色衬衫」）；槽位只能从匹配类型的衣物中挑选，不会把内裤套头上。
+		白色衬衫」）；槽位只能从匹配类型的衣物中挑选，不会把衣物错配到不合适的部位。
 	</p>
 
 	<div class="card">
@@ -330,7 +331,7 @@
 											commitWardrobe();
 										}}
 									>
-										{#each CLOTHING_KINDS as kind (kind)}
+										{#each rules.clothingKinds as kind (kind)}
 											<option value={kind}>{kindLabels[kind]}</option>
 										{/each}
 									</select>
@@ -384,7 +385,7 @@
 			<div class="field">
 				<label for="new-item-kind">衣物类型</label>
 				<select id="new-item-kind" class="select" bind:value={draftKind}>
-					{#each CLOTHING_KINDS as kind (kind)}
+					{#each rules.clothingKinds as kind (kind)}
 						<option value={kind}>{kindLabels[kind]}</option>
 					{/each}
 				</select>

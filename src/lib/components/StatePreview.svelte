@@ -2,12 +2,16 @@
 	import { describeCurrentActivity, formatWorldTime } from '../core/state';
 	import { formatAttributes, formatOutfit, summarizeSchedule } from '../context/state-summary';
 	import type { CharacterState } from '../core/types';
+	import { getEditionRules, stateSummaryOptionsFor } from '../platform/edition';
 
 	interface Props {
 		characterState: CharacterState;
 	}
 
 	let { characterState }: Props = $props();
+
+	/** 预览与系统提示使用同一套版本规则，Web 版不显示私密槽位。 */
+	const summaryOptions = stateSummaryOptionsFor(getEditionRules());
 </script>
 
 <div class="state-preview">
@@ -27,7 +31,7 @@
 		>
 	</p>
 	<p class="preview-line">
-		<span class="k">穿着</span><span>{formatOutfit(characterState.outfit)}</span>
+		<span class="k">穿着</span><span>{formatOutfit(characterState.outfit, summaryOptions)}</span>
 	</p>
 	<p class="preview-line">
 		<span class="k">属性</span><span>{formatAttributes(characterState.attributes)}</span>

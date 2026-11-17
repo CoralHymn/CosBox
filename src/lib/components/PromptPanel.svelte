@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { defaultSystemPrompt } from '../context/pipeline';
+	import { getEditionRules } from '../platform/edition';
 	import { DEFAULT_PROFILE, type AppProfile } from '../stores/settings.svelte';
 
 	interface Props {
@@ -8,6 +9,8 @@
 	}
 
 	let { profile, onSaveProfile }: Props = $props();
+
+	const rules = getEditionRules();
 
 	let systemPrompt = $state('');
 	let characterPrompt = $state('');
@@ -69,11 +72,14 @@
 		留空的段落不会注入。修改后点击保存，立即对下一次对话生效。
 	</p>
 
+	{#if rules.contentNotice !== ''}
+		<p class="muted edition-notice">{rules.contentNotice}</p>
+	{/if}
+
 	<div class="card">
-		<h3 class="card-title">系统提示词</h3>
+		<h3 class="card-title">系统提示词（{rules.promptRuleLabel}）</h3>
 		<p class="muted" style="margin: 0 0 10px;">
-			这里放回复规则或破甲词。原「设置 → 角色档案 → 系统提示」的内容已迁移到这里；
-			留空时使用内置默认模板 （角色身份 + 当前状态约束）。
+			{rules.promptRuleHint}
 		</p>
 		<div class="field">
 			<textarea
@@ -147,5 +153,9 @@
 	.prompt-textarea {
 		min-height: 150px;
 		line-height: 1.6;
+	}
+
+	.edition-notice {
+		margin: 0 0 12px;
 	}
 </style>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
 	import type { AttributeValue, CharacterState, OutfitSlot, StatePatch } from '../core/types';
+	import { getEditionRules } from '../platform/edition';
 	import AccessoryPicker from './AccessoryPicker.svelte';
 	import OutfitSlotPicker from './OutfitSlotPicker.svelte';
 
@@ -16,15 +17,8 @@
 
 	let { characterState, onUpdate }: Props = $props();
 
-	const slots: { key: OutfitSlot; label: string }[] = [
-		{ key: 'headwear', label: '帽子' },
-		{ key: 'top', label: '上衣' },
-		{ key: 'underwear', label: '内衣' },
-		{ key: 'underpants', label: '内裤' },
-		{ key: 'bottom', label: '下装' },
-		{ key: 'socks', label: '袜子' },
-		{ key: 'shoes', label: '鞋' }
-	];
+	/** 槽位按运行版本展示；底层状态数据不裁剪。 */
+	const slots = getEditionRules().outfitSlots;
 
 	// attrs 同时被用户编辑与外部状态同步，不能改写成只读 derived。
 	// eslint-disable-next-line svelte/prefer-writable-derived

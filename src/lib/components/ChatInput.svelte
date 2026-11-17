@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { LoaderCircle, Search, Square } from '@lucide/svelte';
 	import type { ClothingItem, LocationDef } from '../core/types';
+	import { getEditionRules } from '../platform/edition';
 	import { buildAutocompleteSuggestions } from '../utils/autocomplete';
 
 	interface Props {
@@ -27,7 +28,9 @@
 	let dismissed = $state(false);
 	let inputEl = $state<HTMLTextAreaElement | null>(null);
 
-	const suggestions = $derived(buildAutocompleteSuggestions(text, places, wardrobe));
+	const suggestions = $derived(
+		buildAutocompleteSuggestions(text, places, wardrobe, getEditionRules())
+	);
 	const popupVisible = $derived(suggestions.length > 0 && !dismissed);
 
 	/** 建议列表变化时把选中项复位到第一项。 */

@@ -1,6 +1,12 @@
 import { CLOTHING_KINDS } from '../core/state';
 import { LlmError } from '../core/errors';
-import type { ClothingItem, ConfigPatch, LocationDef, ScheduleEntry } from '../core/types';
+import type {
+	ClothingItem,
+	ClothingKind,
+	ConfigPatch,
+	LocationDef,
+	ScheduleEntry
+} from '../core/types';
 import { newId } from '../utils/id';
 import type { ChatMessage, LlmClient, LlmConfig, StateToolSchema } from './types';
 
@@ -18,6 +24,8 @@ export interface GenerationRequest {
 	worldview: WorldviewPreset;
 	/** 仅衣柜生成：性别约束（默认 女/男，可自定义）。 */
 	gender?: string;
+	/** 仅衣柜生成：允许的衣物类型（Web 版由版本规则收敛；缺省为全部）。 */
+	allowedClothingKinds?: readonly ClothingKind[];
 	/** 用户对生成内容的要求。 */
 	requirements: string;
 }
@@ -134,11 +142,12 @@ const SCHEMA_EXAMPLES: Record<GeneratorKind, unknown> = {
 /** 生成任务的专属系统提示词：任务 + 世界观约束 + 格式 + 审查要求。 */
 export function buildGenerationSystemPrompt(request: GenerationRequest): string {
 	const worldview = WORLDVIEW_PRESETS[request.worldview];
+	const clothingKinds = request.allowedClothingKinds ?? CLOTHING_KINDS;
 	const kindLine =
 		request.kind === 'locations'
 			? '生成一份地点库列表：每个地点包含 category（大类，必须是**区域/地段**，如「学校」「商业街」「市中心」「郊外」「住宅区」，而不是场所类型）、name（该区域内的具体地点名称，如「中央商店街」「阳光生活超市」）、description（一句话描述，用于 AI 认知）。\n同一大类可以包含多个不同性质的场所（如奶茶店、服饰店、咖啡店都属于「商业街」），不要为每个小店铺单独建大类；电影院、博物馆等公共设施应归入「市中心」等区域，沙滩、温泉馆等归入「郊外」。'
 			: request.kind === 'wardrobe'
-				? `生成一份衣柜（衣物预设）列表：每个衣物包含 category（大类）、kind（类型：${CLOTHING_KINDS.join('/')}）、name（名称）、description（穿上后的描述）。角色性别：${request.gender ?? '不限'}，衣物需符合该性别设定。`
+				? `生成一份衣柜（衣物预设）列表：每个衣物包含 category（大类）、kind（类型：${clothingKinds.join('/')}）、name（名称）、description（穿上后的描述）。角色性别：${request.gender ?? '不限'}，衣物需符合该性别设定。`
 				: '生成一份周期性日程表：每个条目包含 day（0=周一 … 6=周日）、title（活动名）、start（开始时间 "HH:MM"）、end（结束时间 "HH:MM"）、可选 locationId（关联地点 id）。';
 	return [
 		`【生成任务：${KIND_LABELS[request.kind]}】`,
@@ -185,7 +194,8 @@ export function buildImportPatch(
 /** 解析模型输出的 JSON 数组；非法条目收集问题并跳过。 */
 export function parseGeneratedItems(
 	kind: GeneratorKind,
-	raw: string
+	raw: string,
+	allowedClothingKinds: readonly ClothingKind[] = CLOTHING_KINDS
 ): { items: GeneratedItem[]; issues: string[] } {
 	let data: unknown;
 	try {
@@ -199,7 +209,7 @@ export function parseGeneratedItems(
 	const items: GeneratedItem[] = [];
 	const issues: string[] = [];
 	data.forEach((entry, index) => {
-		const normalized = normalizeEntry(kind, entry, index + 1);
+		const normalized = normalizeEntry(kind, entry, index + 1, allowedClothingKinds);
 		if (normalized.item !== null) {
 			items.push(normalized.item);
 		}
@@ -212,13 +222,14 @@ export function parseGeneratedItems(
 export function reviewGeneratedItems(
 	kind: GeneratorKind,
 	items: ReadonlyArray<GeneratedItem>,
-	worldview: WorldviewPreset
+	worldview: WorldviewPreset,
+	allowedClothingKinds: readonly ClothingKind[] = CLOTHING_KINDS
 ): string[] {
 	const issues: string[] = [];
 	const banned = WORLDVIEW_PRESETS[worldview].bannedKeywords;
 	const seen = new Set<string>();
 	items.forEach((item, index) => {
-		const normalized = normalizeEntry(kind, item, index + 1);
+		const normalized = normalizeEntry(kind, item, index + 1, allowedClothingKinds);
 		issues.push(...normalized.issues);
 		if (normalized.item === null) {
 			return;
@@ -270,7 +281,8 @@ export interface GenerationReviewTool {
 /** 生成审查工具（名称固定为 review_generation，模型按系统提示调用）。 */
 export function buildReviewTool(
 	kind: GeneratorKind,
-	worldview: WorldviewPreset
+	worldview: WorldviewPreset,
+	allowedClothingKinds: readonly ClothingKind[] = CLOTHING_KINDS
 ): GenerationReviewTool {
 	return {
 		name: 'review_generation',
@@ -293,12 +305,12 @@ export function buildReviewTool(
 			}
 			const items: GeneratedItem[] = [];
 			raw.forEach((entry, index) => {
-				const normalized = normalizeEntry(kind, entry, index + 1);
+				const normalized = normalizeEntry(kind, entry, index + 1, allowedClothingKinds);
 				if (normalized.item !== null) {
 					items.push(normalized.item);
 				}
 			});
-			const issues = reviewGeneratedItems(kind, items, worldview);
+			const issues = reviewGeneratedItems(kind, items, worldview, allowedClothingKinds);
 			const output =
 				issues.length === 0
 					? `审查通过：${items.length} 项，格式与世界观约束均符合。`
@@ -320,7 +332,7 @@ export class GeneratorService {
 		if (!this.client.chatWithTools) {
 			throw new LlmError('当前模型服务不支持工具调用，无法使用 AI 生成');
 		}
-		const tool = buildReviewTool(request.kind, request.worldview);
+		const tool = buildReviewTool(request.kind, request.worldview, request.allowedClothingKinds);
 		let messages: ChatMessage[] = [
 			{ role: 'system', content: buildGenerationSystemPrompt(request) },
 			{ role: 'user', content: request.requirements }
@@ -367,8 +379,17 @@ export class GeneratorService {
 				continue;
 			}
 			lastRaw = result.content ?? '';
-			const parsed = parseGeneratedItems(request.kind, lastRaw);
-			const issues = reviewGeneratedItems(request.kind, parsed.items, request.worldview);
+			const parsed = parseGeneratedItems(
+				request.kind,
+				lastRaw,
+				request.allowedClothingKinds
+			);
+			const issues = reviewGeneratedItems(
+				request.kind,
+				parsed.items,
+				request.worldview,
+				request.allowedClothingKinds
+			);
 			if (parsed.items.length > 0) {
 				return { kind: request.kind, items: parsed.items, issues, raw: lastRaw };
 			}
@@ -393,7 +414,8 @@ export class GeneratorService {
 function normalizeEntry(
 	kind: GeneratorKind,
 	entry: unknown,
-	index: number
+	index: number,
+	allowedClothingKinds: readonly ClothingKind[] = CLOTHING_KINDS
 ): { item: GeneratedItem | null; issues: string[] } {
 	if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
 		return { item: null, issues: [`第 ${index} 项不是对象`] };
@@ -418,7 +440,7 @@ function normalizeEntry(
 		const name = typeof record.name === 'string' ? record.name.trim() : '';
 		const rawKind =
 			typeof record.kind === 'string' ? (record.kind.trim() as ClothingItem['kind']) : undefined;
-		const kindValid = rawKind !== undefined && CLOTHING_KINDS.includes(rawKind);
+		const kindValid = rawKind !== undefined && allowedClothingKinds.includes(rawKind);
 		if (name === '') {
 			return { item: null, issues: [`第 ${index} 项缺少衣物名称`] };
 		}
@@ -426,7 +448,7 @@ function normalizeEntry(
 			return {
 				item: null,
 				issues: [
-					`第 ${index} 项 kind 非法（${String(record.kind)}），应为：${CLOTHING_KINDS.join('/')}`
+					`第 ${index} 项 kind 非法（${String(record.kind)}），应为：${allowedClothingKinds.join('/')}`
 				]
 			};
 		}

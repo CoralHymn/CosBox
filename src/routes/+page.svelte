@@ -3,6 +3,7 @@
 	import { ChevronLeft, ChevronRight, Ellipsis, MessageCircle, Settings } from '@lucide/svelte';
 	import type {
 		ChatMessageView,
+		ClothingItem,
 		ConfigPatch,
 		MessageSegment,
 		StatePatch,
@@ -62,11 +63,16 @@
 	import { resolveServiceConfig } from '../lib/llm/model-services';
 	import { fetchModelList, testConnection, type FetchedModel } from '../lib/llm/model-service';
 	import type { DecisionDebugView } from '../lib/llm/state-decision';
-	import { STATE_TOOLS, isToolErrorOutput, type ExecutedToolCall } from '../lib/llm/state-tools';
+	import { buildStateTools, isToolErrorOutput, type ExecutedToolCall } from '../lib/llm/state-tools';
 	import type { LlmConfig, ToolCall, TokenUsage } from '../lib/llm/types';
 	import { SyncService, type SyncResult } from '../lib/sync/sync-service';
 	import type { SyncSettings } from '../lib/sync/types';
 	import { applyThemeToDocument, type ThemeConfig } from '../lib/theme/theme';
+	import {
+		getEditionRules,
+		isWardrobeItemHidden,
+		stateSummaryOptionsFor
+	} from '../lib/platform/edition';
 	import { checkForUpdate, isTauri } from '../lib/platform/updater';
 	import { createHistoryBackSync } from '../lib/platform/back-nav';
 	import { rebuildFromNodes } from '../lib/core/snapshot';
@@ -149,6 +155,11 @@
 	const demoClient = new DemoLlmClient();
 	const openAiClient = new OpenAiCompatibleClient();
 	const searchClient = new WebSearchClient();
+
+	/** 版本规则在运行时解析一次，供界面、工具与上下文管道共用。 */
+	const editionRules = getEditionRules();
+	const editionSummaryOptions = stateSummaryOptionsFor(editionRules);
+	const editionStateTools = buildStateTools(editionRules);
 
 	let tab = $state<TabId>('chat');
 	/**
@@ -638,6 +649,7 @@
 			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
 			memoryLimit: settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
 			enableStateTools: settings.config.allowAiStateTools === true,
+			stateSummaryOptions: editionSummaryOptions,
 			characterName:
 				settings.profile.name ||
 				(typeof session.state.attributes.name === 'string'
@@ -720,13 +732,15 @@
 					}
 				},
 				textToolFallback: settings.config.textToolFallback !== false,
-				tools: settings.config.allowAiStateTools === true ? [...STATE_TOOLS] : [],
+				tools: settings.config.allowAiStateTools === true ? [...editionStateTools] : [],
 				toolContext: {
 					getState: () => session.state,
 					update: (patch, metadata) => session.update(patch, metadata),
 					advanceTime: (minutes) => session.advanceTime(minutes)
 				},
 				enableDecisionConfirm: settings.config.decisionConfirm === true,
+				stateSummaryOptions: editionSummaryOptions,
+				includeSensitiveOutfitHints: editionRules.showSensitiveSlots,
 				...(compactionOptions !== undefined ? { compaction: compactionOptions } : {})
 			},
 			controller.signal
@@ -930,7 +944,7 @@
 				lastUser,
 				lastAssistant: assistant,
 				config: chatConfig,
-				tools: [...STATE_TOOLS],
+				tools: [...editionStateTools],
 				toolContext: {
 					getState: () => session.state,
 					update: (patch, metadata) => session.update(patch, metadata),
@@ -940,7 +954,9 @@
 					streamingPhase = label;
 				},
 				onMetric: (name) => metrics.record(name),
-				textToolFallback: settings.config.textToolFallback !== false
+				textToolFallback: settings.config.textToolFallback !== false,
+				stateSummaryOptions: editionSummaryOptions,
+				includeSensitiveOutfitHints: editionRules.showSensitiveSlots
 			});
 			lastDecisionDebug = debug;
 			// 工具反馈追加进原 AI 气泡的分段：前端可见，后续上下文展开为系统反馈。
@@ -1100,7 +1116,7 @@
 				config: chatConfig,
 				conversation: session.conversation.slice(-12),
 				existing: memoryStore.entries,
-				stateSummary: summarizeState(session.state)
+				stateSummary: summarizeState(session.state, editionSummaryOptions)
 			});
 			lastAutoExtractCount = session.conversation.filter(
 				(message) => message.role !== 'system'
@@ -1175,7 +1191,7 @@
 				config: chatConfig,
 				conversation: session.conversation.slice(-8),
 				existing: memoryStore.entries,
-				stateSummary: summarizeState(session.state)
+				stateSummary: summarizeState(session.state, editionSummaryOptions)
 			});
 			lastAutoExtractCount = nonSystemCount;
 			if (result.items.length > 0) {
@@ -1226,6 +1242,7 @@
 			worldInfo: worldInfo.entries,
 			memories: settings.config.memoryEnabled === false ? [] : memoryStore.entries,
 			memoryLimit: settings.config.memoryInjectLimit ?? DEFAULT_MEMORY_INJECT_LIMIT,
+			stateSummaryOptions: editionSummaryOptions,
 			characterName:
 				settings.profile.name ||
 				(typeof session.state.attributes.name === 'string'
@@ -1261,7 +1278,7 @@
 
 	/** 斜杠命令：直接改状态并生成快照，再补一条系统提示让 AI 感知。 */
 	async function handleSlashCommand(command: SlashCommand): Promise<void> {
-		const result = applySlashCommand(session.state, command);
+		const result = applySlashCommand(session.state, command, editionRules);
 		if (result.error !== undefined) {
 			toasts.error(result.error);
 			return;
@@ -1659,7 +1676,22 @@
 	async function handleAiGenerate(request: GenerationRequest): Promise<GenerationResult> {
 		const genConfig = agentConfig();
 		const service = new GeneratorService(genConfig.provider === 'demo' ? demoClient : openAiClient);
-		return service.generate(request, genConfig);
+		// 衣柜生成按版本收敛类型：Web 版不会生成私密穿着条目。
+		const editionRequest: GenerationRequest =
+			request.kind === 'wardrobe'
+				? { ...request, allowedClothingKinds: editionRules.clothingKinds }
+				: request;
+		const result = await service.generate(editionRequest, genConfig);
+		if (request.kind !== 'wardrobe') {
+			return result;
+		}
+		// 二次兜底：模型仍可能把私密词写进名称/描述，Web 版不把它交给候选列表。
+		return {
+			...result,
+			items: result.items.filter(
+				(item) => !isWardrobeItemHidden(item as ClothingItem, editionRules)
+			)
+		};
 	}
 
 	/** AI 生成结果批量导入：合并去重后作为世界配置（不生成快照）。 */
