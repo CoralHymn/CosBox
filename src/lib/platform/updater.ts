@@ -4,7 +4,7 @@
  */
 
 /** 应用版本号（SemVer）。与 package.json / src-tauri/Cargo.toml / tauri.conf.json 保持一致。 */
-export const APP_VERSION = '0.0.4';
+export const APP_VERSION = '0.0.5';
 
 /** 是否运行在 Tauri WebView 内（桌面 / 移动）。 */
 export function isTauri(): boolean {

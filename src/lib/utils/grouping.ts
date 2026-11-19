@@ -7,6 +7,9 @@ export interface CategoryGroup<T> {
 /**
  * 按 category 分组：有分类的按分类名排序，未分类（空串）放最后，组内保持原顺序。
  * 用于地点库 / 衣柜的大类收纳展示。
+ *
+ * 排序显式用 'zh-CN'：不带 locale 的 localeCompare 结果取决于运行环境默认语言，
+ * CI（en-US）与中文系统、不同浏览器会算出相反的顺序，导致展示不一致、测试挂掉。
  */
 export function groupByCategory<T extends { category: string }>(
 	rows: readonly T[]
@@ -21,7 +24,8 @@ export function groupByCategory<T extends { category: string }>(
 		.map(([category, items]) => ({ category, items }))
 		.sort((a, b) => {
 			return (
-				categoryRank(a.category) - categoryRank(b.category) || a.category.localeCompare(b.category)
+				categoryRank(a.category) - categoryRank(b.category) ||
+				a.category.localeCompare(b.category, 'zh-CN')
 			);
 		});
 }
